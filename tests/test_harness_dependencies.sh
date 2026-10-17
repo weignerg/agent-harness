@@ -100,17 +100,18 @@ else
     fi
 fi
 
-# --- Test 5: install.sh dry-run dependency reporting --------------------------
-echo "[Test 5] Verifying install.sh --dry-run reports all dependencies..."
-DRY_OUTPUT="$("${REPO_DIR}/install.sh" --dry-run)"
-if echo "$DRY_OUTPUT" | grep -qi "Obsidian" && \
-   echo "$DRY_OUTPUT" | grep -qi "FastMCP Tools" && \
-   echo "$DRY_OUTPUT" | grep -qi "ColBERT Index" && \
-   echo "$DRY_OUTPUT" | grep -qi "OpenCode Server" && \
-   echo "$DRY_OUTPUT" | grep -qi "Harness dependencies"; then
-    pass "install.sh dry-run accurately reports Obsidian, ColBERT, FastMCP, and OpenCode Server dependencies"
+# --- Test 5: install.sh dry-run multi-runtime reporting --------------------------
+echo "[Test 5] Verifying install.sh --dry-run reports all runtime targets..."
+DRY_OUTPUT_AGY="$("${REPO_DIR}/install.sh" --dry-run)"
+DRY_OUTPUT_ALL="$("${REPO_DIR}/install.sh" --dry-run --target=all)"
+if echo "$DRY_OUTPUT_AGY" | grep -qi "vault-memory" && \
+   echo "$DRY_OUTPUT_AGY" | grep -qi "worktree-manager" && \
+   echo "$DRY_OUTPUT_ALL" | grep -qi "INSTALLING AGY HARNESS" && \
+   echo "$DRY_OUTPUT_ALL" | grep -qi "INSTALLING CLAUDE CODE HARNESS" && \
+   echo "$DRY_OUTPUT_ALL" | grep -qi "INSTALLING OPENCODE HARNESS"; then
+    pass "install.sh dry-run accurately reports agy, claude, and opencode targets"
 else
-    fail "install.sh dry-run missing dependency reporting in output"
+    fail "install.sh dry-run missing target reporting in output"
 fi
 
 # --- Test 6: OpenCode Headless Remote Server Setup ----------------------------

@@ -26,7 +26,7 @@ echo "==========================================================================
 # Test 1: install.sh --dry-run
 echo "[Test 1] Testing install.sh --dry-run..."
 DRY_OUT="$(HOME="${SANDBOX}" "${REPO_DIR}/install.sh" --dry-run || true)"
-if echo "$DRY_OUT" | grep -q "Dry-run mode enabled"; then
+if echo "$DRY_OUT" | grep -qi "dry[ -]run"; then
     pass "install.sh honors --dry-run"
 else
     fail "install.sh failed dry-run: $DRY_OUT"

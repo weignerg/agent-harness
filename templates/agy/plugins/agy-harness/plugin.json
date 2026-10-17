@@ -4,6 +4,6 @@
   "version": "2.1.0",
   "description": "Official Google Gemini 3.8 Two-Tier Agent Team for Antigravity: supreme-orchestrator & team-orchestrator (Gemini 3.8 High / gemini-3.8-flash-high), architect (Gemini 3.8 High), worker, reviewer & tester (Gemini 3.8 Medium / gemini-3.8-flash-medium), scout & grunt (Gemini 3.8 Low / gemini-3.8-flash-low).",
   "author": {
-    "name": "weignerg"
+    "name": "Unified Harness Contributors"
   }
 }

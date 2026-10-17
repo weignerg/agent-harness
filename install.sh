@@ -231,6 +231,9 @@ install_claude_global() {
 install_opencode_global() {
     local opencode_dest="${OPENCODE_HOME_DIR}"
     local opencode_tmpl="${SCRIPT_DIR}/templates/opencode"
+    local legacy_launchers=("opencode-local" "opencode-architect-local" "opencode-worker-local" "opencode-reviewer-local" "opencode-sub-agent-local")
+
+    local backend_env_dir="${USER_HOME}/.config/opencode-backends"
 
     echo "================================================================================"
     echo "🚀 INSTALLING OPENCODE HARNESS (GLOBAL MODE)"
@@ -239,18 +242,35 @@ install_opencode_global() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would deploy agents/, commands/, themes/, opencode.json to ${opencode_dest}/"
+        echo "  [DRY-RUN] Would ensure ${backend_env_dir}/env exists for backend services"
+        echo "  [DRY-RUN] Would prune legacy launchers in ${USER_HOME}/.local/bin/"
+        echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, opencode.json to ${opencode_dest}/"
         return 0
     fi
 
-    mkdir -p "${opencode_dest}/agents" "${opencode_dest}/commands" "${opencode_dest}/themes"
+    mkdir -p "${backend_env_dir}"
+    if [ ! -f "${backend_env_dir}/env" ]; then
+        touch "${backend_env_dir}/env"
+        chmod 0600 "${backend_env_dir}/env"
+    fi
+
+    for legacy_launcher in "${legacy_launchers[@]}"; do
+        rm -f "${USER_HOME}/.local/bin/${legacy_launcher}"
+    done
+
+    mkdir -p "${opencode_dest}/agents" "${opencode_dest}/commands" "${opencode_dest}/skills" "${opencode_dest}/tools" "${opencode_dest}/rules" "${opencode_dest}/plugins" "${opencode_dest}/themes"
     cp -rf "${opencode_tmpl}/agents/"* "${opencode_dest}/agents/"
     cp -rf "${opencode_tmpl}/commands/"* "${opencode_dest}/commands/"
+    cp -rf "${opencode_tmpl}/skills/"* "${opencode_dest}/skills/"
+    cp -rf "${opencode_tmpl}/tools/"* "${opencode_dest}/tools/"
+    chmod +x "${opencode_dest}/tools/"*.sh "${opencode_dest}/tools/"*.py 2>/dev/null || true
+    cp -rf "${opencode_tmpl}/rules/"* "${opencode_dest}/rules/"
+    cp -rf "${opencode_tmpl}/plugins/"* "${opencode_dest}/plugins/"
     cp -rf "${opencode_tmpl}/themes/"* "${opencode_dest}/themes/"
     cp -f "${opencode_tmpl}/opencode.json" "${opencode_dest}/opencode.json"
     cp -f "${opencode_tmpl}/tui.json" "${opencode_dest}/tui.json"
     cp -f "${opencode_tmpl}/AGENTS.md" "${opencode_dest}/AGENTS.md"
-    echo "  ✅ Installed OpenCode agents, commands, and configuration to ${opencode_dest}/"
+    echo "  ✅ Installed OpenCode 10-component hierarchy to ${opencode_dest}/"
 }
 
 install_local_repo() {

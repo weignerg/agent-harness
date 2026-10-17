@@ -20,14 +20,20 @@ class WorktreeManager:
             return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
         if target_runtime == "agy":
             return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
+        if target_runtime == "orchestration":
+            return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
 
-        # In standalone single-runtime repos or when local marker dirs exist
+        # Priority 1 for unified agent-harness: check if .orchestration exists
+        if (self.repo_dir / ".orchestration").is_dir():
+            return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
+        if (self.repo_dir / ".agents").is_dir():
+            return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
         if (self.repo_dir / ".claude").is_dir() or (self.repo_dir / "files" / ".claude").is_dir():
             return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
         if (self.repo_dir / ".opencode").is_dir():
             return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
 
-        # Canonical Priority 1 for unified agent-harness: .orchestration/worktrees/<branch>
+        # Canonical Priority 1 default fallback for unified agent-harness: .orchestration/worktrees/<branch>
         return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
 
     def provision_worktree(self, branch_name: str, target_dir: Optional[Path | str] = None, runtime: Optional[str] = None) -> Path:

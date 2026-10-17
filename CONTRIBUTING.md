@@ -5,7 +5,7 @@ This project strictly adheres to **Issue-Driven Development**, **Branch Governan
 ## 1. Branch Governance (`release` vs `develop` vs Worktrees)
 
 - **`release` (GitHub Default Branch)**: Reserved exclusively for stable production releases (updated only by merging `develop` -> `release`).
-- **`develop` (Permanent Local Root Branch & PR Target)**: Active integration branch. The local repository root (`/WHNAS/agy/git/agy-harness`) **must always remain checked out on `develop`**. All feature and fix Pull Requests target `develop`.
+- **`develop` (Permanent Local Root Branch & PR Target)**: Active integration branch. The local repository root (`agent-harness`) **must always remain checked out on `develop`**. All feature and fix Pull Requests target `develop`.
 - **`.agents/worktrees/<branch>` (Isolated Worktrees)**: All implementation, refactoring, and testing work occurs inside isolated git worktrees provisioned off `develop` by `team-orchestrator`.
 
 ## 2. Issue-Driven Workflow

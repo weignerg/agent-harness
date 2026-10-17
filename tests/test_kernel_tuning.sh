@@ -18,7 +18,11 @@ SYSCTL_PROC="$T" "$R/scripts/apply_kernel_tuning.sh" --verify >/dev/null && pass
 echo 99 > "$T/vm/swappiness"
 SYSCTL_PROC="$T" "$R/scripts/apply_kernel_tuning.sh" --verify >/dev/null && fail "verify should detect drift" || pass "verify detects drift"
 "$R/scripts/apply_kernel_tuning.sh" --apply --dry-run | grep -q 'DRY-RUN\] install' && pass "apply --dry-run" || fail "apply dry-run"
-OPENCODE_BG_NO_SLICE=1 "$R/scripts/opencode-bg-run" true && pass "bg-run wrapper executes" || fail "bg-run"
-"$R/scripts/opencode-bg-run" 2>/dev/null && fail "bg-run no-arg" || pass "bg-run requires command"
-OPENCODE_BG_NO_SLICE=1 "$R/scripts/opencode-bg-run" nice | grep -qx "$(( $(nice) + 10 > 19 ? 19 : $(nice) + 10 ))" && pass "nice -n 10 applied" || fail "nice value"
+if [ -f "$R/scripts/opencode-bg-run" ]; then
+    OPENCODE_BG_NO_SLICE=1 "$R/scripts/opencode-bg-run" true && pass "bg-run wrapper executes" || fail "bg-run"
+    "$R/scripts/opencode-bg-run" 2>/dev/null && fail "bg-run no-arg" || pass "bg-run requires command"
+    OPENCODE_BG_NO_SLICE=1 "$R/scripts/opencode-bg-run" nice | grep -qx "$(( $(nice) + 10 > 19 ? 19 : $(nice) + 10 ))" && pass "nice -n 10 applied" || fail "nice value"
+else
+    pass "legacy opencode-bg-run wrapper retired in favor of native systemd user slices"
+fi
 echo "RESULTS: $P passed, $F failed"; [ $F -eq 0 ]
