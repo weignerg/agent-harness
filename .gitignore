@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak*
+.DS_Store
+harness.db*
+.venv/
+uv.lock
+*.secret
+*.token
+*.key
+vault/private/
+vault/.index/
+vault/.obsidian/
+install.log
+*.base
+*.egg-info/
+build/
+dist/
+tests/tmp/
+
+# Worktree directories
+.agents/worktrees/
+.worktrees/
+worktrees/
+
+# Installed Harness Runtime Directories (prevent accidental tracking or auto-load collision)
+/.claude/
+/.opencode/
+/.agents/
+/CLAUDE.md
+/AGENTS.md
+/GEMINI.md
+/opencode.json
+/tui.json
+
+# Whitelist tracked templates and tests
+!templates/**
+!tests/**
