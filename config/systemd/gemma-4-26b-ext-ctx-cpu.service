@@ -1,0 +1,38 @@
+[Unit]
+Description=SGLang Gemma-4-26B Secondary Extended Tier (128k Context, FP8 KV Cache, CPU HiCache 32GB Offload)
+After=network.target
+
+[Service]
+Type=exec
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="CUDA_HOME=/opt/cuda"
+Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+Environment="SGLANG_DISABLE_VISION=1"
+Environment="SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1"
+ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
+  --sleep-on-idle \
+  --tool-call-parser gemma4 \
+  --model-path RedHatAI/gemma-4-26B-A4B-it-NVFP4 \
+  --quantization compressed-tensors \
+  --prefill-attention-backend flashinfer \
+  --decode-attention-backend flashinfer \
+  --language-model-only \
+  --kv-cache-dtype fp8_e4m3 \
+  --enable-hierarchical-cache \
+  --hicache-size 32 \
+  --mem-fraction-static 0.86 \
+  --context-length 131072 \
+  --chunked-prefill-size 2048 \
+  --max-running-requests 1 \
+  --swa-full-tokens-ratio 1.0 \
+  --cuda-graph-backend-prefill disabled \
+  --cuda-graph-backend-decode disabled \
+  --port 36921 \
+  --host 127.0.0.1
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

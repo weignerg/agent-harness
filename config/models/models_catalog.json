@@ -1,0 +1,118 @@
+{
+  "qwen-3.8-27b-nvfp4-med-ctx": {
+    "name": "qwen-3.8-27b-nvfp4-med-ctx",
+    "aliases": [
+      "qwen-3.8-27b", "qwen3.8-27b", "qwen-3.8-27b-nvfp4", "qwen3.8-27b-nvfp4",       "qwen27b",
+      "model-high:effort-low", "model-high-effort-low"
+    ],
+    "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/qwen-3.8-27b-nvfp4-med-ctx.service"
+  },
+  "opencode-sglang-ornith-35b": {
+    "name": "opencode-sglang-ornith-35b",
+    "aliases": [
+      "ornith-1.5-35b", "ornith-1.5-35b-a3b", "ornith-35b", "ornith35b", "ornith", "ornith-moe", "ornith-local",
+      "worker-local", "reviewer-local",
+      "ornith-30000", "ornith-port-30000", "ornith-35b-30000",
+      "model-high:effort-med", "model-high-effort-med"
+    ],
+    "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/opencode-sglang-ornith-35b.service"
+  },
+  "ornith-1.5-9b-nvfp4-low-ctx": {
+    "name": "ornith-1.5-9b-nvfp4-low-ctx",
+    "aliases": [
+      "ornith-1.5-9b", "ornith-9b", "ornith9b", "sub-agent-local", "subagent-local",
+      "model-low:effort-low"
+    ],
+    "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/ornith-1.5-9b-nvfp4-low-ctx.service",
+    "vram_required_mb": 8192
+  },
+  "qwen-3.8-flash-next-nvfp4": {
+    "name": "qwen-3.8-flash-next-nvfp4",
+    "aliases": [
+      "qwen-3.8-flash-next", "qwen3.8-flash-next", "qwen-flash-next", "flash-next",
+      "architect-local",
+      "model-high:effort-high", "model-high-effort-high",
+      "model-med:effort-high", "model-med-effort-high"
+    ],
+    "model_path": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/qwen-3.8-flash-next-nvfp4.service"
+  },
+  "gemma-4-26b-med-ctx-med-spd": {
+    "name": "gemma-4-26b-med-ctx-med-spd",
+    "aliases": [
+      "gemma-4-26b-a4b", "gemma-4-26b", "gemma4-26b", "gemma26b", "gemma-4-26b-64k"
+    ],
+    "model_path": "RedHatAI/gemma-4-26B-A4B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-26b-med-ctx-med-spd.service"
+  },
+  "gemma-4-26b-ext-ctx-cpu": {
+    "name": "gemma-4-26b-ext-ctx-cpu",
+    "aliases": [
+      "gemma-4-26b-128k", "gemma26b-128k"
+    ],
+    "model_path": "RedHatAI/gemma-4-26B-A4B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-26b-ext-ctx-cpu.service"
+  },
+  "gemma-4-26b-hi-ctx-slow-spd": {
+    "name": "gemma-4-26b-hi-ctx-slow-spd",
+    "aliases": [
+      "gemma-4-26b-256k", "gemma26b-256k"
+    ],
+    "model_path": "RedHatAI/gemma-4-26B-A4B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-26b-hi-ctx-slow-spd.service"
+  },
+  "gemma-4-31b-hi-ctx-slow-spd": {
+    "name": "gemma-4-31b-hi-ctx-slow-spd",
+    "aliases": [
+      "gemma-4-31b-256k", "gemma31b-256k", "gemma-4-31b-high"
+    ],
+    "model_path": "RedHatAI/gemma-4-31B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-31b-hi-ctx-slow-spd.service"
+  },
+  "gemma-4-31b-med-ctx-med-spd": {
+    "name": "gemma-4-31b-med-ctx-med-spd",
+    "aliases": [
+      "gemma-4-31b-128k", "gemma31b-128k", "gemma-4-31b-med"
+    ],
+    "model_path": "RedHatAI/gemma-4-31B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-31b-med-ctx-med-spd.service"
+  },
+  "gemma-4-31b-low-ctx-hi-spd": {
+    "name": "gemma-4-31b-low-ctx-hi-spd",
+    "aliases": [
+      "gemma-4-31b", "gemma-4-31b-it", "gemma4-31b", "gemma31b", "gemma-4-31b-32k"
+    ],
+    "model_path": "RedHatAI/gemma-4-31B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-31b-low-ctx-hi-spd.service"
+  },
+  "qwen3-32b-it-nvfp4": {
+    "name": "qwen3-32b-it-nvfp4",
+    "aliases": [
+      "qwen", "qwen3", "qwen3-32b", "qwen3-32b-it",
+      "model-low:effort-high", "model-low-effort-high", "gpt-oss-120b-medium"
+    ],
+    "model_path": "RedHatAI/qwen3-32b-it-nvfp4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/qwen3-32b-med-ctx-med-spd.service"
+  },
+  "llama-3.3-70b-instruct-nvfp4": {
+    "name": "llama-3.3-70b-instruct-nvfp4",
+    "aliases": [
+      "llama", "llama-3", "llama-3.3", "llama-3.3-70b", "llama3.3-70b",
+      "claude-sonnet-5-5-low", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-high"
+    ],
+    "model_path": "RedHatAI/llama-3.3-70b-instruct-nvfp4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/llama-3.3-70b-med-ctx-med-spd.service"
+  },
+  "gemma-4-e2b-subagent-nvfp4": {
+    "name": "gemma-4-e2b-subagent-nvfp4",
+    "aliases": [
+      "gemma-4-e2b", "gemma-e2b", "gemma4-e2b"
+    ],
+    "model_path": "unsloth/gemma-4-E2B-it-NVFP4",
+    "service_file": "__USER_HOME__/.config/opencode-backends/gemma-4-E2B-it-nvfp4-med-ctx.service",
+    "vram_required_mb": 5120
+  }
+}

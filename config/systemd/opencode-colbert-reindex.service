@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenCode ColBERTv2 Semantic Memory Vault Reindexer
+After=network.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=%h/.local/share/opencode-sglang-stack/reindex_vault.sh --all
+
+[Install]
+WantedBy=default.target

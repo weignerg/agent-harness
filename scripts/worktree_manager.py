@@ -1,0 +1,109 @@
+"""Autonomous git worktree lifecycle manager with Conventional Commits semantic squashing."""
+from __future__ import annotations
+
+import argparse
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+
+class WorktreeManager:
+    def __init__(self, repo_dir: Optional[str | Path] = None, runtime: Optional[str] = None):
+        self.repo_dir = Path(repo_dir) if repo_dir else Path.cwd()
+        self.runtime = runtime
+
+    def default_worktree_path(self, branch_name: str, runtime: Optional[str] = None) -> Path:
+        target_runtime = runtime or self.runtime
+        if target_runtime == "claude":
+            return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
+        if target_runtime == "opencode":
+            return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
+        if target_runtime == "agy":
+            return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
+
+        # In standalone single-runtime repos or when local marker dirs exist
+        if (self.repo_dir / ".claude").is_dir() or (self.repo_dir / "files" / ".claude").is_dir():
+            return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
+        if (self.repo_dir / ".opencode").is_dir():
+            return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
+
+        # Canonical Priority 1 for unified agent-harness: .orchestration/worktrees/<branch>
+        return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
+
+    def provision_worktree(self, branch_name: str, target_dir: Optional[Path | str] = None, runtime: Optional[str] = None) -> Path:
+        resolved_target = Path(target_dir) if target_dir is not None else self.default_worktree_path(branch_name, runtime=runtime)
+        resolved_target.parent.mkdir(parents=True, exist_ok=True)
+        cmd = ["git", "worktree", "add", "-b", branch_name, str(resolved_target), "develop"]
+        subprocess.run(cmd, cwd=self.repo_dir, check=True, capture_output=True)
+        return resolved_target
+
+    def prune_worktree(self, target_dir: Path | str):
+        resolved_target = Path(target_dir)
+        cmd = ["git", "worktree", "remove", "--force", str(resolved_target)]
+        subprocess.run(cmd, cwd=self.repo_dir, check=False, capture_output=True)
+        subprocess.run(["git", "worktree", "prune"], cwd=self.repo_dir, check=False, capture_output=True)
+
+    def semantic_squash_commit(self, commit_type: str, scope: str, description: str, cwd: Optional[Path | str] = None):
+        work_dir = Path(cwd) if cwd is not None else self.repo_dir
+        msg = f"{commit_type}({scope}): {description}"
+        subprocess.run(["git", "commit", "--amend", "-m", msg], cwd=work_dir, check=False, capture_output=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Autonomous git worktree lifecycle manager")
+    parser.add_argument("--runtime", "-r", dest="runtime", default=None, help="Target runtime adapter (agy, claude, opencode)")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    create_p = subparsers.add_parser("create", help="Provision an isolated git worktree")
+    create_p.add_argument("pos_branch", nargs="?", default=None, help="Branch name (positional)")
+    create_p.add_argument("pos_path", nargs="?", default=None, help="Target worktree path (positional)")
+    create_p.add_argument("--branch", "-b", dest="opt_branch", default=None, help="Branch name")
+    create_p.add_argument("--path", "-p", dest="opt_path", default=None, help="Target worktree path (defaults to .orchestration/worktrees/<branch>)")
+    create_p.add_argument("--runtime", "-r", dest="opt_runtime", default=None, help="Target runtime adapter")
+
+    subparsers.add_parser("list", help="List active git worktrees")
+
+    for cmd_name in ("prune", "remove"):
+        rm_p = subparsers.add_parser(cmd_name, help="Prune and remove a git worktree")
+        rm_p.add_argument("pos_path", nargs="?", default=None, help="Worktree path to remove (positional)")
+        rm_p.add_argument("--path", "-p", dest="opt_path", default=None, help="Worktree path to remove")
+
+    commit_p = subparsers.add_parser("commit", help="Amend commit with Conventional Commit message")
+    commit_p.add_argument("--type", "-t", required=True, dest="commit_type", help="Commit type (feat, fix, etc.)")
+    commit_p.add_argument("--scope", "-s", required=True, help="Commit scope")
+    commit_p.add_argument("--message", "-m", required=True, help="Commit description")
+
+    args = parser.parse_args()
+    mgr = WorktreeManager(runtime=getattr(args, "runtime", None))
+
+    if args.command == "create":
+        branch = args.opt_branch or args.pos_branch
+        path = args.opt_path or args.pos_path
+        runtime = args.opt_runtime or getattr(args, "runtime", None)
+        if not branch:
+            parser.error("Branch name is required to create a worktree")
+        created = mgr.provision_worktree(branch_name=branch, target_dir=path, runtime=runtime)
+        print(f"Created worktree at: {created}")
+
+    elif args.command == "list":
+        res = subprocess.run(["git", "worktree", "list"], cwd=mgr.repo_dir, capture_output=True, text=True, check=False)
+        print(res.stdout.strip())
+
+    elif args.command in ("prune", "remove"):
+        path = args.opt_path or args.pos_path
+        if not path:
+            parser.error(f"Worktree path is required to {args.command}")
+        mgr.prune_worktree(path)
+        print(f"Pruned worktree: {path}")
+
+    elif args.command == "commit":
+        mgr.semantic_squash_commit(
+            commit_type=args.commit_type,
+            scope=args.scope,
+            description=args.message,
+        )
+        print(f"Amended commit: {args.commit_type}({args.scope}): {args.message}")
+
+
+if __name__ == "__main__":
+    main()

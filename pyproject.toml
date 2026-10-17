@@ -1,0 +1,19 @@
+[project]
+name = "agent-harness"
+version = "0.4.0"
+description = "Unified multi-runtime agentic harness supporting Antigravity, Claude Code, and OpenCode"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{name = "weignerg", email = "weignerg@gmail.com"}]
+dependencies = [
+    "pydantic>=2.6",
+    "fastmcp>=2.0",
+    "onnxruntime>=1.18",
+    "numpy>=1.26",
+    "tokenizers>=0.19",
+    "jsonschema>=4.20",
+]
+
+[tool.setuptools.packages.find]
+include = ["harness*"]

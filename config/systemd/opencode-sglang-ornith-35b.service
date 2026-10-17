@@ -1,0 +1,30 @@
+[Unit]
+Description=SGLang Ornith-1.5-35B-A3B Stack on Port 30000 (256k Context)
+After=network.target
+
+[Service]
+Type=exec
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="SGLANG_CONTEXT_LENGTH=262144"
+EnvironmentFile=-%h/.config/opencode-backends/context_length.state
+Environment="CUDA_HOME=/opt/cuda"
+Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
+  --model-path ornith-ai/Ornith-1.5-35B-A3B-NVFP4 \
+  --served-model-name ornith-1.5-35b \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --mem-fraction-static 0.88 \
+  --context-length ${SGLANG_CONTEXT_LENGTH} \
+  --chunked-prefill-size 2048 \
+  --max-running-requests 1 \
+  --port 30000 \
+  --host 127.0.0.1
+
+ExecStopPost=%h/.local/share/opencode-sglang-stack/sglang_oom_handler.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

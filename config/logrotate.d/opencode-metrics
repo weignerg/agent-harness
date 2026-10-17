@@ -1,0 +1,12 @@
+# Install as ~/.config/opencode/logrotate.conf include or /etc/logrotate.d/opencode-metrics
+# (replace __USER_HOME__).  Python logger rotates by size too; this covers idle compression.
+__USER_HOME__/.local/state/opencode/metrics.jsonl {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0600
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=OpenCode background agent slice (keeps subagents from starving SGLang and interactive sessions)
+
+[Slice]
+CPUWeight=200
+IOWeight=200
+MemoryHigh=24G
+MemoryMax=28G
+TasksMax=4096

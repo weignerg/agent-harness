@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "deny": [
+      "mcp__github__create_issue",
+      "mcp__github__update_issue",
+      "mcp__github__add_issue_comment",
+      "mcp__github__create_pull_request",
+      "mcp__github__update_pull_request",
+      "mcp__github__create_pull_request_review",
+      "mcp__github__create_pull_request_review_comment",
+      "mcp__github__merge_pull_request",
+      "mcp__github__create_or_update_file_contents",
+      "mcp__github__delete_file",
+      "mcp__github__push_files",
+      "mcp__github__create_release",
+      "mcp__github__create_repository",
+      "mcp__github__fork_repository",
+      "Bash(gh pr merge*)",
+      "Bash(git push*)",
+      "Bash(git -C * push*)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sftp *)",
+      "Bash(rsync *)",
+      "Bash(nc *)",
+      "Bash(ncat *)",
+      "Bash(socat *)",
+      "Bash(telnet *)",
+      "Bash(ftp *)",
+      "Bash(gh pr create*)",
+      "Bash(gh issue create*)",
+      "Bash(node *)",
+      "Bash(npx *)",
+      "Bash(claude *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/orchestration/read-only-block/block-external-writes.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

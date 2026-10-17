@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenCode Headless Remote Server on Port 4096
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="OPENCODE_SERVER_PORT=4096"
+Environment="OPENCODE_SERVER_HOST=0.0.0.0"
+ExecStart=%h/.local/bin/opencode serve --port 4096 --hostname 0.0.0.0
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

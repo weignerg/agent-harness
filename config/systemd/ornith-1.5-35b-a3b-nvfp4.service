@@ -1,0 +1,30 @@
+[Unit]
+Description=SGLang Ornith-1.5-35B-A3B MoE Profile (64k Context, Zero CPU Offload)
+After=network.target
+
+[Service]
+Type=exec
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="CUDA_HOME=/opt/cuda"
+Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
+  --sleep-on-idle \
+  --tool-call-parser qwen \
+  --model-path ornith-ai/Ornith-1.5-35B-A3B-NVFP4 \
+  --quantization modelopt \
+  --prefill-attention-backend flashinfer \
+  --decode-attention-backend flashinfer \
+  --kv-cache-dtype nvfp4 \
+  --mem-fraction-static 0.88 \
+  --context-length 65536 \
+  --chunked-prefill-size 2048 \
+  --max-running-requests 1 \
+  --port 36921 \
+  --host 127.0.0.1
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

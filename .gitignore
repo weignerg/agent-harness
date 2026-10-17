@@ -1,5 +1,7 @@
 __pycache__/
+**/__pycache__/
 *.py[cod]
+**/*.pyc
 *$py.class
 *.bak*
 .DS_Store
@@ -20,6 +22,10 @@ dist/
 tests/tmp/
 
 # Worktree directories
+.orchestration/worktrees/
+.orchestration/tmp/
+.orchestration/logs/*.log
+.orchestration/memory/*.db
 .agents/worktrees/
 .worktrees/
 worktrees/
@@ -34,6 +40,7 @@ worktrees/
 /opencode.json
 /tui.json
 
-# Whitelist tracked templates and tests
+# Whitelist tracked files and templates
+!.orchestration/handoffs/
+!.orchestration/**/.gitkeep
 !templates/**
-!tests/**

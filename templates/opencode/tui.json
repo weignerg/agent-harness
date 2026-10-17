@@ -1,0 +1,11 @@
+{
+  "theme": "blackwell",
+  "diff_style": "split",
+  "mouse": true,
+  "scroll_speed": 3,
+  "keybindings": {
+    "ctrl+r": "command:reindex",
+    "ctrl+t": "command:test",
+    "ctrl+s": "command:review"
+  }
+}
