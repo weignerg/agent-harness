@@ -33,6 +33,7 @@ AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
 CLAUDE_HOME_DIR="${CLAUDE_HOME_DIR:-${USER_HOME}/.claude}"
 OPENCODE_HOME_DIR="${OPENCODE_HOME_DIR:-${USER_HOME}/.config/opencode}"
 BACKEND_DIR="${USER_HOME}/.config/opencode-backends"
+SYSTEMD_USER_DIR="${SYSTEMD_USER_DIR:-${USER_HOME}/.config/systemd/user}"
 SGLANG_STACK_DIR="${USER_HOME}/.local/share/opencode-sglang-stack"
 
 TARGET="all"
@@ -43,6 +44,8 @@ DRY_RUN=false
 NON_INTERACTIVE=false
 REINSTALL=false
 PURGE=false
+OVERRIDE_GPU=""
+ENABLE_SYSTEMD="${ENABLE_SYSTEMD:-false}"
 
 show_help() {
     cat << 'EOF'
@@ -161,6 +164,18 @@ while [[ $# -gt 0 ]]; do
             REINSTALL=true
             shift
             ;;
+        --override-gpu)
+            OVERRIDE_GPU="$2"
+            shift 2
+            ;;
+        --override-gpu=*)
+            OVERRIDE_GPU="${1#*=}"
+            shift
+            ;;
+        --systemd|--with-systemd)
+            ENABLE_SYSTEMD=true
+            shift
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -172,6 +187,10 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [ "$MODE" = "global" ]; then
+    ENABLE_SYSTEMD=true
+fi
 
 # Resolve TARGET_REPO
 if [ "$MODE" = "local" ]; then
@@ -258,19 +277,27 @@ install_agy_global() {
     cp -f "${agy_tmpl}/GEMINI.md" "${orch_dest}/GEMINI.md"
 
     if [ -L "${agents_link}" ]; then
-        ln -sfn "${orch_dest}" "${agents_link}"
+        rm -f "${agents_link}"
     elif [ -d "${agents_link}" ]; then
-        cp -rf "${agy_tmpl}/rules/"* "${agents_link}/rules/" 2>/dev/null || true
-        cp -rf "${agy_tmpl}/skills/"* "${agents_link}/skills/" 2>/dev/null || true
-        cp -rf "${agy_tmpl}/tools/"* "${agents_link}/tools/" 2>/dev/null || true
-        chmod +x "${agents_link}/tools/"*.sh 2>/dev/null || true
-        cp -rf "${agy_tmpl}/orchestration/"* "${agents_link}/orchestration/" 2>/dev/null || true
-        cp -f "${agy_tmpl}/AGENTS.md" "${agents_link}/AGENTS.md"
-        cp -f "${agy_tmpl}/GEMINI.md" "${agents_link}/GEMINI.md"
-    else
-        ln -sfn "${orch_dest}" "${agents_link}"
+        # Migrate any user-defined skills, rules, or tools into orch_dest before symlinking
+        cp -rn "${agents_link}/skills/"* "${orch_dest}/skills/" 2>/dev/null || true
+        cp -rn "${agents_link}/rules/"* "${orch_dest}/rules/" 2>/dev/null || true
+        cp -rn "${agents_link}/tools/"* "${orch_dest}/tools/" 2>/dev/null || true
+        local bak_agents="${agents_link}.pre-harness.bak"
+        if [ ! -e "$bak_agents" ]; then
+            cp -r "$agents_link" "$bak_agents"
+            echo "  ⚠️ Warning: Pre-existing directory ${agents_link} backed up to ${bak_agents}"
+        else
+            echo "  ⚠️ Warning: Pre-existing directory ${agents_link} already backed up at ${bak_agents}"
+        fi
+        rm -rf "$agents_link"
+    elif [ -e "${agents_link}" ]; then
+        local bak_agents="${agents_link}.pre-harness.bak"
+        mv "$agents_link" "$bak_agents"
+        echo "  ⚠️ Warning: Pre-existing file ${agents_link} backed up to ${bak_agents}"
     fi
-    rm -f "${orch_dest}/rules.md" "${agents_link}/rules.md" 2>/dev/null || true
+    ln -sfn "${orch_dest}" "${agents_link}"
+    rm -f "${orch_dest}/rules.md" 2>/dev/null || true
     echo "  ✅ Synced rules, skills, tools, and charters to ${orch_dest}/"
 
     mkdir -p "$(dirname "$mcp_config")"
@@ -362,15 +389,88 @@ install_claude_global() {
     echo "  ✅ Installed Claude Code agents, skills, and configuration to ${claude_dest}/"
 }
 
+deploy_opencode_backend_and_units() {
+    local systemd_dest="$1"
+    local backend_env_dir="$2"
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
+        return 0
+    fi
+
+    mkdir -p "${systemd_dest}" "${backend_env_dir}"
+
+    # 1. Run GPU probe to detect hardware profile
+    local gpu_profile=""
+    local mem_fraction=""
+    local max_context=""
+    if [ -x "${SCRIPT_DIR}/scripts/gpu_probe.sh" ]; then
+        gpu_profile="$("${SCRIPT_DIR}/scripts/gpu_probe.sh" ${OVERRIDE_GPU:+--override-gpu "$OVERRIDE_GPU"} 2>/dev/null || echo '{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device"}')"
+    else
+        gpu_profile='{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device"}'
+    fi
+    echo "  Detected GPU Profile: ${gpu_profile}"
+    echo "$gpu_profile" > "${backend_env_dir}/gpu_profile.json"
+    mem_fraction="$(printf '%s' "$gpu_profile" | grep -oE '"memory_fraction":[0-9.]+' | grep -oE '[0-9.]+' | head -n1 || echo "0.88")"
+    max_context="$(printf '%s' "$gpu_profile" | grep -oE '"max_context":[0-9]+' | grep -oE '[0-9]+' | head -n1 || echo "262144")"
+
+    # 2. Deploy model catalog template expanded with USER_HOME
+    if [ -f "${SCRIPT_DIR}/config/models/models_catalog.json" ]; then
+        sed "s|__USER_HOME__|${USER_HOME}|g" "${SCRIPT_DIR}/config/models/models_catalog.json" > "${backend_env_dir}/models_catalog.json"
+    fi
+
+    # 3. Deploy systemd service profiles into backend_env_dir
+    if compgen -G "${SCRIPT_DIR}/config/systemd/*.service" > /dev/null; then
+        cp -f "${SCRIPT_DIR}"/config/systemd/*.service "${backend_env_dir}/"
+    fi
+    if compgen -G "${SCRIPT_DIR}/config/systemd/*.timer" > /dev/null; then
+        cp -f "${SCRIPT_DIR}"/config/systemd/*.timer "${backend_env_dir}/"
+    fi
+
+    # 4. Deploy systemd user units into systemd_dest (~/.config/systemd/user)
+    local units=(
+        "opencode-server.service"
+        "opencode-agent.slice"
+        "opencode-colbert-reindex.service"
+        "opencode-colbert-reindex.timer"
+        "opencode-sglang-ornith-35b.service"
+    )
+
+    for u in "${units[@]}"; do
+        if [ -f "${SCRIPT_DIR}/config/systemd/${u}" ]; then
+            cp -f "${SCRIPT_DIR}/config/systemd/${u}" "${systemd_dest}/${u}"
+        fi
+    done
+
+    # Tune primary SGLang service with probed parameters
+    if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${systemd_dest}/opencode-sglang-ornith-35b.service" ]; then
+        sed -i \
+            "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|;s|Environment=\"SGLANG_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_CONTEXT_LENGTH=${max_context}\"|" \
+            "${systemd_dest}/opencode-sglang-ornith-35b.service"
+        sed -i \
+            "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
+            "${systemd_dest}/opencode-sglang-ornith-35b.service"
+    fi
+
+    # 5. Reload systemd daemon if available
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --user daemon-reload 2>/dev/null || true
+    fi
+    echo "  ✅ Deployed systemd user units to ${systemd_dest}/"
+}
+
 install_opencode_global() {
     local opencode_dest="${OPENCODE_HOME_DIR}"
     local opencode_tmpl="${SCRIPT_DIR}/templates/opencode"
     local legacy_launchers=("opencode-local" "opencode-architect-local" "opencode-worker-local" "opencode-reviewer-local" "opencode-sub-agent-local")
-    local backend_env_dir="${USER_HOME}/.config/opencode-backends"
+    local backend_env_dir="${BACKEND_DIR}"
+    local systemd_dest="${SYSTEMD_USER_DIR}"
 
     echo "================================================================================"
     echo "🚀 INSTALLING OPENCODE HARNESS (GLOBAL MODE)"
     echo "   Target Dir    : ${opencode_dest}"
+    echo "   Backend Dir   : ${backend_env_dir}"
+    echo "   Systemd Dir   : ${systemd_dest}"
     echo "   Dry Run       : ${DRY_RUN}"
     echo "================================================================================"
 
@@ -378,12 +478,43 @@ install_opencode_global() {
         echo "  [DRY-RUN] Would ensure ${backend_env_dir}/env exists for backend services"
         echo "  [DRY-RUN] Would prune legacy launchers in ${USER_HOME}/.local/bin/"
         echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, opencode.json to ${opencode_dest}/"
+        echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
         return 0
     fi
 
     mkdir -p "${backend_env_dir}"
     if [ ! -f "${backend_env_dir}/env" ]; then
-        touch "${backend_env_dir}/env"
+        cat << EOF > "${backend_env_dir}/env"
+# OpenCode Backend Environment & Fallback Cloud API Configuration
+# Gated model access token
+HF_TOKEN=${HF_TOKEN:-}
+# Remote Headless Server credentials (port 4096)
+OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-}
+OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
+OPENCODE_SERVER_PORT=4096
+OPENCODE_SERVER_HOST=0.0.0.0
+# Cloud API Fallback Keys
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+GEMINI_API_KEY=${GEMINI_API_KEY:-}
+OPENAI_API_KEY=${OPENAI_API_KEY:-}
+EOF
+        chmod 0600 "${backend_env_dir}/env"
+    else
+        for var_name in HF_TOKEN ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; do
+            val="${!var_name:-}"
+            if [ -n "$val" ]; then
+                if grep -sq "^${var_name}=$" "${backend_env_dir}/env"; then
+                    sed -i "s|^${var_name}=$|${var_name}=${val}|" "${backend_env_dir}/env"
+                elif ! grep -sq "^${var_name}=" "${backend_env_dir}/env"; then
+                    printf '%s=%s\n' "$var_name" "$val" >> "${backend_env_dir}/env"
+                fi
+            fi
+        done
+        for fallback_var in ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY; do
+            if ! grep -sq "^${fallback_var}=" "${backend_env_dir}/env"; then
+                printf '%s=\n' "$fallback_var" >> "${backend_env_dir}/env"
+            fi
+        done
         chmod 0600 "${backend_env_dir}/env"
     fi
 
@@ -403,7 +534,9 @@ install_opencode_global() {
     cp -f "${opencode_tmpl}/opencode.json" "${opencode_dest}/opencode.json"
     cp -f "${opencode_tmpl}/tui.json" "${opencode_dest}/tui.json"
     cp -f "${opencode_tmpl}/AGENTS.md" "${opencode_dest}/AGENTS.md"
-    echo "  ✅ Installed OpenCode 10-component hierarchy to ${opencode_dest}/"
+
+    deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
+    echo "  ✅ Installed OpenCode 10-component hierarchy & systemd backend services to ${opencode_dest}/"
 }
 
 # --- LOCAL TARGET INSTALLERS --------------------------------------------------
@@ -538,6 +671,10 @@ install_opencode_local() {
     cp -f "${opencode_tmpl}/tui.json" "${dest_opencode}/tui.json"
     cp -f "${opencode_tmpl}/AGENTS.md" "${dest_opencode}/AGENTS.md"
 
+    if [ "$ENABLE_SYSTEMD" = true ]; then
+        deploy_opencode_backend_and_units "${SYSTEMD_USER_DIR}" "${BACKEND_DIR}"
+    fi
+
     ensure_gitignore_entries "${repo_path}/.gitignore" ".opencode/"
     echo "  ✅ Installed OpenCode 10-component hierarchy to ${dest_opencode}/"
 }
@@ -562,6 +699,7 @@ install_all_local() {
 run_install() {
     local recorded_roots=()
     local recorded_symlinks=()
+    local recorded_files=()
     local manifest_file=""
 
     if [ "$MODE" = "local" ]; then
@@ -581,11 +719,25 @@ run_install() {
                 mkdir -p "${TARGET_REPO}/.orchestration"
                 install_opencode_local
                 recorded_roots+=("${TARGET_REPO}/.opencode")
+                if [ "$ENABLE_SYSTEMD" = true ]; then
+                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                        if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                            recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
+                        fi
+                    done
+                fi
                 ;;
             all)
                 install_all_local
                 recorded_roots+=("${TARGET_REPO}/.orchestration" "${TARGET_REPO}/.claude" "${TARGET_REPO}/.opencode")
                 recorded_symlinks+=("${TARGET_REPO}/.agents:.orchestration")
+                if [ "$ENABLE_SYSTEMD" = true ]; then
+                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                        if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                            recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
+                        fi
+                    done
+                fi
                 ;;
             *)
                 echo "❌ Error: Unknown target '${TARGET}'. Supported: agy, claude, opencode, all" >&2
@@ -594,12 +746,17 @@ run_install() {
         esac
 
         if [ "$DRY_RUN" = false ]; then
+            local file_args=()
+            if [ ${#recorded_files[@]} -gt 0 ]; then
+                file_args=(--files "${recorded_files[@]}")
+            fi
             python3 -m harness.installer.manifest record \
                 --manifest-path "$manifest_file" \
                 --target "$TARGET" \
                 --mode "$MODE" \
                 --roots "${recorded_roots[@]}" \
-                --symlinks "${recorded_symlinks[@]}"
+                --symlinks "${recorded_symlinks[@]}" \
+                "${file_args[@]}"
         fi
         echo "🎉 Local Agent Harness installation complete!"
     else
@@ -619,11 +776,21 @@ run_install() {
                 mkdir -p "${USER_HOME}/.orchestration"
                 install_opencode_global
                 recorded_roots+=("${USER_HOME}/.config/opencode")
+                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                    if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                        recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
+                    fi
+                done
                 ;;
             all)
                 install_all_global
                 recorded_roots+=("${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${USER_HOME}/.claude" "${USER_HOME}/.config/opencode")
                 recorded_symlinks+=("${USER_HOME}/.agents:${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}/plugins/agy-harness:${GEMINI_CONFIG_DIR}/plugins/agent-harness")
+                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                    if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                        recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
+                    fi
+                done
                 ;;
             *)
                 echo "❌ Error: Unknown target '${TARGET}'. Supported: agy, claude, opencode, all" >&2
@@ -632,12 +799,17 @@ run_install() {
         esac
 
         if [ "$DRY_RUN" = false ]; then
+            local file_args=()
+            if [ ${#recorded_files[@]} -gt 0 ]; then
+                file_args=(--files "${recorded_files[@]}")
+            fi
             python3 -m harness.installer.manifest record \
                 --manifest-path "$manifest_file" \
                 --target "$TARGET" \
                 --mode "$MODE" \
                 --roots "${recorded_roots[@]}" \
-                --symlinks "${recorded_symlinks[@]}"
+                --symlinks "${recorded_symlinks[@]}" \
+                "${file_args[@]}"
         fi
         echo "🎉 Global Agent Harness installation complete!"
     fi
@@ -695,10 +867,15 @@ run_uninstall() {
                 rm -f "${USER_HOME}/.local/bin/$l"
             done
 
-            local systemd_user_dir="${USER_HOME}/.config/systemd/user"
+            local systemd_user_dir="${SYSTEMD_USER_DIR:-${USER_HOME}/.config/systemd/user}"
             if [ -d "${systemd_user_dir}" ]; then
-                for u in "${systemd_user_dir}"/opencode-sglang-*.service "${systemd_user_dir}"/opencode-server.service; do
+                for u in "${systemd_user_dir}"/opencode-*.service "${systemd_user_dir}"/opencode-*.timer "${systemd_user_dir}"/opencode-*.slice; do
                     if [ -f "$u" ]; then
+                        local unit_name="$(basename "$u")"
+                        if command -v systemctl >/dev/null 2>&1; then
+                            systemctl --user stop "$unit_name" 2>/dev/null || true
+                            systemctl --user disable "$unit_name" 2>/dev/null || true
+                        fi
                         rm -f "$u"
                     fi
                 done

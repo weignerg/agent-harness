@@ -458,6 +458,178 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn(".agents/", lines)
             self.assertFalse(any("node_modules.agents" in line for line in lines), "Newline was not inserted between entries")
 
+    def test_opencode_backend_systemd_deployment_global_sandbox(self):
+        """Test OpenCode backend deployment deploys systemd user units, tracks in manifest, verifies SHA256, and uninstalls cleanly."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+                "HF_TOKEN": "test_hf_token_sample",
+                "ANTHROPIC_API_KEY": "test_ant_key_sample",
+            }
+
+            # 1. Install OpenCode globally in sandbox
+            proc_inst = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", env=env)
+            self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
+
+            # Verify deployed systemd user units
+            expected_units = [
+                "opencode-server.service",
+                "opencode-agent.slice",
+                "opencode-colbert-reindex.service",
+                "opencode-colbert-reindex.timer",
+                "opencode-sglang-ornith-35b.service",
+            ]
+            for unit in expected_units:
+                unit_path = systemd_user_dir / unit
+                self.assertTrue(unit_path.is_file(), f"Missing systemd user unit: {unit_path}")
+
+            # Verify environment configuration and 0600 permissions
+            env_file = sandbox / ".config" / "opencode-backends" / "env"
+            self.assertTrue(env_file.is_file())
+            self.assertEqual(oct(env_file.stat().st_mode & 0o777), "0o600")
+            env_content = env_file.read_text(encoding="utf-8")
+            self.assertIn("HF_TOKEN=test_hf_token_sample", env_content)
+            self.assertIn("ANTHROPIC_API_KEY=test_ant_key_sample", env_content)
+
+            # Verify opencode.json cloud fallback providers
+            opencode_cfg = sandbox / ".config" / "opencode" / "opencode.json"
+            self.assertTrue(opencode_cfg.is_file())
+            cfg_data = json.loads(opencode_cfg.read_text(encoding="utf-8"))
+            self.assertIn("anthropic", cfg_data.get("provider", {}))
+            self.assertIn("google", cfg_data.get("provider", {}))
+
+            # Verify manifest tracks deployed systemd user units
+            manifest_file = sandbox / ".orchestration" / "install_manifest.json"
+            self.assertTrue(manifest_file.is_file())
+            manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            recorded_file_paths = [f["path"] for f in manifest_data.get("files", [])]
+            for unit in expected_units:
+                resolved_unit = str((systemd_user_dir / unit).resolve())
+                self.assertIn(resolved_unit, recorded_file_paths, f"Unit {unit} was not recorded in manifest")
+
+            # 2. Verify SHA-256 hashes via --verify
+            proc_verify = self.run_installer("--verify", "--mode", "global", env=env)
+            self.assertEqual(proc_verify.returncode, 0, f"Verify failed: {proc_verify.stdout}")
+            self.assertIn("Verification SUCCESS", proc_verify.stdout)
+
+            # 3. Verify tampering detection on a systemd unit
+            target_unit = systemd_user_dir / "opencode-server.service"
+            orig_content = target_unit.read_text(encoding="utf-8")
+            target_unit.write_text(orig_content + "\n# TAMPERED INJECTION\n", encoding="utf-8")
+
+            proc_tamper = self.run_installer("--verify", "--mode", "global", env=env)
+            self.assertNotEqual(proc_tamper.returncode, 0, "Verify should fail when unit is tampered")
+            self.assertIn("Tampered Files Detected", proc_tamper.stdout)
+            self.assertIn("opencode-server.service", proc_tamper.stdout)
+
+            # Restore original content for clean uninstall
+            target_unit.write_text(orig_content, encoding="utf-8")
+
+            # 4. Uninstall rolls back systemd user units
+            proc_uninst = self.run_installer("--uninstall", "--mode", "global", "--non-interactive", env=env)
+            self.assertEqual(proc_uninst.returncode, 0, f"Uninstall failed: {proc_uninst.stderr}\n{proc_uninst.stdout}")
+
+            for unit in expected_units:
+                unit_path = systemd_user_dir / unit
+                self.assertFalse(unit_path.exists(), f"Unit {unit} was not removed by uninstall")
+
+            # Non-purged env file must remain intact
+            self.assertTrue(env_file.is_file(), "env file should be preserved on standard uninstall")
+
+    def test_opencode_backend_systemd_deployment_local_with_systemd_flag(self):
+        """Test OpenCode backend deployment in local repository mode with --systemd flag."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "workspace"
+            sandbox.mkdir()
+            repo_dir = sandbox / "target_project"
+            repo_dir.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+            }
+
+            proc_inst = self.run_installer(
+                "--target", "opencode",
+                "--mode", "local",
+                str(repo_dir),
+                "--systemd",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
+
+            # Verify systemd units deployed
+            self.assertTrue((systemd_user_dir / "opencode-server.service").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-agent.slice").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.service").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.timer").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-sglang-ornith-35b.service").is_file())
+
+            # Manifest in local repo tracks them
+            manifest_file = repo_dir / ".orchestration" / "install_manifest.json"
+            self.assertTrue(manifest_file.is_file())
+            manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            recorded_file_paths = [f["path"] for f in manifest_data.get("files", [])]
+            self.assertIn(str((systemd_user_dir / "opencode-server.service").resolve()), recorded_file_paths)
+
+            # Verify integrity
+            proc_verify = self.run_installer("--verify", "--mode", "local", str(repo_dir), env=env)
+            self.assertEqual(proc_verify.returncode, 0)
+            self.assertIn("Verification SUCCESS", proc_verify.stdout)
+
+            # Uninstall
+            proc_uninst = self.run_installer("--uninstall", "--mode", "local", str(repo_dir), "--non-interactive", env=env)
+            self.assertEqual(proc_uninst.returncode, 0)
+            self.assertFalse((systemd_user_dir / "opencode-server.service").exists())
+            self.assertFalse((systemd_user_dir / "opencode-agent.slice").exists())
+
+    def test_opencode_gpu_probe_tuning_in_service_unit(self):
+        """Test GPU probe detects profile and tunes service unit memory fraction and context length."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+
+            # Force rtx-5090 profile via --override-gpu
+            proc_inst = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-5090",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc_inst.returncode, 0)
+
+            # Check service file tuning
+            unit_file = systemd_user_dir / "opencode-sglang-ornith-35b.service"
+            self.assertTrue(unit_file.is_file())
+            unit_content = unit_file.read_text(encoding="utf-8")
+            self.assertIn("--mem-fraction-static 0.88", unit_content)
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', unit_content)
+
+            # Check gpu_profile.json recorded
+            gpu_prof_file = sandbox / ".config" / "opencode-backends" / "gpu_profile.json"
+            self.assertTrue(gpu_prof_file.is_file())
+            prof_data = json.loads(gpu_prof_file.read_text(encoding="utf-8"))
+            self.assertEqual(prof_data["profile"], "rtx-5090")
+
 
 if __name__ == "__main__":
     unittest.main()
