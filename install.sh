@@ -405,14 +405,56 @@ deploy_opencode_backend_and_units() {
     local mem_fraction=""
     local max_context=""
     if [ -x "${SCRIPT_DIR}/scripts/gpu_probe.sh" ]; then
-        gpu_profile="$("${SCRIPT_DIR}/scripts/gpu_probe.sh" ${OVERRIDE_GPU:+--override-gpu "$OVERRIDE_GPU"} 2>/dev/null || echo '{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device"}')"
+        gpu_profile="$("${SCRIPT_DIR}/scripts/gpu_probe.sh" ${OVERRIDE_GPU:+--override-gpu "$OVERRIDE_GPU"} 2>/dev/null || echo '{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device","model":"ornith-1.5-35b","service":"opencode-sglang-ornith-35b.service","cpu_offload_gb":0}')"
     else
-        gpu_profile='{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device"}'
+        gpu_profile='{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device","model":"ornith-1.5-35b","service":"opencode-sglang-ornith-35b.service","cpu_offload_gb":0}'
     fi
     echo "  Detected GPU Profile: ${gpu_profile}"
     echo "$gpu_profile" > "${backend_env_dir}/gpu_profile.json"
     mem_fraction="$(printf '%s' "$gpu_profile" | grep -oE '"memory_fraction":[0-9.]+' | grep -oE '[0-9.]+' | head -n1 || echo "0.88")"
     max_context="$(printf '%s' "$gpu_profile" | grep -oE '"max_context":[0-9]+' | grep -oE '[0-9]+' | head -n1 || echo "262144")"
+    local probed_model="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model', 'ornith-1.5-35b'))" "${gpu_profile}" 2>/dev/null || echo "ornith-1.5-35b")"
+    local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
+    local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
+
+    echo "  ✅ Probed GPU resources: Model=${probed_model}, Context=${max_context}, Service=${probed_service}"
+
+    # Update ${backend_env_dir}/env with probed variables while preserving existing secrets and 0600 mode
+    if [ -f "${backend_env_dir}/env" ]; then
+        python3 -c "
+import sys
+path = sys.argv[1]
+keys = {
+    'PROBED_CONTEXT_LENGTH': sys.argv[2],
+    'PROBED_MEM_FRACTION': sys.argv[3],
+    'PROBED_MODEL': sys.argv[4],
+    'PROBED_CPU_OFFLOAD_GB': sys.argv[5],
+}
+lines = []
+try:
+    with open(path, 'r') as f:
+        lines = f.readlines()
+except FileNotFoundError:
+    pass
+
+new_lines = []
+seen = set()
+for line in lines:
+    k = line.split('=', 1)[0].strip() if '=' in line else None
+    if k in keys:
+        new_lines.append(f'{k}={keys[k]}\n')
+        seen.add(k)
+    else:
+        new_lines.append(line)
+for k, v in keys.items():
+    if k not in seen:
+        new_lines.append(f'{k}={v}\n')
+
+with open(path, 'w') as f:
+    f.writelines(new_lines)
+" "${backend_env_dir}/env" "${max_context}" "${mem_fraction}" "${probed_model}" "${probed_cpu_offload}"
+        chmod 0600 "${backend_env_dir}/env"
+    fi
 
     # 2. Deploy model catalog template expanded with USER_HOME
     if [ -f "${SCRIPT_DIR}/config/models/models_catalog.json" ]; then
@@ -438,6 +480,9 @@ deploy_opencode_backend_and_units() {
 
     for u in "${units[@]}"; do
         if [ -f "${SCRIPT_DIR}/config/systemd/${u}" ]; then
+            if [ -L "${systemd_dest}/${u}" ]; then
+                rm -f "${systemd_dest}/${u}"
+            fi
             cp -f "${SCRIPT_DIR}/config/systemd/${u}" "${systemd_dest}/${u}"
         fi
     done
@@ -476,6 +521,8 @@ install_opencode_global() {
 
     if [ "$DRY_RUN" = true ]; then
         echo "  [DRY-RUN] Would ensure ${backend_env_dir}/env exists for backend services"
+        echo "  [DRY-RUN] Would probe GPU hardware via scripts/gpu_probe.sh and save to ${backend_env_dir}/gpu_profile.json"
+        echo "  [DRY-RUN] Would update ${backend_env_dir}/env with PROBED_* sizing parameters"
         echo "  [DRY-RUN] Would prune legacy launchers in ${USER_HOME}/.local/bin/"
         echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, opencode.json to ${opencode_dest}/"
         echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
