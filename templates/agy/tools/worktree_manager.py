@@ -56,17 +56,41 @@ class WorktreeManager:
         if target_runtime == "opencode":
             return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
 
-        # Authoritative Directive: worktrees strictly reside in .orchestration/worktrees/
-        # Legacy defaults eliminated; strictly enforce .orchestration/worktrees/
+        # Authoritative Directive: Option A (Strict Global Centralization)
         try:
-            from harness.paths import resolve_true_repo_root
+            from harness.paths import (
+                is_local_orchestration,
+                resolve_authoritative_orchestration_root,
+                resolve_true_repo_root,
+            )
             true_repo = resolve_true_repo_root(self.repo_dir) or self.repo_dir
-            if (true_repo / ".orchestration").is_dir():
-                return (true_repo / ".orchestration" / "worktrees" / branch_name).resolve()
+            orch_root = resolve_authoritative_orchestration_root(true_repo)
+            if is_local_orchestration(true_repo):
+                return (orch_root / "worktrees" / branch_name).resolve()
+            repo_name = true_repo.name
+            return (orch_root / "worktrees" / repo_name / branch_name).resolve()
         except ImportError:
-            pass
-
-        return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
+            anchors = [
+                self.repo_dir / ".orchestration_root",
+                self.repo_dir / ".orchestration" / ".orchestration_root",
+            ]
+            is_local = False
+            for anchor in anchors:
+                if anchor.is_file():
+                    try:
+                        content = anchor.read_text(encoding="utf-8")
+                        for line in content.splitlines():
+                            line_clean = line.strip().lower()
+                            if line_clean == "mode=local" or line_clean.startswith("mode=local"):
+                                is_local = True
+                                break
+                    except Exception:
+                        pass
+            if is_local:
+                return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
+            repo_name = self.repo_dir.name
+            orch_root = Path.home() / ".orchestration"
+            return (orch_root / "worktrees" / repo_name / branch_name).resolve()
 
     def provision_worktree(self, branch_name: str, target_dir: Optional[Path | str] = None, runtime: Optional[str] = None) -> Path:
         resolved_target = Path(target_dir) if target_dir is not None else self.default_worktree_path(branch_name, runtime=runtime)

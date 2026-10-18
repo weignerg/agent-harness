@@ -1176,6 +1176,10 @@ warmup_sglang_service() {
         return 0
     fi
 
+    if [ "$MODE" = "local" ] && [ "$ENABLE_SYSTEMD" != true ]; then
+        return 0
+    fi
+
     if [ "$DRY_RUN" = true ]; then
         echo "  [DRY-RUN] Would perform foreground SGLang warmup & weight verification"
         return 0
@@ -1183,14 +1187,19 @@ warmup_sglang_service() {
 
     # Auto-skip if in sandbox / test environment unless EXPLICIT_WARMUP is true
     if [ "${EXPLICIT_WARMUP:-false}" != true ]; then
+        if [ "$SKIP_WARMUP" = true ]; then
+            echo "  ℹ️  SGLang model warmup skipped (--skip-warmup)."
+            return 0
+        fi
+
         if { [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; }; then
             echo "  ℹ️  SGLang model warmup skipped (isolated sandbox test environment)."
             return 0
         fi
 
-        # Auto-skip if non-interactive without TTY
-        if [ "$NON_INTERACTIVE" = true ] && [ ! -t 0 ] && [ ! -t 1 ]; then
-            echo "  ℹ️  SGLang model warmup skipped (non-interactive headless environment without TTY)."
+        # Auto-skip if non-interactive
+        if [ "$NON_INTERACTIVE" = true ]; then
+            echo "  ℹ️  SGLang model warmup skipped (non-interactive mode)."
             return 0
         fi
     fi
@@ -1615,16 +1624,20 @@ deploy_opencode_backend_and_units() {
             done
 
             if [ "$healed" != true ]; then
-                echo "  📦 Local sglang repo not found or install failed. Attempting package install (sglang[all]>=0.4.0)..."
-                if command -v uv >/dev/null 2>&1; then
-                    uv pip install --python "${py_exec}" "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
+                if [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+                    echo "  ℹ️  Skipping remote sglang package install in isolated sandbox test environment."
                 else
-                    "${py_exec}" -m pip install "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
-                fi
+                    echo "  📦 Local sglang repo not found or install failed. Attempting package install (sglang[all]>=0.4.0)..."
+                    if command -v uv >/dev/null 2>&1; then
+                        uv pip install --python "${py_exec}" "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
+                    else
+                        "${py_exec}" -m pip install "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
+                    fi
 
-                if "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
-                    echo "  ✅ Successfully auto-healed sglang via package install"
-                    healed=true
+                    if "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
+                        echo "  ✅ Successfully auto-healed sglang via package install"
+                        healed=true
+                    fi
                 fi
             fi
 

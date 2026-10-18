@@ -15,7 +15,7 @@ class StrictModel(BaseModel):
 
 class WorktreeCreateInput(StrictModel):
     branch: str = Field(description="Name of the new git branch to create in the worktree")
-    path: Optional[str] = Field(default=None, description="Target directory path for the worktree. Defaults to .orchestration/worktrees/<branch>")
+    path: Optional[str] = Field(default=None, description="Target directory path for the worktree. Defaults to canonical worktree path")
     base: Optional[str] = Field(default="develop", description="Base branch or commit to branch from (default: develop)")
 
 class WorktreeListInput(StrictModel):

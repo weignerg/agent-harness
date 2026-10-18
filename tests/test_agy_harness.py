@@ -185,6 +185,7 @@ class TestAgyHarnessStructure(unittest.TestCase):
     def test_runtime_defaults_for_worktree_anchor_and_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
+            (tmp_path / ".orchestration_root").write_text("mode=local\n", encoding="utf-8")
             mgr = WorktreeManager(repo_dir=tmp_path, runtime="agy")
             self.assertEqual(
                 mgr.default_worktree_path("feat/issue-147"),

@@ -10,9 +10,13 @@ from unittest.mock import patch
 
 from harness.memory.handoff import TaskHandoff
 from harness.paths import (
+    is_local_orchestration,
     parse_anchor_file,
+    parse_anchor_metadata,
     resolve_authoritative_orchestration_root,
+    resolve_canonical_worktree_dir,
     resolve_true_repo_root,
+    resolve_worktree_path,
 )
 from scripts.worktree_manager import WorktreeManager
 
@@ -117,8 +121,30 @@ class TestAuthoritativeRootAndDiscipline(unittest.TestCase):
             resolved = resolve_authoritative_orchestration_root(self.worktree_dir)
             self.assertEqual(resolved, (self.main_repo / ".orchestration").resolve())
 
-    def test_priority_3_main_repo_orchestration_from_nested_worktree(self):
-        """Test Priority 3: <main_repo>/.orchestration from inside a nested worktree cwd."""
+    def test_priority_3_repo_without_local_anchor_falls_back_to_global(self):
+        """Test 1: Repository having .orchestration/ directory but NO .orchestration_root(mode=local) resolves to ~/.orchestration."""
+        main_orch = self.main_repo / ".orchestration"
+        main_orch.mkdir(exist_ok=True)
+        fake_home = self.tmp_path / "fake_home"
+        fake_home.mkdir(exist_ok=True)
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=fake_home):
+            orig_cwd = os.getcwd()
+            try:
+                os.chdir(self.worktree_dir)
+                resolved = resolve_authoritative_orchestration_root()
+                self.assertEqual(resolved, (fake_home / ".orchestration").resolve())
+
+                # CRITICAL: Verify <worktree>/.orchestration was NOT created or returned
+                self.assertFalse((self.worktree_dir / ".orchestration").exists())
+                self.assertNotEqual(resolved, (self.worktree_dir / ".orchestration").resolve())
+            finally:
+                os.chdir(orig_cwd)
+
+    def test_repo_with_local_anchor_resolves_to_repo_orchestration(self):
+        """Test 2: Repository with .orchestration_root containing mode=local resolves to <repo>/.orchestration."""
+        anchor_file = self.main_repo / ".orchestration_root"
+        anchor_file.write_text("mode=local\n", encoding="utf-8")
         main_orch = self.main_repo / ".orchestration"
         main_orch.mkdir(exist_ok=True)
 
@@ -128,21 +154,56 @@ class TestAuthoritativeRootAndDiscipline(unittest.TestCase):
                 os.chdir(self.worktree_dir)
                 resolved = resolve_authoritative_orchestration_root()
                 self.assertEqual(resolved, main_orch.resolve())
-
-                # CRITICAL: Verify <worktree>/.orchestration was NOT created or returned
-                self.assertFalse((self.worktree_dir / ".orchestration").exists())
-                self.assertNotEqual(resolved, (self.worktree_dir / ".orchestration").resolve())
             finally:
                 os.chdir(orig_cwd)
 
+    def test_worktrees_in_global_mode_scoped_under_home_worktrees_repo(self):
+        """Test 3: Worktrees in global mode are scoped under ~/.orchestration/worktrees/<repo_name>/<branch_name>."""
+        fake_home = self.tmp_path / "fake_home"
+        fake_home.mkdir(exist_ok=True)
+
+        with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=fake_home):
+            target_branch = "feat/global-scoped-test"
+            wt_path = resolve_canonical_worktree_dir(self.main_repo, target_branch)
+            expected = (fake_home / ".orchestration" / "worktrees" / self.main_repo.name / target_branch).resolve()
+            self.assertEqual(wt_path, expected)
+
+            # Also verify via WorktreeManager
+            mgr = WorktreeManager(repo_dir=self.main_repo)
+            mgr_path = mgr.default_worktree_path(target_branch)
+            self.assertEqual(mgr_path, expected)
+
+    def test_worktrees_in_local_mode_scoped_under_repo_orchestration(self):
+        """Test 4: Worktrees in local mode are scoped under <repo>/.orchestration/worktrees/<branch_name>."""
+        anchor_file = self.main_repo / ".orchestration_root"
+        anchor_file.write_text("mode=local\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {}, clear=True):
+            target_branch = "feat/local-scoped-test"
+            wt_path = resolve_canonical_worktree_dir(self.main_repo, target_branch)
+            expected = (self.main_repo / ".orchestration" / "worktrees" / target_branch).resolve()
+            self.assertEqual(wt_path, expected)
+
+            # Also verify via WorktreeManager
+            mgr = WorktreeManager(repo_dir=self.main_repo)
+            mgr_path = mgr.default_worktree_path(target_branch)
+            self.assertEqual(mgr_path, expected)
+
     def test_priority_3_symlinked_agents_directory(self):
-        """Test Priority 3: <main_repo>/.agents symlink targeting .orchestration."""
+        """Test Priority 3: <main_repo>/.agents symlink with mode=local anchor vs without."""
         main_orch = self.main_repo / ".orchestration"
         main_orch.mkdir(exist_ok=True)
-        agents_symlink = self.main_repo / ".agents_link"
-        agents_symlink.symlink_to(main_orch, target_is_directory=True)
+        fake_home = self.tmp_path / "fake_home"
+        fake_home.mkdir(exist_ok=True)
 
-        # Test resolving target
+        # Without mode=local anchor: falls back to global
+        with patch.dict(os.environ, {}, clear=True), patch.object(Path, "home", return_value=fake_home):
+            resolved = resolve_authoritative_orchestration_root(self.worktree_dir)
+            self.assertEqual(resolved, (fake_home / ".orchestration").resolve())
+
+        # With mode=local anchor: resolves to main_orch
+        anchor_file = self.main_repo / ".orchestration_root"
+        anchor_file.write_text("mode=local\n", encoding="utf-8")
         with patch.dict(os.environ, {}, clear=True):
             resolved = resolve_authoritative_orchestration_root(self.worktree_dir)
             self.assertEqual(resolved, main_orch.resolve())
@@ -191,6 +252,9 @@ class TestAuthoritativeRootAndDiscipline(unittest.TestCase):
     def test_worktree_manager_inside_nested_worktree(self):
         """Test WorktreeManager called from inside nested worktree targets main_repo and avoids nesting."""
         (self.main_repo / ".orchestration").mkdir(exist_ok=True)
+        # In local mode
+        anchor_file = self.main_repo / ".orchestration_root"
+        anchor_file.write_text("mode=local\n", encoding="utf-8")
 
         orig_cwd = os.getcwd()
         try:
