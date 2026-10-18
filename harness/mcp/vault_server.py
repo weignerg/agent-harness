@@ -23,12 +23,30 @@ def colbert_retrieve(query: str, top_k: int = 5, index_dir: Optional[str] = None
 
     if index_dir:
         idx_path = Path(index_dir)
-    elif (Path.home() / "Vaults/home/.index/index.json").exists() or (Path.home() / "Vaults/home").is_dir():
-        idx_path = Path.home() / "Vaults/home"
     else:
-        idx_path = Path("vault")
+        # Auto-detect local repository sub-vault if ORCHESTRATION_ROOT or local repo is active
+        import os
+        orch_root = os.environ.get("ORCHESTRATION_ROOT")
+        local_vault = None
+        if orch_root:
+            cand = Path(orch_root)
+            if cand.name == ".orchestration" and (cand.parent / "vault").is_dir():
+                local_vault = cand.parent / "vault"
+            elif (cand / "memory").is_dir() and any((cand / "memory").glob("*.md")):
+                local_vault = cand / "memory"
+            elif (cand.parent / "vault").is_dir():
+                local_vault = cand.parent / "vault"
+        if not local_vault and (Path.cwd() / "vault").is_dir():
+            local_vault = Path.cwd() / "vault"
 
-    cache_path = idx_path / ".index" if (idx_path / ".index").is_dir() or idx_path.name in ("vault", "home") else idx_path
+        if local_vault and ((local_vault / ".index/index.json").exists() or any(local_vault.glob("*.md"))):
+            idx_path = local_vault
+        elif (Path.home() / "Vaults/home/.index/index.json").exists() or (Path.home() / "Vaults/home").is_dir():
+            idx_path = Path.home() / "Vaults/home"
+        else:
+            idx_path = Path("vault")
+
+    cache_path = idx_path / ".index" if (idx_path / ".index").is_dir() or idx_path.name in ("vault", "home", "memory") else idx_path
     idx = CPUColBERTIndex(index_dir=cache_path if (cache_path / "index.json").exists() else None)
 
     if (cache_path / "index.json").exists():

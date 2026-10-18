@@ -15,7 +15,7 @@ class StrictModel(BaseModel):
 
 class WorktreeCreateInput(StrictModel):
     branch: str = Field(description="Name of the new git branch to create in the worktree")
-    path: Optional[str] = Field(default=None, description="Target directory path for the worktree. Defaults to .agents/worktrees/<branch>")
+    path: Optional[str] = Field(default=None, description="Target directory path for the worktree. Defaults to .orchestration/worktrees/<branch>")
     base: Optional[str] = Field(default="develop", description="Base branch or commit to branch from (default: develop)")
 
 class WorktreeListInput(StrictModel):
@@ -32,10 +32,11 @@ class WorktreeCommitInput(StrictModel):
 
 @server.tool(name="worktree_create", description="Provision an isolated git worktree for a branch")
 def worktree_create(branch: str, path: Optional[str] = None, base: Optional[str] = "develop") -> Dict[str, Any]:
-    from harness.paths import resolve_true_repo_root
+    from harness.paths import resolve_true_repo_root, resolve_worktree_path
     from scripts.worktree_manager import WorktreeManager
-    manager = WorktreeManager(repo_dir=resolve_true_repo_root())
-    target_path = Path(path).resolve() if path else manager.default_worktree_path(branch)
+    repo_root = resolve_true_repo_root()
+    manager = WorktreeManager(repo_dir=repo_root)
+    target_path = Path(path).resolve() if path else resolve_worktree_path(branch, repo_root)
     try:
         manager.provision_worktree(branch_name=branch, target_dir=target_path)
         return {

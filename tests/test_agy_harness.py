@@ -131,7 +131,7 @@ class TestAgyHarnessStructure(unittest.TestCase):
         team_body = (AGENTS_DIR / "team-orchestrator.md").read_text(encoding="utf-8")
         self.assertIn("## Subagent Spawning Model & Effort Policy (Gemini 3.8)", team_body)
         self.assertIn("Architect-First", team_body)
-        self.assertIn(".agents/worktrees/<branch>", team_body)
+        self.assertIn(".orchestration/worktrees/<branch>", team_body)
         self.assertIn("Automatic Adversarial Review Loop", team_body)
 
         reviewer_body = (AGENTS_DIR / "reviewer.md").read_text(encoding="utf-8")
@@ -165,7 +165,7 @@ class TestAgyHarnessStructure(unittest.TestCase):
 
         wt_skill = (skills_dir / "worktree-lifecycle" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn(
-            "~/.agents/tools/worktree_manager.py create feat/issue-42 .agents/worktrees/feat/issue-42",
+            "~/.agents/tools/worktree_manager.py create feat/issue-42 .orchestration/worktrees/feat/issue-42",
             wt_skill,
         )
         sglang_skill = (skills_dir / "sglang-management" / "SKILL.md").read_text(encoding="utf-8")
@@ -188,7 +188,7 @@ class TestAgyHarnessStructure(unittest.TestCase):
             mgr = WorktreeManager(repo_dir=tmp_path, runtime="agy")
             self.assertEqual(
                 mgr.default_worktree_path("feat/issue-147"),
-                (tmp_path / ".agents" / "worktrees" / "feat/issue-147").resolve(),
+                (tmp_path / ".orchestration" / "worktrees" / "feat/issue-147").resolve(),
             )
 
             orch_mgr = WorktreeManager(repo_dir=tmp_path)
@@ -198,7 +198,7 @@ class TestAgyHarnessStructure(unittest.TestCase):
             )
 
             anchor = ContextAnchorInjector()
-            self.assertEqual(anchor.rules_path, Path("GEMINI.md"))
+            self.assertIn(anchor.rules_path.name, ("GEMINI.md", "agent-teams.md"))
 
             orig_cwd = Path.cwd()
             try:

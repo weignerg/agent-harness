@@ -705,6 +705,73 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ATTENTION: INSTALLATION INCOMPLETE - MANUAL INTERVENTION REQUIRED", proc.stdout)
             self.assertIn("sudo ufw allow 4096/tcp comment OpenCode Server", proc.stdout)
 
+    def test_issue7_grandma_proof_terminal_box_and_password(self):
+        """Test Issue #7: Grandma-proof UX, automatic password generation (0600), and terminal box."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--non-interactive",
+                env=env,
+            )
+
+            # 1. Verify env file exists with mode 0600
+            env_file = sandbox / ".config" / "opencode-backends" / "env"
+            self.assertTrue(env_file.is_file())
+            self.assertEqual(oct(env_file.stat().st_mode)[-3:], "600")
+
+            # 2. Verify 16-character alphanumeric password
+            content = env_file.read_text(encoding="utf-8")
+            pass_line = [line for line in content.splitlines() if line.startswith("OPENCODE_SERVER_PASSWORD=")]
+            self.assertTrue(len(pass_line) == 1)
+            gen_pass = pass_line[0].split("=")[1]
+            self.assertEqual(len(gen_pass), 16)
+            self.assertTrue(gen_pass.isalnum())
+
+            # 3. Verify Grandma-Proof terminal box
+            self.assertIn("IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL", proc.stdout)
+            self.assertIn("opencode", proc.stdout)
+
+            # 4. Verify password displayed in summary
+            self.assertIn(f"password: {gen_pass} (auto-generated)", proc.stdout)
+
+    def test_issue7_download_models_flags(self):
+        """Test Issue #7: --download-models and --no-download-models flags."""
+        proc_dl = self.run_installer("--dry-run", "--target", "opencode", "--download-models")
+        self.assertEqual(proc_dl.returncode, 0)
+        self.assertIn("Download Opt  : true", proc_dl.stdout)
+        self.assertIn("Would verify model weights", proc_dl.stdout)
+
+        proc_nodl = self.run_installer("--dry-run", "--target", "opencode", "--no-download-models")
+        self.assertEqual(proc_nodl.returncode, 0)
+        self.assertIn("Download Opt  : false", proc_nodl.stdout)
+        self.assertIn("Would verify model weights", proc_nodl.stdout)
+
+    def test_issue7_default_firewall_flag(self):
+        """Test Issue #7: Default firewall enabled and --no-firewall bypass."""
+        proc_def = self.run_installer("--dry-run", "--target", "opencode")
+        self.assertEqual(proc_def.returncode, 0)
+        self.assertIn("Applying UFW firewall rules", proc_def.stdout)
+
+        proc_nofw = self.run_installer("--dry-run", "--target", "opencode", "--no-firewall")
+        self.assertEqual(proc_nofw.returncode, 0)
+        self.assertIn("Firewall rule management skipped (--no-firewall", proc_nofw.stdout)
+
+    def test_issue7_healthcheck_bypass_flags(self):
+        """Test Issue #7: --healthcheck and --no-healthcheck flags."""
+        proc_skip = self.run_installer("--dry-run", "--target", "opencode", "--skip-healthcheck")
+        self.assertEqual(proc_skip.returncode, 0)
+        self.assertIn("Backend healthchecks skipped (--no-healthcheck)", proc_skip.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
+

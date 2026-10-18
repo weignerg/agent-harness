@@ -303,7 +303,88 @@ else
     echo "  ⏭️  SKIP: opencode binary not installed"
 fi
 
+# --- Test 19: Verify Issue #7 CLI flags in install.sh --help -----------------
+echo "[Test 19] Verifying Issue #7 CLI flags in install.sh --help..."
+HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
+if echo "$HELP_OUT" | grep -q -- "--download-models" && \
+   echo "$HELP_OUT" | grep -q -- "--no-download-models" && \
+   echo "$HELP_OUT" | grep -q -- "--firewall" && \
+   echo "$HELP_OUT" | grep -q -- "--no-firewall" && \
+   echo "$HELP_OUT" | grep -q -- "--healthcheck" && \
+   echo "$HELP_OUT" | grep -q -- "--skip-healthcheck"; then
+    pass "install.sh document flags: --download-models, --firewall, --healthcheck"
+else
+    fail "install.sh --help missing one or more Issue #7 CLI flags"
+fi
+
+# --- Test 20: Verify Default Firewall is enabled by default -------------------
+echo "[Test 20] Verifying Default Firewall enabled by default..."
+FIREWALL_DEFAULT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode)"
+if echo "$FIREWALL_DEFAULT" | grep -q "Applying UFW firewall rules" || echo "$FIREWALL_DEFAULT" | grep -q "sudo ufw allow 4096/tcp comment OpenCode Server"; then
+    pass "Firewall rules enabled by default in install.sh"
+else
+    fail "Firewall rules not enabled by default in install.sh"
+fi
+
+NO_FIREWALL_OUT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode --no-firewall)"
+if echo "$NO_FIREWALL_OUT" | grep -q "Firewall rule management skipped (--no-firewall)"; then
+    pass "--no-firewall flag correctly disables firewall rules"
+else
+    fail "--no-firewall did not skip firewall rules"
+fi
+
+# --- Test 21: Verify Model Acquisition Verification Flags ---------------------
+echo "[Test 21] Verifying model acquisition verification flags..."
+DL_OUT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode --download-models)"
+if echo "$DL_OUT" | grep -q "Download Opt  : true" && echo "$DL_OUT" | grep -q "Would verify model weights"; then
+    pass "--download-models sets download option to true in dry-run"
+else
+    fail "--download-models flag failed to activate download option"
+fi
+
+NODL_OUT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode --no-download-models)"
+if echo "$NODL_OUT" | grep -q "Download Opt  : false" && echo "$NODL_OUT" | grep -q "Would verify model weights"; then
+    pass "--no-download-models sets download option to false in dry-run"
+else
+    fail "--no-download-models flag failed to set download option to false"
+fi
+
+# --- Test 22: Verify Grandma-Proof UX, Password Generation & Terminal Box -----
+echo "[Test 22] Verifying Grandma-Proof post-install UX and automatic password generation..."
+SANDBOX_GP="$(mktemp -d /tmp/installer-test-grandma-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}"' EXIT
+
+GP_OUT="$(HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
+
+# 1. Verify 16-character password auto-generated in env file
+if [ -f "${SANDBOX_GP}/.config/opencode-backends/env" ]; then
+    GEN_PASS="$(grep '^OPENCODE_SERVER_PASSWORD=' "${SANDBOX_GP}/.config/opencode-backends/env" | cut -d'=' -f2)"
+    if [ ${#GEN_PASS} -eq 16 ]; then
+        pass "Auto-generated server password is exactly 16 characters"
+    else
+        fail "Auto-generated password length is ${#GEN_PASS}, expected 16"
+    fi
+else
+    fail "Backend env file not created in sandbox"
+fi
+
+# 2. Verify Immediate Next Step terminal box
+if echo "$GP_OUT" | grep -q "IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL" && \
+   echo "$GP_OUT" | grep -q "opencode"; then
+    pass "Immediate Next Step terminal box rendered with 'opencode' command"
+else
+    fail "Immediate Next Step terminal box missing from installer output"
+fi
+
+# 3. Verify auto-generated password is surfaced to user in summary
+if echo "$GP_OUT" | grep -q "password: ${GEN_PASS} (auto-generated)"; then
+    pass "Auto-generated password surfaced in Grandma-Proof summary box"
+else
+    fail "Auto-generated password not surfaced in Grandma-Proof summary"
+fi
+
 echo "================================================================================"
 echo "📊 TEST RESULTS: ${TESTS_PASSED} Passed, ${TESTS_FAILED} Failed"
 echo "================================================================================"
 [ "$TESTS_FAILED" -eq 0 ]
+

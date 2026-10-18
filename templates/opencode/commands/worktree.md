@@ -9,4 +9,4 @@ Manage git worktrees for isolated task branching and execution:
 python3 ~/.config/opencode/tools/worktree_manager.py $ARGUMENTS
 ```
 
-Verify that the worktree directory is ready and isolated from the main working copy.
+Worktrees strictly reside in `.orchestration/worktrees/<branch>`. Verify that the worktree directory is ready and isolated from the main working copy.

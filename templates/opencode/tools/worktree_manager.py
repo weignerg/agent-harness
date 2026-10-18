@@ -55,22 +55,17 @@ class WorktreeManager:
             return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
         if target_runtime == "opencode":
             return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
-        if target_runtime == "agy":
-            return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
-        if target_runtime == "orchestration":
-            return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
 
-        # Priority 1 for unified agent-harness: check if .orchestration exists
-        if (self.repo_dir / ".orchestration").is_dir():
-            return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
-        if (self.repo_dir / ".agents").is_dir():
-            return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
-        if (self.repo_dir / ".claude").is_dir() or (self.repo_dir / "files" / ".claude").is_dir():
-            return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
-        if (self.repo_dir / ".opencode").is_dir():
-            return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
+        # Authoritative Directive: worktrees strictly reside in .orchestration/worktrees/
+        # Legacy defaults eliminated; strictly enforce .orchestration/worktrees/
+        try:
+            from harness.paths import resolve_true_repo_root
+            true_repo = resolve_true_repo_root(self.repo_dir) or self.repo_dir
+            if (true_repo / ".orchestration").is_dir():
+                return (true_repo / ".orchestration" / "worktrees" / branch_name).resolve()
+        except ImportError:
+            pass
 
-        # Canonical Priority 1 default fallback for unified agent-harness: .orchestration/worktrees/<branch>
         return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
 
     def provision_worktree(self, branch_name: str, target_dir: Optional[Path | str] = None, runtime: Optional[str] = None) -> Path:

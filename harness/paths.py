@@ -173,3 +173,14 @@ def resolve_authoritative_orchestration_root(start_path: Optional[Union[Path, st
         return parsed_global
 
     return (Path.home() / ".orchestration").resolve()
+
+
+def resolve_canonical_worktree_dir(start_path: Optional[Union[Path, str]] = None) -> Path:
+    """Resolve the canonical worktree directory strictly under <authoritative_orchestration_root>/worktrees."""
+    orch_root = resolve_authoritative_orchestration_root(start_path)
+    return (orch_root / "worktrees").resolve()
+
+
+def resolve_worktree_path(branch_name: str, start_path: Optional[Union[Path, str]] = None) -> Path:
+    """Resolve the canonical worktree path for a branch strictly under <authoritative_orchestration_root>/worktrees/<branch_name>."""
+    return (resolve_canonical_worktree_dir(start_path) / branch_name).resolve()
