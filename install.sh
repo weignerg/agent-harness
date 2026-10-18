@@ -606,7 +606,7 @@ install_agy_global() {
         fi
     fi
 
-    python3 - "$mcp_config" "$canonical_repo" "$py_bin" <<'PYEOF'
+    python3 - "$mcp_config" "$canonical_repo" "$py_bin" "$orch_dest" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
@@ -614,6 +614,7 @@ from pathlib import Path
 mcp_path = Path(sys.argv[1])
 repo_dir = sys.argv[2]
 py_bin = sys.argv[3]
+orch_dest = sys.argv[4]
 
 data = {}
 if mcp_path.is_file():
@@ -629,12 +630,12 @@ servers = data.setdefault("mcpServers", {})
 servers["vault-memory"] = {
     "command": py_bin,
     "args": ["-m", "harness.mcp.vault_server"],
-    "env": {"PYTHONPATH": repo_dir},
+    "env": {"PYTHONPATH": repo_dir, "ORCHESTRATION_ROOT": orch_dest},
 }
 servers["worktree-manager"] = {
     "command": py_bin,
     "args": ["-m", "harness.mcp.worktree_server"],
-    "env": {"PYTHONPATH": repo_dir},
+    "env": {"PYTHONPATH": repo_dir, "ORCHESTRATION_ROOT": orch_dest},
 }
 
 mcp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -840,6 +841,8 @@ OPENCODE_SERVER_USERNAME=${OPENCODE_SERVER_USERNAME:-}
 OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:-}
 OPENCODE_SERVER_PORT=4096
 OPENCODE_SERVER_HOST=0.0.0.0
+# Authoritative Orchestration Root
+ORCHESTRATION_ROOT=${USER_HOME}/.orchestration
 # Cloud API Fallback Keys
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -862,6 +865,11 @@ EOF
                 printf '%s=\n' "$fallback_var" >> "${backend_env_dir}/env"
             fi
         done
+        if grep -sq "^ORCHESTRATION_ROOT=" "${backend_env_dir}/env"; then
+            sed -i "s|^ORCHESTRATION_ROOT=.*|ORCHESTRATION_ROOT=${USER_HOME}/.orchestration|" "${backend_env_dir}/env"
+        else
+            printf 'ORCHESTRATION_ROOT=%s\n' "${USER_HOME}/.orchestration" >> "${backend_env_dir}/env"
+        fi
         chmod 0600 "${backend_env_dir}/env"
     fi
 
@@ -879,6 +887,22 @@ EOF
     cp -rf "${opencode_tmpl}/plugins/"* "${opencode_dest}/plugins/"
     cp -rf "${opencode_tmpl}/themes/"* "${opencode_dest}/themes/"
     cp -f "${opencode_tmpl}/opencode.json" "${opencode_dest}/opencode.json"
+    python3 - "${opencode_dest}/opencode.json" "${USER_HOME}/.orchestration" <<'PYEOF'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+orch = sys.argv[2]
+if p.is_file():
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        mcp = data.setdefault("mcp", {})
+        for name in ("vault-memory", "worktree-manager"):
+            if name in mcp:
+                mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
+        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+PYEOF
     cp -f "${opencode_tmpl}/tui.json" "${opencode_dest}/tui.json"
     cp -f "${opencode_tmpl}/AGENTS.md" "${opencode_dest}/AGENTS.md"
 
@@ -941,7 +965,7 @@ install_agy_local() {
     fi
     ln -sfn .orchestration "${dest_agents}"
 
-    ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/"
+    ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
     echo "  ✅ Installed Antigravity operational assets to ${dest_orch}/ and linked ${dest_agents}"
 }
 
@@ -983,7 +1007,7 @@ install_claude_local() {
         --template-settings "${claude_tmpl}/settings/core.json" \
         --output "${dest_claude}/settings.json"
 
-    ensure_gitignore_entries "${repo_path}/.gitignore" ".claude/"
+    ensure_gitignore_entries "${repo_path}/.gitignore" ".claude/" ".orchestration_root"
     echo "  ✅ Installed Claude Code local configuration to ${dest_claude}/"
 }
 
@@ -1015,6 +1039,22 @@ install_opencode_local() {
     cp -rf "${opencode_tmpl}/plugins/"* "${dest_opencode}/plugins/"
     cp -rf "${opencode_tmpl}/themes/"* "${dest_opencode}/themes/"
     cp -f "${opencode_tmpl}/opencode.json" "${dest_opencode}/opencode.json"
+    python3 - "${dest_opencode}/opencode.json" "${repo_path}/.orchestration" <<'PYEOF'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+orch = sys.argv[2]
+if p.is_file():
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        mcp = data.setdefault("mcp", {})
+        for name in ("vault-memory", "worktree-manager"):
+            if name in mcp:
+                mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
+        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+PYEOF
     cp -f "${opencode_tmpl}/tui.json" "${dest_opencode}/tui.json"
     cp -f "${opencode_tmpl}/AGENTS.md" "${dest_opencode}/AGENTS.md"
 
@@ -1022,7 +1062,7 @@ install_opencode_local() {
         deploy_opencode_backend_and_units "${SYSTEMD_USER_DIR}" "${BACKEND_DIR}"
     fi
 
-    ensure_gitignore_entries "${repo_path}/.gitignore" ".opencode/"
+    ensure_gitignore_entries "${repo_path}/.gitignore" ".opencode/" ".orchestration_root"
     echo "  ✅ Installed OpenCode 10-component hierarchy to ${dest_opencode}/"
 }
 
@@ -1038,7 +1078,7 @@ install_all_local() {
     install_agy_local
     install_claude_local
     install_opencode_local
-    ensure_gitignore_entries "${TARGET_REPO}/.gitignore" ".agents/" ".claude/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/"
+    ensure_gitignore_entries "${TARGET_REPO}/.gitignore" ".agents/" ".claude/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
 }
 
 # --- ACTION EXECUTORS ---------------------------------------------------------
@@ -1051,6 +1091,21 @@ run_install() {
 
     if [ "$MODE" = "local" ]; then
         manifest_file="${TARGET_REPO}/.orchestration/install_manifest.json"
+        if [ "$DRY_RUN" = true ]; then
+            echo "  [DRY-RUN] Would write ${TARGET_REPO}/.orchestration_root and ${TARGET_REPO}/.orchestration/.orchestration_root"
+        else
+            mkdir -p "${TARGET_REPO}/.orchestration"
+            cat << EOF > "${TARGET_REPO}/.orchestration_root"
+mode=local
+root=${TARGET_REPO}/.orchestration
+EOF
+            cat << EOF > "${TARGET_REPO}/.orchestration/.orchestration_root"
+mode=local
+root=${TARGET_REPO}/.orchestration
+EOF
+        fi
+        recorded_files+=("${TARGET_REPO}/.orchestration_root")
+        ensure_gitignore_entries "${TARGET_REPO}/.gitignore" ".orchestration_root"
         case "$TARGET" in
             agy|antigravity|gemini)
                 install_agy_local
@@ -1109,6 +1164,15 @@ run_install() {
         echo "🎉 Local Agent Harness installation complete!"
     else
         manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
+        if [ "$DRY_RUN" = true ]; then
+            echo "  [DRY-RUN] Would write ${USER_HOME}/.orchestration/.orchestration_root"
+        else
+            mkdir -p "${USER_HOME}/.orchestration"
+            cat << EOF > "${USER_HOME}/.orchestration/.orchestration_root"
+mode=global
+root=${USER_HOME}/.orchestration
+EOF
+        fi
         case "$TARGET" in
             agy|antigravity|gemini)
                 install_agy_global
@@ -1265,6 +1329,9 @@ run_uninstall() {
                 fi
             fi
 
+            # Clean anchor file
+            rm -f "${USER_HOME}/.orchestration/.orchestration_root"
+
             # Safely clean empty directories without wiping user modifications
             for d in "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${GEMINI_CONFIG_DIR}/plugins/agy-harness" "${USER_HOME}/.orchestration" "${AGENTS_HOME_DIR}" "${CLAUDE_HOME_DIR}" "${OPENCODE_HOME_DIR}"; do
                 if [ -d "$d" ]; then
@@ -1282,6 +1349,9 @@ run_uninstall() {
         fi
     else
         if [ "$DRY_RUN" = false ]; then
+            # Clean anchor files
+            rm -f "${TARGET_REPO}/.orchestration_root" "${TARGET_REPO}/.orchestration/.orchestration_root"
+
             # Only remove .agents if it is a symlink
             if [ -L "${TARGET_REPO}/.agents" ]; then
                 rm -f "${TARGET_REPO}/.agents"

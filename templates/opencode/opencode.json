@@ -56,6 +56,9 @@
         "-c",
         "PY=\"${HOME}/.local/share/opencode-sglang-stack/venv/bin/python\"; if [ ! -x \"$PY\" ]; then PY=\"python3\"; fi; exec \"$PY\" -m harness.mcp.vault_server"
       ],
+      "environment": {
+        "ORCHESTRATION_ROOT": "{env:ORCHESTRATION_ROOT}"
+      },
       "enabled": true
     },
     "worktree-manager": {
@@ -65,6 +68,9 @@
         "-c",
         "PY=\"${HOME}/.local/share/opencode-sglang-stack/venv/bin/python\"; if [ ! -x \"$PY\" ]; then PY=\"python3\"; fi; exec \"$PY\" -m harness.mcp.worktree_server"
       ],
+      "environment": {
+        "ORCHESTRATION_ROOT": "{env:ORCHESTRATION_ROOT}"
+      },
       "enabled": true
     }
   },
