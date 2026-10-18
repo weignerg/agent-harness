@@ -21,7 +21,7 @@ AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
 CLAUDE_HOME_DIR="${CLAUDE_HOME_DIR:-${USER_HOME}/.claude}"
 OPENCODE_HOME_DIR="${OPENCODE_HOME_DIR:-${USER_HOME}/.config/opencode}"
 BACKEND_DIR="${USER_HOME}/.config/opencode-backends"
-SYSTEMD_USER_DIR="${USER_HOME}/.config/systemd/user"
+SYSTEMD_USER_DIR="${SYSTEMD_USER_DIR:-${USER_HOME}/.config/systemd/user}"
 SGLANG_STACK_DIR="${USER_HOME}/.local/share/opencode-sglang-stack"
 
 MODE="global"
@@ -113,8 +113,13 @@ if [ "$MODE" = "global" ]; then
 
     # Clean harness systemd user units
     if [ -d "${SYSTEMD_USER_DIR}" ]; then
-        for u in "${SYSTEMD_USER_DIR}"/opencode-sglang-*.service "${SYSTEMD_USER_DIR}"/opencode-server.service; do
+        for u in "${SYSTEMD_USER_DIR}"/opencode-*.service "${SYSTEMD_USER_DIR}"/opencode-*.timer "${SYSTEMD_USER_DIR}"/opencode-*.slice; do
             if [ -f "$u" ]; then
+                unit_name="$(basename "$u")"
+                if command -v systemctl >/dev/null 2>&1; then
+                    systemctl --user stop "$unit_name" 2>/dev/null || true
+                    systemctl --user disable "$unit_name" 2>/dev/null || true
+                fi
                 rm -f "$u"
             fi
         done
@@ -127,9 +132,12 @@ if [ "$MODE" = "global" ]; then
     [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
     [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
 
-    # Safely restore pre-existing settings if backup exists
+    # Safely restore pre-existing settings and agents if backup exists
     if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
         mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
+    fi
+    if [ -d "${AGENTS_HOME_DIR}.pre-harness.bak" ] && [ ! -e "${AGENTS_HOME_DIR}" ]; then
+        mv -f "${AGENTS_HOME_DIR}.pre-harness.bak" "${AGENTS_HOME_DIR}"
     fi
 
     # Safely clean empty directories without wiping user modifications

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -264,6 +265,12 @@ class ManifestEngine:
             current_hash = compute_sha256(p)
             if current_hash == f_entry["sha256"] or force:
                 if not dry_run:
+                    if p.suffix in (".service", ".timer", ".slice") or p.name.startswith("opencode-"):
+                        try:
+                            subprocess.run(["systemctl", "--user", "stop", p.name], capture_output=True, check=False)
+                            subprocess.run(["systemctl", "--user", "disable", p.name], capture_output=True, check=False)
+                        except Exception:
+                            pass
                     try:
                         p.unlink()
                     except OSError:
@@ -296,7 +303,14 @@ class ManifestEngine:
                 else:
                     removed_directories.append(d_path)
 
-        # 4. Remove manifest file if clean
+        # 4. Reload systemd daemon if units were removed
+        if not dry_run and any(Path(f).suffix in (".service", ".timer", ".slice") for f in removed_files):
+            try:
+                subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, check=False)
+            except Exception:
+                pass
+
+        # 5. Remove manifest file if clean
         if not dry_run and len(preserved_files) == 0:
             if self.manifest_path.is_file():
                 try:
@@ -340,6 +354,7 @@ def _run_cli() -> None:
     record_p.add_argument("--mode", default="global", help="Mode: global or local")
     record_p.add_argument("--roots", nargs="*", default=[], help="Root directories to scan and record")
     record_p.add_argument("--symlinks", nargs="*", default=[], help="Symlinks in format <link_path>:<target_path>")
+    record_p.add_argument("--files", nargs="*", default=[], help="Individual files to record")
 
     args = parser.parse_args()
 
@@ -413,6 +428,10 @@ def _run_cli() -> None:
             if ":" in s:
                 link_p, target_p = s.split(":", 1)
                 engine.record_symlink(link_p, target_p)
+        for f in args.files:
+            p = Path(f).resolve()
+            if p.is_file():
+                engine.record_file(p)
         engine.save(target=args.target, mode=args.mode)
         print(f"  ✅ Manifest saved to {m_path} ({len(engine.manifest.files)} files recorded)")
         sys.exit(0)
