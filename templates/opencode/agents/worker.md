@@ -7,10 +7,10 @@ permission:
   edit: allow
   write: allow
   bash:
+    "*": allow
     "gh pr merge*": ask
     "git push --force*": ask
     "git push * --force*": ask
-    "*": allow
   task: allow
 ---
 

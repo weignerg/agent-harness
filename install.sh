@@ -34,6 +34,18 @@ ORIGINAL_INVOCATION="${ORIGINAL_CMD}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
+resolve_canonical_repo_dir() {
+    local canonical_repo="$SCRIPT_DIR"
+    if git -C "$SCRIPT_DIR" rev-parse --git-common-dir >/dev/null 2>&1; then
+        local common_git
+        common_git="$(cd "$SCRIPT_DIR" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+        if [[ "$(basename "$common_git")" == ".git" ]]; then
+            canonical_repo="$(dirname "$common_git")"
+        fi
+    fi
+    printf '%s' "$canonical_repo"
+}
+
 USER_HOME="${USER_HOME:-${HOME}}"
 GEMINI_CONFIG_DIR="${GEMINI_CONFIG_DIR:-${USER_HOME}/.gemini/config}"
 AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
@@ -655,14 +667,7 @@ install_agy_global() {
         py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
     fi
 
-    local canonical_repo="$SCRIPT_DIR"
-    if git -C "$SCRIPT_DIR" rev-parse --git-common-dir >/dev/null 2>&1; then
-        local common_git
-        common_git="$(cd "$SCRIPT_DIR" && cd "$(git rev-parse --git-common-dir)" && pwd)"
-        if [[ "$(basename "$common_git")" == ".git" ]]; then
-            canonical_repo="$(dirname "$common_git")"
-        fi
-    fi
+    local canonical_repo="$(resolve_canonical_repo_dir)"
 
     python3 - "$mcp_config" "$canonical_repo" "$py_bin" "$orch_dest" <<'PYEOF'
 import json
@@ -863,11 +868,12 @@ EOF
         chmod 0600 "$env_file"
     fi
 
+    local canonical_repo="$(resolve_canonical_repo_dir)"
     for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
         if [ -d "$venv_candidate" ]; then
             for sp in "${venv_candidate}"/lib/python*/site-packages; do
                 if [ -d "$sp" ]; then
-                    printf '%s\n' "${SCRIPT_DIR}" > "${sp}/agent_harness.pth"
+                    printf '%s\n' "${canonical_repo}" > "${sp}/agent_harness.pth"
                     echo "  🔗 Linked agent-harness into SGLang venv: ${sp}/agent_harness.pth"
                 fi
             done
@@ -1399,7 +1405,7 @@ verify_backend_healthchecks() {
     local failure_reasons=()
 
     # 1. Start / enable units if systemctl is available
-    if command -v systemctl >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
@@ -1618,11 +1624,12 @@ deploy_opencode_backend_and_units() {
         echo "  ✅ SGLang backend venv verified at ${STACK_DIR}/venv"
     fi
 
+    local canonical_repo="$(resolve_canonical_repo_dir)"
     for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
         if [ -d "$venv_candidate" ]; then
             for sp in "${venv_candidate}"/lib/python*/site-packages; do
                 if [ -d "$sp" ]; then
-                    printf '%s\n' "${SCRIPT_DIR}" > "${sp}/agent_harness.pth"
+                    printf '%s\n' "${canonical_repo}" > "${sp}/agent_harness.pth"
                     echo "  🔗 Linked agent-harness into SGLang venv: ${sp}/agent_harness.pth"
                 fi
             done
@@ -1820,7 +1827,7 @@ with open(path, 'w') as f:
     fi
 
     # 5. Reload systemd daemon if available
-    if command -v systemctl >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
         systemctl --user daemon-reload 2>/dev/null || true
     fi
     echo "  ✅ Deployed systemd user units to ${systemd_dest}/"
@@ -1873,20 +1880,26 @@ install_opencode_global() {
     cp -rf "${opencode_tmpl}/themes/"* "${opencode_dest}/themes/"
     cp -rf "${opencode_tmpl}/orchestration/"* "${opencode_dest}/orchestration/"
     cp -f "${opencode_tmpl}/opencode.json" "${opencode_dest}/opencode.json"
-    python3 - "${opencode_dest}/opencode.json" "${USER_HOME}/.orchestration" "${opencode_dest}" <<'PYEOF'
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    python3 - "${opencode_dest}/opencode.json" "${USER_HOME}/.orchestration" "${opencode_dest}" "${canonical_repo}" <<'PYEOF'
 import json, sys
 from pathlib import Path
 p = Path(sys.argv[1])
 orch = sys.argv[2]
 dest = sys.argv[3]
+repo = sys.argv[4] if len(sys.argv) > 4 else ""
 if p.is_file():
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         mcp = data.setdefault("mcp", {})
         for name in ("vault-memory", "worktree-manager"):
             if name in mcp:
-                mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
+                env = mcp[name].setdefault("environment", {})
+                env["ORCHESTRATION_ROOT"] = orch
+                if repo:
+                    env["PYTHONPATH"] = repo
         data["instructions"] = [f"{dest}/AGENTS.md", f"{dest}/rules/*.md"]
+        data["default_agent"] = "supreme-orchestrator"
         p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass
@@ -2029,18 +2042,27 @@ install_opencode_local() {
     cp -rf "${opencode_tmpl}/themes/"* "${dest_opencode}/themes/"
     cp -rf "${opencode_tmpl}/orchestration/"* "${dest_opencode}/orchestration/"
     cp -f "${opencode_tmpl}/opencode.json" "${dest_opencode}/opencode.json"
-    python3 - "${dest_opencode}/opencode.json" "${repo_path}/.orchestration" <<'PYEOF'
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    python3 - "${dest_opencode}/opencode.json" "${repo_path}/.orchestration" "${dest_opencode}" "${canonical_repo}" <<'PYEOF'
 import json, sys
 from pathlib import Path
 p = Path(sys.argv[1])
 orch = sys.argv[2]
+dest = sys.argv[3] if len(sys.argv) > 3 else ""
+repo = sys.argv[4] if len(sys.argv) > 4 else ""
 if p.is_file():
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         mcp = data.setdefault("mcp", {})
         for name in ("vault-memory", "worktree-manager"):
             if name in mcp:
-                mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
+                env = mcp[name].setdefault("environment", {})
+                env["ORCHESTRATION_ROOT"] = orch
+                if repo:
+                    env["PYTHONPATH"] = repo
+        if dest:
+            data["instructions"] = [f"{dest}/AGENTS.md", f"{dest}/rules/*.md"]
+        data["default_agent"] = "supreme-orchestrator"
         p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass
@@ -2295,14 +2317,14 @@ run_uninstall() {
                 for u in "${systemd_user_dir}"/opencode-*.service "${systemd_user_dir}"/opencode-*.timer "${systemd_user_dir}"/opencode-*.slice; do
                     if [ -f "$u" ]; then
                         local unit_name="$(basename "$u")"
-                        if command -v systemctl >/dev/null 2>&1; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
                             systemctl --user stop "$unit_name" 2>/dev/null || true
                             systemctl --user disable "$unit_name" 2>/dev/null || true
                         fi
                         rm -f "$u"
                     fi
                 done
-                if command -v systemctl >/dev/null 2>&1; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
                     systemctl --user daemon-reload 2>/dev/null || true
                 fi
             fi
