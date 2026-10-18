@@ -303,7 +303,327 @@ else
     echo "  ⏭️  SKIP: opencode binary not installed"
 fi
 
+# --- Test 19: Verify Issue #7 CLI flags in install.sh --help -----------------
+echo "[Test 19] Verifying Issue #7 CLI flags in install.sh --help..."
+HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
+if echo "$HELP_OUT" | grep -q -- "--download-models" && \
+   echo "$HELP_OUT" | grep -q -- "--no-download-models" && \
+   echo "$HELP_OUT" | grep -q -- "--firewall" && \
+   echo "$HELP_OUT" | grep -q -- "--no-firewall" && \
+   echo "$HELP_OUT" | grep -q -- "--healthcheck" && \
+   echo "$HELP_OUT" | grep -q -- "--skip-healthcheck"; then
+    pass "install.sh document flags: --download-models, --firewall, --healthcheck"
+else
+    fail "install.sh --help missing one or more Issue #7 CLI flags"
+fi
+
+# --- Test 20: Verify Default Firewall is enabled by default -------------------
+echo "[Test 20] Verifying Default Firewall enabled by default..."
+FIREWALL_DEFAULT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode)"
+if echo "$FIREWALL_DEFAULT" | grep -q "Applying UFW firewall rules" || echo "$FIREWALL_DEFAULT" | grep -q "sudo ufw allow 4096/tcp comment OpenCode Server"; then
+    pass "Firewall rules enabled by default in install.sh"
+else
+    fail "Firewall rules not enabled by default in install.sh"
+fi
+
+NO_FIREWALL_OUT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode --no-firewall)"
+if echo "$NO_FIREWALL_OUT" | grep -q "Firewall rule management skipped (--no-firewall)"; then
+    pass "--no-firewall flag correctly disables firewall rules"
+else
+    fail "--no-firewall did not skip firewall rules"
+fi
+
+# --- Test 21: Verify Model Acquisition Verification Flags ---------------------
+echo "[Test 21] Verifying model acquisition verification flags..."
+DL_OUT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode --download-models)"
+if echo "$DL_OUT" | grep -q "Download Opt  : true" && echo "$DL_OUT" | grep -q "Would verify model weights"; then
+    pass "--download-models sets download option to true in dry-run"
+else
+    fail "--download-models flag failed to activate download option"
+fi
+
+NODL_OUT="$("${INSTALL_SCRIPT}" --dry-run --target=opencode --no-download-models)"
+if echo "$NODL_OUT" | grep -q "Download Opt  : false" && echo "$NODL_OUT" | grep -q "Would verify model weights"; then
+    pass "--no-download-models sets download option to false in dry-run"
+else
+    fail "--no-download-models flag failed to set download option to false"
+fi
+
+# --- Test 22: Verify Post-Install Summary, Password Generation & Terminal Box -----
+echo "[Test 22] Verifying post-install summary UX and automatic password generation..."
+SANDBOX_GP="$(mktemp -d /tmp/installer-test-summary-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}"' EXIT
+
+GP_OUT="$(HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
+
+# 1. Verify 16-character password auto-generated in env file
+if [ -f "${SANDBOX_GP}/.config/opencode-backends/env" ]; then
+    GEN_PASS="$(grep '^OPENCODE_SERVER_PASSWORD=' "${SANDBOX_GP}/.config/opencode-backends/env" | cut -d'=' -f2)"
+    if [ ${#GEN_PASS} -eq 16 ]; then
+        pass "Auto-generated server password is exactly 16 characters"
+    else
+        fail "Auto-generated password length is ${#GEN_PASS}, expected 16"
+    fi
+else
+    fail "Backend env file not created in sandbox"
+fi
+
+# 2. Verify Immediate Next Step terminal box
+if echo "$GP_OUT" | grep -q "IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL" && \
+   echo "$GP_OUT" | grep -q "opencode"; then
+    pass "Immediate Next Step terminal box rendered with 'opencode' command"
+else
+    fail "Immediate Next Step terminal box missing from installer output"
+fi
+
+# 3. Verify auto-generated password is surfaced to user in summary
+if echo "$GP_OUT" | grep -q "password: ${GEN_PASS} (auto-generated)"; then
+    pass "Auto-generated password surfaced in completion summary box"
+else
+    fail "Auto-generated password not surfaced in completion summary"
+fi
+
+# --- Test 23: Verify SGLang venv auto-healing with local repository -----------
+echo "[Test 23] Verifying SGLang venv auto-healing with local repository..."
+SANDBOX_HEAL="$(mktemp -d /tmp/installer-test-heal-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}"' EXIT
+
+# Prepare mock local sglang repository in candidate path
+MOCK_SGLANG_REPO="${SANDBOX_HEAL}/git/sglang/python"
+mkdir -p "${MOCK_SGLANG_REPO}"
+touch "${MOCK_SGLANG_REPO}/pyproject.toml"
+
+# Prepare mock venv with python3 that simulates broken sglang import initially
+MOCK_STACK="${SANDBOX_HEAL}/.local/share/opencode-sglang-stack"
+mkdir -p "${MOCK_STACK}/venv/bin"
+cat << 'EOF' > "${MOCK_STACK}/venv/bin/python3"
+#!/bin/sh
+STATE_FILE="$(dirname "$0")/sglang_state"
+if [ "$1" = "-c" ] && [ "$2" = "import sglang" ]; then
+    if [ -f "$STATE_FILE" ]; then
+        exit 0
+    else
+        echo "ModuleNotFoundError: No module named 'sglang'" >&2
+        exit 1
+    fi
+elif [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+    touch "$STATE_FILE"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_STACK}/venv/bin/python3"
+
+HEAL_OUT="$(USER_HOME="${SANDBOX_HEAL}" HOME="${SANDBOX_HEAL}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
+if echo "$HEAL_OUT" | grep -q "sglang import check failed" && \
+   echo "$HEAL_OUT" | grep -q "Successfully auto-healed sglang via editable install"; then
+    pass "SGLang venv auto-healed via local candidate repository"
+else
+    fail "SGLang venv auto-heal failed"
+fi
+
+# --- Test 24: Verify Minimal NVIDIA Driver Mismatch Reboot Box ----------------
+echo "[Test 24] Verifying Minimal NVIDIA Driver Mismatch Reboot Box..."
+SANDBOX_NV="$(mktemp -d /tmp/installer-test-nv-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}"' EXIT
+
+MOCK_NV_BIN="${SANDBOX_NV}/bin"
+mkdir -p "${MOCK_NV_BIN}"
+cat << 'EOF' > "${MOCK_NV_BIN}/nvidia-smi"
+#!/bin/sh
+echo "Failed to initialize NVML: Driver/library version mismatch" >&2
+exit 18
+EOF
+chmod 0755 "${MOCK_NV_BIN}/nvidia-smi"
+
+NV_OUT="$(PATH="${MOCK_NV_BIN}:${PATH}" COLBERT_TIMER_RETRIES=1 OPENCODE_SERVER_RETRIES=1 SGLANG_HEALTHCHECK_RETRIES=1 USER_HOME="${SANDBOX_NV}" HOME="${SANDBOX_NV}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+if echo "$NV_OUT" | grep -q "REBOOT REQUIRED: NVIDIA DRIVER UPGRADE DETECTED" && \
+   echo "$NV_OUT" | grep -q "sudo reboot" && \
+   echo "$NV_OUT" | grep -q "After reboot, resume installation with:" && \
+   echo "$NV_OUT" | grep -q "install.sh" && \
+   ! echo "$NV_OUT" | grep -q "Kernel Module Version:" && \
+   ! echo "$NV_OUT" | grep -q "Diagnostic Information:"; then
+    pass "High-contrast clean minimal NVIDIA driver mismatch reboot instruction box emitted"
+else
+    fail "Minimal NVIDIA driver mismatch reboot instruction box not emitted or contained diagnostic wall of text"
+fi
+
+# --- Test 25: Verify SGLang Warmup CLI flags & live warmup execution ----------
+echo "[Test 25] Verifying SGLang Warmup CLI flags & live warmup execution..."
+HELP_WARMUP="$("${INSTALL_SCRIPT}" --help)"
+if echo "$HELP_WARMUP" | grep -q -- "--skip-warmup"; then
+    pass "install.sh --help documents --skip-warmup / --warmup"
+else
+    fail "install.sh --help missing --skip-warmup"
+fi
+
+SANDBOX_WARMUP="$(mktemp -d /tmp/installer-test-warmup-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}"' EXIT
+
+# Prepare mock stack with mock sglang binary that simulates a mock server on port 30000
+MOCK_WARMUP_STACK="${SANDBOX_WARMUP}/.local/share/opencode-sglang-stack"
+mkdir -p "${MOCK_WARMUP_STACK}/venv/bin"
+
+# Mock python3 that succeeds import check
+cat << 'EOF' > "${MOCK_WARMUP_STACK}/venv/bin/python3"
+#!/bin/sh
+if [ "$1" = "-c" ] && [ "$2" = "import sglang" ]; then
+    exit 0
+fi
+exec /usr/bin/python3 "$@"
+EOF
+chmod 0755 "${MOCK_WARMUP_STACK}/venv/bin/python3"
+
+# Mock sglang binary that starts a simple HTTP server on 127.0.0.1:30000 returning /v1/models 200
+cat << 'EOF' > "${MOCK_WARMUP_STACK}/venv/bin/sglang"
+#!/usr/bin/env python3
+import sys
+import http.server
+import socketserver
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/v1/models':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(('127.0.0.1', 30099), Handler) as httpd:
+    httpd.serve_forever()
+EOF
+chmod 0755 "${MOCK_WARMUP_STACK}/venv/bin/sglang"
+
+WARMUP_RUN="$(USER_HOME="${SANDBOX_WARMUP}" HOME="${SANDBOX_WARMUP}" SGLANG_PORT=30099 SGLANG_WARMUP_TIMEOUT=10 "${INSTALL_SCRIPT}" --target=opencode --warmup --skip-healthcheck --non-interactive 2>&1 || true)"
+if echo "$WARMUP_RUN" | grep -q "SGLang Model Warmup & Weight Verification (Live Progress)" && \
+   echo "$WARMUP_RUN" | grep -q "SGLang warmup successful: Model is loaded and healthy."; then
+    pass "SGLang foreground warmup pass executed and verified model healthcheck"
+else
+    fail "SGLang foreground warmup pass failed"
+fi
+
+# --- Test 26: Verify SGLang healthcheck live model loading progress & readiness ---
+echo "[Test 26] Verifying SGLang healthcheck live model loading progress & readiness..."
+SANDBOX_HC_PROG="$(mktemp -d /tmp/installer-test-hc-prog-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}"' EXIT
+
+MOCK_HC_BIN="${SANDBOX_HC_PROG}/bin"
+mkdir -p "${MOCK_HC_BIN}"
+STATE_HC="${MOCK_HC_BIN}/curl_calls.txt"
+
+cat << EOF > "${MOCK_HC_BIN}/curl"
+#!/bin/sh
+STATE="${STATE_HC}"
+for arg in "\$@"; do
+    if echo "\$arg" | grep -q "30000/v1/models"; then
+        COUNT=0
+        [ -f "\$STATE" ] && COUNT=\$(cat "\$STATE")
+        COUNT=\$((COUNT + 1))
+        echo "\$COUNT" > "\$STATE"
+        if [ "\$COUNT" -eq 1 ]; then
+            if echo "\$*" | grep -q "%{http_code}"; then
+                printf "\\n503"
+            else
+                printf '{"error":"Loading model weights"}'
+            fi
+            exit 0
+        else
+            if echo "\$*" | grep -q "%{http_code}"; then
+                printf '{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200'
+            else
+                printf '{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n'
+            fi
+            exit 0
+        fi
+    elif echo "\$arg" | grep -q "4096"; then
+        if echo "\$*" | grep -q "%{http_code}"; then
+            printf "OpenCode Server\\n200"
+        else
+            printf "OpenCode Server\\n"
+        fi
+        exit 0
+    fi
+done
+exit 1
+EOF
+chmod 0755 "${MOCK_HC_BIN}/curl"
+
+cat << 'EOF' > "${MOCK_HC_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    echo "active"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_HC_BIN}/systemctl"
+
+HC_PROG_OUT="$(PATH="${MOCK_HC_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_PROG}" HOME="${SANDBOX_HC_PROG}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+if echo "$HC_PROG_OUT" | grep -q "SGLang is loading model weights into VRAM" && \
+   echo "$HC_PROG_OUT" | grep -q "SGLang inference engine is active and serving on port 30000." && \
+   echo "$HC_PROG_OUT" | grep -q "All backend service healthchecks passed!"; then
+    pass "SGLang healthcheck emits live loading progress and succeeds upon model readiness"
+else
+    fail "SGLang healthcheck live loading progress or readiness verification failed"
+fi
+
+# --- Test 27: Verify SGLang healthcheck early failure detection --------------
+echo "[Test 27] Verifying SGLang healthcheck early failure detection..."
+SANDBOX_HC_FAIL="$(mktemp -d /tmp/installer-test-hc-fail-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}" "${SANDBOX_HC_FAIL}"' EXIT
+
+MOCK_FAIL_BIN="${SANDBOX_HC_FAIL}/bin"
+mkdir -p "${MOCK_FAIL_BIN}"
+
+cat << 'EOF' > "${MOCK_FAIL_BIN}/curl"
+#!/bin/sh
+for arg in "$@"; do
+    if echo "$arg" | grep -q "4096"; then
+        if echo "$*" | grep -q "%{http_code}"; then
+            printf "OpenCode Server\n200"
+        else
+            printf "OpenCode Server\n"
+        fi
+        exit 0
+    fi
+done
+exit 1
+EOF
+chmod 0755 "${MOCK_FAIL_BIN}/curl"
+
+cat << 'EOF' > "${MOCK_FAIL_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then
+        echo "failed"
+        exit 1
+    fi
+    echo "active"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_FAIL_BIN}/systemctl"
+
+FAIL_START_TIME=$(date +%s)
+HC_FAIL_OUT="$(PATH="${MOCK_FAIL_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_FAIL}" HOME="${SANDBOX_HC_FAIL}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+FAIL_DURATION=$(( $(date +%s) - FAIL_START_TIME ))
+
+if echo "$HC_FAIL_OUT" | grep -q "SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait." && \
+   echo "$HC_FAIL_OUT" | grep -q "SGLang inference engine failed healthcheck." && \
+   [ "$FAIL_DURATION" -lt 15 ]; then
+    pass "SGLang healthcheck aborted immediately upon failed unit state without waiting full timeout"
+else
+    fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
+fi
+
 echo "================================================================================"
 echo "📊 TEST RESULTS: ${TESTS_PASSED} Passed, ${TESTS_FAILED} Failed"
 echo "================================================================================"
 [ "$TESTS_FAILED" -eq 0 ]
+
+

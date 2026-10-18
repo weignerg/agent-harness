@@ -6,7 +6,7 @@ This project strictly adheres to **Issue-Driven Development**, **Branch Governan
 
 - **`release` (GitHub Default Branch)**: Reserved exclusively for stable production releases (updated only by merging `develop` -> `release`).
 - **`develop` (Permanent Local Root Branch & PR Target)**: Active integration branch. The local repository root (`agent-harness`) **must always remain checked out on `develop`**. All feature and fix Pull Requests target `develop`.
-- **`.agents/worktrees/<branch>` (Isolated Worktrees)**: All implementation, refactoring, and testing work occurs inside isolated git worktrees provisioned off `develop` by `team-orchestrator`.
+- **`.orchestration/worktrees/<branch>` (Isolated Worktrees)**: All implementation, refactoring, and testing work occurs inside isolated git worktrees provisioned off `develop` by `team-orchestrator`.
 
 ## 2. Issue-Driven Workflow
 
@@ -17,10 +17,10 @@ This project strictly adheres to **Issue-Driven Development**, **Branch Governan
    `<type>/issue-<number>-<description>`
    - Types: `feat/`, `fix/`, `docs/`, `refactor/`, `test/`
    - Example: `fix/issue-3-launcher-race-condition`
-   Develop inside an isolated worktree at `.agents/worktrees/<branch-name>`, provisioned by `team-orchestrator` (delegated from `supreme-orchestrator`). The root workspace remains anchored on `develop`.
+   Develop inside an isolated worktree at `.orchestration/worktrees/<branch-name>`, provisioned by `team-orchestrator` (delegated from `supreme-orchestrator`). The root workspace remains anchored on `develop`.
 3. **Commit Messages**:
    Use Conventional Commits referencing the issue:
-   `feat(worktree): Issue-#3 isolate worktree under .agents/worktrees`
+   `feat(worktree): Issue-#3 isolate worktree under .orchestration/worktrees`
 
 ## 3. Adversarial Code Review & Two-Key Merge Gate
 

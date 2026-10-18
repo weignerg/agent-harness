@@ -8,6 +8,12 @@
 [![Inference](https://img.shields.io/badge/inference-SGLang_RadixAttention-orange.svg)](docs/sglang-inference-stack.md)
 [![Service](https://img.shields.io/badge/systemd-user_units-lightgrey.svg)](config/systemd)
 
+### 📖 Documentation & Deep Dives
+- 📡 [Multi-Platform Remote Connections](docs/remote_connections.md) (`docs/remote_connections.md`) — Headless OpenCode server, Mobile pairing, `agy remote-control start`, and `claude server`.
+- 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
+- ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
+- 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
+
 ---
 
 ## 1. Architectural Overview
@@ -18,7 +24,7 @@ Rather than maintaining fragmented scripts, skills, and configuration rules acro
 - **Polymorphic Memory Engine**: Combines CPU-accelerated ColBERTv2 late-interaction neural search over Obsidian knowledge vaults with RadixAttention prefix caching and standardized markdown task handoffs.
 - **Dynamic Runtime Adapters**: Pluggable adapters (`AgyRuntimeAdapter`, `ClaudeRuntimeAdapter`, `OpenCodeRuntimeAdapter`) seamlessly translate unified agent charters, tools, and rules into engine-native schemas.
 - **Master Universal Installer**: Atomic manifest-driven installer and uninstaller supporting global and localized repository deployments with cryptographic SHA-256 rollback protection.
-- **Local SGLang Backend Parity**: Turnkey systemd user service deployment for high-throughput local LLM serving, automatic GPU hardware probing, cgroup agent slicing, and OOM watchdog recovery.
+- **Local SGLang Backend Parity**: Automated systemd user service deployment for high-throughput local LLM serving, automatic GPU hardware probing, cgroup agent slicing, and OOM watchdog recovery.
 
 ```
 agent-harness/
@@ -110,6 +116,29 @@ Uninstallation uses the atomic manifest engine to roll back deployed files in re
 
 # Remove local repository harness assets
 ./uninstall.sh --local /path/to/target-repo -y
+```
+
+#### 6. Installation & Post-Install UX
+The installer provides complete end-to-end deployment:
+- **Zero Ambiguity**: Running `./install.sh` automatically probes host GPU capabilities, provisions the backend virtual environment, deploys the required systemd user services, configures secure 16-character server credentials (`OPENCODE_SERVER_PASSWORD`), and starts the units.
+- **Model Verification & Acquisition**: Auto-detects local Hugging Face model weight caches (`.safetensors`). If weights are missing, you can download them automatically via `--download-models` (with `HF_TOKEN`) or inspect explicit manual download instructions.
+- **Transparent First-Run SGLang Warmup Pass**: Performs a foreground model warmup and weight download pass before activating background systemd units, streaming live progress directly to the console. To bypass (e.g. for CI/CD or resource-constrained environments), pass `--skip-warmup`.
+- **Clean NVIDIA Driver Mismatch Reboot Handling**: If an un-rebooted NVIDIA kernel module mismatch is detected (e.g. following `apt upgrade`), the installer halts cleanly with exit code 1 and renders a high-contrast, perfectly-aligned reboot instruction box reproducing the exact invocation command to resume after reboot, omitting unhelpful diagnostic dumps.
+- **Strict Healthcheck Completion Invariant**: Before reporting completion, the installer verifies that local systemd daemons (`opencode-server.service`, SGLang inference on port 30000, and the ColBERT reindexing timer) are active and responding. Can be skipped in non-systemd sandboxes or via `--skip-healthcheck`.
+- **Master All-In-One Deployment Dashboard**: Concludes with a comprehensive summary card surfacing:
+  - **Inventory & Configuration**: Antigravity plugins, Claude Code harness, OpenCode 10-component hierarchy, systemd user services, probed model/hardware, knowledge vault, ColBERT engine, and firewall rules.
+  - **Tool Launch Commands**: Terminal launch syntax for `opencode`, `claude`, `agy` (Antigravity), `obsidian ~/Vaults/home`, and `~/.local/share/opencode-sglang-stack/reindex_vault.sh` (or `/reindex` in OpenCode).
+  - **Server Endpoints & Launch Commands**: Headless OpenCode server with credentials (`http://<LAN_IP>:4096`), SGLang endpoint (`http://127.0.0.1:30000/v1`), Antigravity remote control (`agy remote-control start`), and Claude Code server (`claude server`).
+  - **Immediate Next Step Terminal Box**: High-contrast, 100% precision aligned box instructing the user on the single command to run next (`opencode`).
+  - **Documentation & Deep Dives**: Direct links to `docs/remote_connections.md`, `docs/vault_and_memory_guide.md`, `docs/inference_architecture.md`, and `README.md`.
+  - **Operational Commands**: Useful `systemctl --user status` and installer verification/uninstall commands.
+
+#### 7. Default Host Firewall Protection
+Security is enabled by default (`WITH_FIREWALL=true`). The installer stages host UFW rules allowing SSH and OpenCode server (port 4096) access from the local area network (LAN) while keeping backend inference ports bound to local loopback:
+```bash
+# Explicitly control firewall staging:
+./install.sh --target opencode --firewall      # Default
+./install.sh --target opencode --no-firewall   # Bypass UFW rules
 ```
 
 ---
@@ -333,12 +362,42 @@ When local GPU acceleration is offline or large-context reasoning exceeds local 
 `agent-harness` features a CPU-first semantic retrieval engine based on ColBERTv2 late-interaction scoring:
 
 - **Zero GPU Contention**: Neural MaxSim token matching runs exclusively on CPU via ONNX Runtime (`onnxruntime`), leaving 100% of GPU VRAM allocated to model inference.
-- **Obsidian Vault Compatibility**: Directly indexes markdown knowledge vaults located in `vault/` (entities, concepts, guides, architectural decisions).
-- **FastMCP Tool Server (`vault-memory`)**: Exposes `colbert_retrieve` over the Model Context Protocol (FastMCP) with strict JSONSchema Draft 2020-12 compliance.
+- **Hierarchical Knowledge Vaults**: Partitioned into a host-wide primary vault (`~/Vaults/home`) and modular repository sub-vaults (`<repo>/vault`).
+- **Sub-Vault Scaffolding (`scripts/scaffold_subvault.sh`)**: Rapidly provisions new project sub-vaults with standard directories (`entities/`, `decisions/`, `protocols/`, `projects/`), auto-registers them with Obsidian Desktop (`~/.config/obsidian/obsidian.json`), and creates symlinks into `~/Vaults/repos/<repo_name>`:
+  ```bash
+  # Scaffold sub-vault for current repository
+  ./scripts/scaffold_subvault.sh
+
+  # Scaffold for an external project
+  ./scripts/scaffold_subvault.sh /path/to/another/repo
+  ```
+- **Automated 5-Minute Reindexing**: Systemd user timer (`opencode-colbert-reindex.timer`) automatically indexes changed markdown notes in the background.
+- **FastMCP Tool Server (`vault-memory`)**: Exposes `colbert_retrieve` over the Model Context Protocol (FastMCP) with dynamic sub-vault auto-detection based on `ORCHESTRATION_ROOT` or active git worktrees.
+
+For detailed architectural specifications, ColBERT CPU token math, and Obsidian integration guidelines, see [docs/vault_and_memory_guide.md](docs/vault_and_memory_guide.md).
 
 ---
 
-## 7. Verification & Testing
+## 7. Remote Connections & Mobile Client Access
+
+`agent-harness` provides secure headless and mobile connectivity across your network without exposing unauthenticated endpoints:
+
+- **OpenCode Headless Server (Port 4096)**: Persistent systemd user daemon (`opencode-server.service`) listening on port 4096. Gated by HTTP Basic Auth via credentials configured in `~/.config/opencode-backends/env` (mode `0600`).
+- **OpenCode Mobile Client**: Connects native iOS and Android devices directly to your server:
+  - Upstream project: [OpenCode Mobile](https://github.com/alvarolorentedev/opencode-mobile).
+  - Pair using your server's local LAN IP (displayed at installation completion) and auto-generated server password.
+- **Antigravity SSH Tunneling**: Forward local ports securely from remote developer workstations running Google Antigravity, VS Code, or Cursor:
+  ```bash
+  ssh -N -L 4096:localhost:4096 -L 30000:localhost:30000 user@<SERVER_IP>
+  ```
+- **Claude Code Headless**: Operate Claude Code in headless or server sessions with automatic backend environment pass-through.
+- **Host Firewall Hardening**: UFW rules staged automatically to allow SSH (22) and OpenCode Server (4096) from the local subnet while keeping SGLang inference (30000) bound to loopback.
+
+For full setup procedures, pairing steps, and firewall recipes, see [docs/remote_connections.md](docs/remote_connections.md).
+
+---
+
+## 8. Verification & Testing
 
 The repository maintains an automated two-layer verification suite:
 
@@ -358,6 +417,6 @@ Verifies systemd unit syntax, SGLang CLI parser configs, OOM watchdog context la
 
 ---
 
-## 8. License
+## 9. License
 
 This project is licensed under the terms of the **GNU Affero General Public License v3.0** ([AGPL-3.0](LICENSE)).

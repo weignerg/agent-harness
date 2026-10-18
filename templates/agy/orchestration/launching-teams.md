@@ -33,7 +33,7 @@ Read this before planning or launching any team. `supreme-orchestrator.md` owns 
   - **Read first:** the handoffs, with dates.
   - **Working with the user:** "the user is in this terminal. Raise each open decision when you reach it, and keep working on everything that doesn't depend on it."
   - **Work:** lettered steps (a, b, c). Every outward-facing write is drafted first and done on the user's OK.
-  - **Constraints:** the overlaps; "if a spawn or edit is denied, stop and ask the user, don't work around it; if the classifier blocks an action the user already authorized, follow the classifier-block rule in systems-integration.md"; the isolated worktree at `.agents/worktrees/<branch>`.
+  - **Constraints:** the overlaps; "if a spawn or edit is denied, stop and ask the user, don't work around it; if the classifier blocks an action the user already authorized, follow the classifier-block rule in systems-integration.md"; the isolated worktree at `.orchestration/worktrees/<branch>`.
   - **Acceptance and Done report:** what replaces the PR line for work that isn't a PR.
 - **Gitignored inputs** such as `docs/.generated/plans/` aren't in a worktree. Give them as absolute paths into the main checkout.
 

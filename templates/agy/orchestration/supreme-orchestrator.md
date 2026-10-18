@@ -48,7 +48,7 @@ Read `~/.agents/orchestration/launching-teams.md` first. It covers planning a se
 2. **Launch** with a method from §4, or give the user the §5 start table. To adopt an existing live session instead, `send_message` it: "Read `<kickoff path>` and adopt it as your role. Reply to the Supreme Orchestrator when you have." If it isn't already named `{Branch_Name}`, ask it to `/rename` itself.
 3. **Confirm** with the §6 checks, then tell the user which terminal or tab belongs to each team.
 
-Teams start in the repo root and create their own worktree at `.agents/worktrees/<branch>`. Leave the main checkout clean.
+Teams start in the repo root and create their own worktree at `.orchestration/worktrees/<branch>`. Leave the main checkout clean.
 
 ## Status sweep
 
@@ -100,7 +100,7 @@ You're the single owner of anything teams share, such as a service, ports, or di
 At end of day, or whenever a team or you is about to end with work still open, write a handoff to `~/.agents/orchestration/handoffs/<session name, with / replaced by _>.md`. Cover:
 - the goal;
 - the branch, PR link, and head sha;
-- the worktree path (`.agents/worktrees/<branch>`), and anything uncommitted in it;
+- the worktree path (`.orchestration/worktrees/<branch>`), and anything uncommitted in it;
 - what's done and verified;
 - what's open, and who owns it;
 - the decisions already made;

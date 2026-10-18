@@ -71,7 +71,7 @@ Teammates live only inside the running session. After a resume, read the task li
 
 - **END OF DAY** from the Supreme Orchestrator:
   - Finish the phase you're in, and start no new one. Push or post only what the user has already authorized.
-  - Keep your worktree at `.agents/worktrees/<branch>`. Name any drafts sitting in `tmp/` in your handoff.
+  - Keep your worktree at `.orchestration/worktrees/<branch>`. Name any drafts sitting in `tmp/` in your handoff.
   - Write the handoff to `~/.agents/orchestration/handoffs/<session_name_with_underscores>.md`.
   - Reply "STOPPED: <handoff path> — <one-line state>".
   - Stop working until you're restarted.
@@ -89,7 +89,7 @@ When the team is only waiting on CI or review, or the user ends its session, sto
 ## Lifecycle (implement mode)
 
 1. **Blueprint**: your first response, as above.
-2. **Branch**: work in an isolated worktree at `.agents/worktrees/{Branch_Name}`.
+2. **Branch**: work in an isolated worktree at `.orchestration/worktrees/{Branch_Name}`.
 3. **Plan**: the architect writes it. Settle anything ambiguous with the user.
 4. **Implement**: the worker builds it.
 5. **Self-review**: the reviewer reviews the diff, and the worker fixes findings. Repeat until no 🔴 BLOCKER or 🟠 MUST FIX findings remain.

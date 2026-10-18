@@ -30,4 +30,4 @@ The harness decouples orchestration logic from vendor-specific file naming:
 ## Worktree Lifecycle & Branch Governance
 - Root is anchored permanently on `develop`.
 - `release` is the protected default branch for releases.
-- All tasks execute in isolated git worktrees at `.agents/worktrees/<branch>` (or runtime-specific path) via `scripts/worktree_manager.py`.
+- All tasks execute in isolated git worktrees at `.orchestration/worktrees/<branch>` (or runtime-specific path) via `scripts/worktree_manager.py`.
