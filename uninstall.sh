@@ -98,6 +98,12 @@ if [ "$MODE" = "global" ]; then
     manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
     if [ -f "$manifest_file" ]; then
         python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
+    else
+        # Legacy fallback cleanup for unmanifested installations
+        rm -f "${USER_HOME}/AGENTS.md"
+        rm -f "${OPENCODE_HOME_DIR}/opencode.json"
+        rm -f "${OPENCODE_HOME_DIR}/tui.json"
+        rm -f "${OPENCODE_HOME_DIR}/AGENTS.md"
     fi
 
     # Clean legacy launchers
