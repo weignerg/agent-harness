@@ -771,7 +771,128 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertEqual(proc_skip.returncode, 0)
         self.assertIn("Backend healthchecks skipped (--no-healthcheck)", proc_skip.stdout)
 
+    def test_issue7_sglang_context_length_service_fallback(self):
+        """Test Issue #7: opencode-sglang-ornith-35b.service defines guaranteed SGLANG_CONTEXT_LENGTH fallback."""
+        service_file = REPO_ROOT / "config" / "systemd" / "opencode-sglang-ornith-35b.service"
+        self.assertTrue(service_file.is_file())
+        content = service_file.read_text(encoding="utf-8")
+        self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', content)
+        self.assertIn('--context-length ${SGLANG_CONTEXT_LENGTH}', content)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+            deployed_service = sandbox / ".config" / "systemd" / "user" / "opencode-sglang-ornith-35b.service"
+            self.assertTrue(deployed_service.is_file())
+            deployed_content = deployed_service.read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=', deployed_content)
+            self.assertIn('--context-length ${SGLANG_CONTEXT_LENGTH}', deployed_content)
+
+    def test_issue7_sglang_venv_auto_healing(self):
+        """Test Issue #7: SGLang venv auto-heals when import sglang initially fails in venv."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            # Mock candidate local sglang repository
+            mock_sglang = sandbox / "git" / "sglang" / "python"
+            mock_sglang.mkdir(parents=True)
+            (mock_sglang / "pyproject.toml").touch()
+
+            # Mock venv with python3 script that simulates broken sglang until pip install -e is called
+            mock_stack = sandbox / ".local" / "share" / "opencode-sglang-stack"
+            venv_bin = mock_stack / "venv" / "bin"
+            venv_bin.mkdir(parents=True)
+
+            py_mock = venv_bin / "python3"
+            py_mock.write_text(
+                '#!/bin/sh\n'
+                'STATE_FILE="$(dirname "$0")/sglang_state"\n'
+                'if [ "$1" = "-c" ] && [ "$2" = "import sglang" ]; then\n'
+                '    if [ -f "$STATE_FILE" ]; then\n'
+                '        exit 0\n'
+                '    else\n'
+                '        echo "ModuleNotFoundError: No module named sglang" >&2\n'
+                '        exit 1\n'
+                '    fi\n'
+                'elif [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then\n'
+                '    touch "$STATE_FILE"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            py_mock.chmod(0o755)
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+            self.assertIn("sglang import check failed", proc.stdout)
+            self.assertIn("Successfully auto-healed sglang via editable install", proc.stdout)
+
+    def test_issue7_nvidia_driver_mismatch_detection(self):
+        """Test Issue #7: NVIDIA driver mismatch detection emits high-contrast banner and remediation."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            mock_nv = mock_bin / "nvidia-smi"
+            mock_nv.write_text(
+                '#!/bin/sh\n'
+                'echo "Failed to initialize NVML: Driver/library version mismatch" >&2\n'
+                'exit 18\n',
+                encoding="utf-8",
+            )
+            mock_nv.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+                "COLBERT_TIMER_RETRIES": "1",
+                "OPENCODE_SERVER_RETRIES": "1",
+                "SGLANG_HEALTHCHECK_RETRIES": "1",
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            # Healthcheck is expected to fail with non-zero exit code due to live service failure
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("NVIDIA DRIVER/LIBRARY VERSION MISMATCH DETECTED", proc.stderr)
+            self.assertIn("sudo reboot", proc.stderr)
+            self.assertIn("systemctl --user start opencode-sglang-ornith-35b.service", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -383,8 +383,71 @@ else
     fail "Auto-generated password not surfaced in Grandma-Proof summary"
 fi
 
+# --- Test 23: Verify SGLang venv auto-healing with local repository -----------
+echo "[Test 23] Verifying SGLang venv auto-healing with local repository..."
+SANDBOX_HEAL="$(mktemp -d /tmp/installer-test-heal-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}"' EXIT
+
+# Prepare mock local sglang repository in candidate path
+MOCK_SGLANG_REPO="${SANDBOX_HEAL}/git/sglang/python"
+mkdir -p "${MOCK_SGLANG_REPO}"
+touch "${MOCK_SGLANG_REPO}/pyproject.toml"
+
+# Prepare mock venv with python3 that simulates broken sglang import initially
+MOCK_STACK="${SANDBOX_HEAL}/.local/share/opencode-sglang-stack"
+mkdir -p "${MOCK_STACK}/venv/bin"
+cat << 'EOF' > "${MOCK_STACK}/venv/bin/python3"
+#!/bin/sh
+STATE_FILE="$(dirname "$0")/sglang_state"
+if [ "$1" = "-c" ] && [ "$2" = "import sglang" ]; then
+    if [ -f "$STATE_FILE" ]; then
+        exit 0
+    else
+        echo "ModuleNotFoundError: No module named 'sglang'" >&2
+        exit 1
+    fi
+elif [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then
+    touch "$STATE_FILE"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_STACK}/venv/bin/python3"
+
+HEAL_OUT="$(USER_HOME="${SANDBOX_HEAL}" HOME="${SANDBOX_HEAL}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
+if echo "$HEAL_OUT" | grep -q "sglang import check failed" && \
+   echo "$HEAL_OUT" | grep -q "Successfully auto-healed sglang via editable install"; then
+    pass "SGLang venv auto-healed via local candidate repository"
+else
+    fail "SGLang venv auto-heal failed"
+fi
+
+# --- Test 24: Verify NVIDIA Driver Mismatch Detection Banner -------------------
+echo "[Test 24] Verifying NVIDIA Driver Mismatch Detection Banner..."
+SANDBOX_NV="$(mktemp -d /tmp/installer-test-nv-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}"' EXIT
+
+MOCK_NV_BIN="${SANDBOX_NV}/bin"
+mkdir -p "${MOCK_NV_BIN}"
+cat << 'EOF' > "${MOCK_NV_BIN}/nvidia-smi"
+#!/bin/sh
+echo "Failed to initialize NVML: Driver/library version mismatch" >&2
+exit 18
+EOF
+chmod 0755 "${MOCK_NV_BIN}/nvidia-smi"
+
+NV_OUT="$(PATH="${MOCK_NV_BIN}:${PATH}" COLBERT_TIMER_RETRIES=1 OPENCODE_SERVER_RETRIES=1 SGLANG_HEALTHCHECK_RETRIES=1 USER_HOME="${SANDBOX_NV}" HOME="${SANDBOX_NV}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+if echo "$NV_OUT" | grep -q "NVIDIA DRIVER/LIBRARY VERSION MISMATCH DETECTED" && \
+   echo "$NV_OUT" | grep -q "sudo reboot" && \
+   echo "$NV_OUT" | grep -q "systemctl --user start opencode-sglang-ornith-35b.service"; then
+    pass "High-contrast NVIDIA driver mismatch banner and reboot remediation emitted"
+else
+    fail "NVIDIA driver mismatch banner not emitted"
+fi
+
 echo "================================================================================"
 echo "📊 TEST RESULTS: ${TESTS_PASSED} Passed, ${TESTS_FAILED} Failed"
 echo "================================================================================"
 [ "$TESTS_FAILED" -eq 0 ]
+
 

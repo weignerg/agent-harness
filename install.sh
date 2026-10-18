@@ -1087,7 +1087,7 @@ verify_backend_healthchecks() {
     echo "  Checking ColBERT reindexing timer..."
     local timer_active=false
     if command -v systemctl >/dev/null 2>&1; then
-        for _ in {1..5}; do
+        for _ in $(seq 1 "${COLBERT_TIMER_RETRIES:-5}"); do
             if systemctl --user is-active --quiet opencode-colbert-reindex.timer 2>/dev/null; then
                 timer_active=true
                 break
@@ -1107,7 +1107,7 @@ verify_backend_healthchecks() {
     echo "  Checking OpenCode headless server (port 4096)..."
     local server_active=false
     local server_listening=false
-    for _ in {1..10}; do
+    for _ in $(seq 1 "${OPENCODE_SERVER_RETRIES:-10}"); do
         if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet opencode-server.service 2>/dev/null; then
             server_active=true
         fi
@@ -1136,7 +1136,7 @@ verify_backend_healthchecks() {
     echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
     local sglang_active=false
     local sglang_listening=false
-    for _ in {1..15}; do
+    for _ in $(seq 1 "${SGLANG_HEALTHCHECK_RETRIES:-15}"); do
         if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet "${svc_name}" 2>/dev/null; then
             sglang_active=true
         fi
@@ -1160,6 +1160,34 @@ verify_backend_healthchecks() {
     fi
 
     if [ "$health_failed" = true ]; then
+        local driver_mismatch=false
+        if command -v nvidia-smi >/dev/null 2>&1; then
+            local nv_probe=""
+            nv_probe="$(nvidia-smi 2>&1 || true)"
+            if echo "$nv_probe" | grep -qi "version mismatch"; then
+                driver_mismatch=true
+            fi
+        fi
+
+        if [ "$driver_mismatch" = true ]; then
+            cat << 'EOF' >&2
+
+================================================================================
+⚠️  NVIDIA DRIVER/LIBRARY VERSION MISMATCH DETECTED
+================================================================================
+Your system NVIDIA drivers were recently upgraded and require a system reboot
+to load the new kernel module into memory.
+Until rebooted, CUDA and NVML cannot initialize, causing SGLang to fail.
+
+Remediation:
+  1. Save your open work.
+  2. Reboot your computer: sudo reboot
+  3. After reboot, SGLang will start automatically or run:
+     systemctl --user start opencode-sglang-ornith-35b.service
+================================================================================
+EOF
+        fi
+
         cat << 'EOF' >&2
 
 ❌ ========================================================================
@@ -1173,6 +1201,13 @@ EOF
 
         echo "" >&2
         echo "📋 Diagnostic Information:" >&2
+        if [ "$driver_mismatch" = true ]; then
+            echo "--- NVIDIA Driver/Library Diagnostic ---" >&2
+            nvidia-smi 2>&1 | head -n 5 >&2 || true
+            if [ -f /proc/driver/nvidia/version ]; then
+                echo "Kernel Module Version: $(cat /proc/driver/nvidia/version 2>/dev/null | head -n 1)" >&2
+            fi
+        fi
         if command -v systemctl >/dev/null 2>&1; then
             echo "--- Systemd User Unit Statuses ---" >&2
             systemctl --user status opencode-colbert-reindex.timer opencode-server.service "${svc_name}" --no-pager 2>&1 | head -n 30 >&2 || true
@@ -1184,6 +1219,9 @@ EOF
 
         echo "" >&2
         echo "🔧 Remediation Steps:" >&2
+        if [ "$driver_mismatch" = true ]; then
+            echo "  ⚠️  PRIORITY: Reboot system (sudo reboot) to load upgraded NVIDIA kernel module" >&2
+        fi
         echo "  1. Check unit journal logs: journalctl --user -u ${svc_name} -u opencode-server.service -n 50" >&2
         echo "  2. Ensure model weights are downloaded (run with --download-models)" >&2
         echo "  3. Manually start services: systemctl --user start ${svc_name} opencode-server.service opencode-colbert-reindex.timer" >&2
@@ -1249,6 +1287,76 @@ deploy_opencode_backend_and_units() {
         fi
     else
         echo "  ✅ SGLang backend venv verified at ${STACK_DIR}/venv"
+    fi
+
+    # Verify sglang import in venv and auto-heal if missing or broken (e.g., stale editable install)
+    local py_exec="${STACK_DIR}/venv/bin/python3"
+    if [ ! -x "${py_exec}" ] && [ -x "${STACK_DIR}/venv/bin/python" ]; then
+        py_exec="${STACK_DIR}/venv/bin/python"
+    fi
+
+    if [ -x "${py_exec}" ]; then
+        if ! "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
+            echo "  ⚠️  sglang import check failed in ${STACK_DIR}/venv. Attempting auto-heal..."
+            local healed=false
+
+            # Candidate paths for local sglang repositories (dynamically resolved to avoid static host/user leaks)
+            local sglang_candidates=()
+            [ -n "${SGLANG_REPO_PATH:-}" ] && sglang_candidates+=("${SGLANG_REPO_PATH}")
+            local git_common=""
+            git_common="$(git -C "${SCRIPT_DIR}" rev-parse --git-common-dir 2>/dev/null || true)"
+            if [ -n "$git_common" ]; then
+                local git_root=""
+                git_root="$(cd "${SCRIPT_DIR}" && cd "${git_common}/.." 2>/dev/null && pwd || true)"
+                if [ -n "$git_root" ]; then
+                    sglang_candidates+=("$(dirname "${git_root}")/sglang/python")
+                    sglang_candidates+=("$(dirname "${git_root}")/sglang")
+                fi
+            fi
+            sglang_candidates+=(
+                "${USER_HOME}/git/sglang/python"
+                "${USER_HOME}/git/sglang"
+                "${USER_HOME}/src/sglang/python"
+                "${USER_HOME}/sglang/python"
+                "$(cd "${SCRIPT_DIR}/.." 2>/dev/null && pwd)/sglang/python"
+                "$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)/sglang/python"
+                "$(cd "${SCRIPT_DIR}/../../.." 2>/dev/null && pwd)/sglang/python"
+                "$(cd "${SCRIPT_DIR}/../../../.." 2>/dev/null && pwd)/sglang/python"
+                "$(cd "${SCRIPT_DIR}/../../../../.." 2>/dev/null && pwd)/sglang/python"
+            )
+
+            for cand in "${sglang_candidates[@]}"; do
+                if [ -d "${cand}" ] && ([ -f "${cand}/setup.py" ] || [ -f "${cand}/pyproject.toml" ]); then
+                    echo "  🔍 Found local sglang repository at ${cand}. Reinstalling editable..."
+                    "${py_exec}" -m pip install -e "${cand}" --no-build-isolation --no-deps >/dev/null 2>&1 || true
+                    if "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
+                        echo "  ✅ Successfully auto-healed sglang via editable install from ${cand}"
+                        healed=true
+                        break
+                    fi
+                fi
+            done
+
+            if [ "$healed" != true ]; then
+                echo "  📦 Local sglang repo not found or install failed. Attempting package install (sglang[all]>=0.4.0)..."
+                if command -v uv >/dev/null 2>&1; then
+                    uv pip install --python "${py_exec}" "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
+                else
+                    "${py_exec}" -m pip install "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
+                fi
+
+                if "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
+                    echo "  ✅ Successfully auto-healed sglang via package install"
+                    healed=true
+                fi
+            fi
+
+            if [ "$healed" != true ]; then
+                echo "  ⚠️  Could not auto-heal sglang in ${STACK_DIR}/venv. SGLang startup may fail."
+            fi
+        else
+            echo "  ✅ SGLang python package verified in ${STACK_DIR}/venv"
+        fi
     fi
 
     # 1. Run GPU probe to detect hardware profile
@@ -1348,9 +1456,18 @@ with open(path, 'w') as f:
 
     # Tune primary SGLang service with probed parameters
     if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${systemd_dest}/opencode-sglang-ornith-35b.service" ]; then
-        sed -i \
-            "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|;s|Environment=\"SGLANG_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_CONTEXT_LENGTH=${max_context}\"|" \
-            "${systemd_dest}/opencode-sglang-ornith-35b.service"
+        if grep -q 'Environment="SGLANG_CONTEXT_LENGTH=' "${systemd_dest}/opencode-sglang-ornith-35b.service"; then
+            sed -i \
+                "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|;s|Environment=\"SGLANG_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_CONTEXT_LENGTH=${max_context}\"|" \
+                "${systemd_dest}/opencode-sglang-ornith-35b.service"
+        else
+            sed -i \
+                "/\[Service\]/a Environment=\"SGLANG_CONTEXT_LENGTH=${max_context}\"" \
+                "${systemd_dest}/opencode-sglang-ornith-35b.service"
+            sed -i \
+                "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|" \
+                "${systemd_dest}/opencode-sglang-ornith-35b.service"
+        fi
         sed -i \
             "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
             "${systemd_dest}/opencode-sglang-ornith-35b.service"
