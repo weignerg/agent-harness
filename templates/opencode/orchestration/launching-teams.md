@@ -13,12 +13,25 @@ Read this before planning or launching any team. `supreme-orchestrator.md` owns 
    - Honor standing user decisions that handoffs record as "don't raise again". Tell the team to ask the user before reopening one.
 3. **Show the user one numbered table:** team, work, waits on, and whether it runs under the read-only block. The user reorganizes it, by merging, splitting, renaming or dropping teams. Rewrite the kickoffs to match, and move replaced ones to `kickoffs/superseded/`.
 4. **Shaping rules:**
+   - **Hierarchical Epic & Issue Architecture**:
+     - Work is structured hierarchically: **Epic Issues** define high-level feature sets or architectural initiatives.
+     - Epics contain child **Issues** that complete specific objectives for the Epic (`Parent: #<epic_number>`).
+     - Any child issue may additionally have **Nested Sub-issues** for granular implementation slices.
+   - **Branch & PR Hierarchy**:
+     - A branch and PR is created for **every issue**: `<type>/issue-<number>-<description>` (e.g. `feat/issue-10-core`, `fix/issue-12-subtask`).
+     - Top-level Epic branches branch from `develop`; child and nested issue branches branch directly from **their parent issue's branch** (`base: <parent_branch>`), NOT `develop`.
+     - Nested issue PRs target their **parent issue's branch** (`--base <parent_branch>`), NOT `develop`.
+   - **Sequential Execution Order (One at a Time)**:
+     - Nested issues must be worked on **one at a time** in strict sequential order. Never run concurrent overlapping edits across sibling nested branches.
+     - Each nested issue PR is reviewed and merged into the parent issue's branch before the next nested issue begins.
+     - Once all child/nested issues are merged into the parent branch, the parent issue opens or finalizes its PR targeting *its* parent (or `develop` for a top-level Epic).
    - Each deliverable gets one team. A team creates its issue first, then renames itself to the new issue number.
    - Don't launch a team that only waits on another team's output. Fold that work into the owning team, or let a later issue handle it.
    - Prefer keeping an existing PR. Retitle it to the new issue and update its description. GitHub can't change an open PR's source branch (`gh pr edit` has no parameter for it), so the branch name stays. Rewording old commits needs a force push, so ask first. Open a new PR only when keeping the old one is impossible.
    - Start teams fresh with a kickoff that carries the current state. Don't resume old sessions without their handoff.
 5. **Cross-team overlaps.** When two teams edit the same files (for example `rules/process-safety.md`), name the overlap in both kickoffs. Each team checks with the Supreme Orchestrator before editing a shared file.
 6. **Shared deliverables have one writer.** Other teams write their own files to an agreed folder (e.g. under `~/.config/opencode/orchestration/handoffs/`) and message the owning team when a file is ready.
+
 
 ## 2. Write each kickoff
 

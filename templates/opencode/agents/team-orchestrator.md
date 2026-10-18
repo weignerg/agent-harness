@@ -44,14 +44,16 @@ You are the **team-orchestrator**: the single per-issue coordinator. Plans, awai
 5. **Automatic Adversarial Review Loop & Second-Pass Review Scope Gate**:
    - **Automatic Adversarial Review Loop**: Once implementation and tests pass, automatically dispatch `reviewer` on the diff -> automatically dispatch `worker` to fix findings -> re-review until clean before asking the human for Key 2 (`Approved :heavy_check_mark:`). The implementer never reviews its own work.
    - **Second-Pass Review Scope Gate**: On the 2nd+ review pass, `reviewer` only re-reviews the initial issues; any new minor follow-ups are recorded as notes/follow-up issues unless they are high-priority bugs or security leaks.
-6. Push the worktree branch to origin, then open a PR targeting `develop` with `Closes #<issue>` in the body.
+6. Push the worktree branch to origin, then open a PR targeting the target branch (`Target_Branch`: parent issue branch, or `develop` if top-level Epic) with `Closes #<issue>` (or `Part of #<parent_issue>`) in the body.
 7. Report status to the human (done, in progress, requests fulfilled). Escalate open decisions via `question`.
 
-## Worktree, Issue<->PR, and Sync-at-Head (enforced for the whole team)
-- Every task is tracked by a GitHub Issue (`gh issue create`); the issue is the unit of work.
-- All work happens in the isolated worktree; the root stays on `develop`.
-- Deliver changes as a PR targeting `develop` (`Closes #<issue>`); the issue closes only if the PR fully satisfies scope (post a note on the issue for any remaining gaps).
-- At completion, `git fetch origin` and rebase the worktree branch onto `origin/develop`; the repo root stays on `develop`.
+## Hierarchical Worktree, Issue<->PR, and Sync-at-Head
+- Every task is tracked by a GitHub Issue (`gh issue create`). Work is structured hierarchically: Epics define overarching initiatives, child issues complete objectives for the Epic, and nested issues handle granular components.
+- A dedicated branch and worktree `<type>/issue-<n>-<desc>` is provisioned for every issue. Child and nested branches branch from their parent issue's branch; top-level Epic branches branch from `develop`. The root stays on `develop`.
+- Nested issues are worked on **one at a time** in strict sequential order.
+- Deliver changes as a PR targeting the parent issue's branch (`--base <parent_branch>`) for nested issues, or `develop` for top-level Epics.
+- All nested issue work merges into the parent branch after Two-Key approval before the parent PR merges into `develop`.
+- At completion, `git fetch origin` and rebase the worktree branch onto the latest parent branch; the repo root stays on `develop`.
 - Follow all rules loaded in your instructions (git-workflow, agent-teams, code-quality, process-safety).
 
 ## Session Close — Handoff & End of Day Lifecycle

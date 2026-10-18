@@ -70,10 +70,11 @@ Full routing guidance: `rules/agent-teams.md`.
 ---
 
 ## 🛡️ Operational Rules (loaded automatically from `rules/`)
-1. **Agent Teams** (`rules/agent-teams.md`): supreme-orchestrator/team-orchestrator separation of duties, issue<->PR worktree flow, and two-key merge gate.
-2. **Git Workflow** (`rules/git-workflow.md`): issue-first, worktree isolation, branch naming, Conventional Commits.
+1. **Agent Teams** (`rules/agent-teams.md`): supreme-orchestrator/team-orchestrator separation of duties, hierarchical epic/nested issue workflow, sequential execution, and two-key merge gate.
+2. **Git Workflow** (`rules/git-workflow.md`): hierarchical epics, dedicated branch/PR per issue (`<type>/issue-<n>-<desc>`), parent-branch branching & rollup merge targets, worktree isolation, Conventional Commits.
 3. **Code Quality** (`rules/code-quality.md`): two-stage TDD, zero regressions, traceback-to-patch repairs.
 4. **Process Safety** (`rules/process-safety.md`): never kill or terminate `supreme-orchestrator`, `team-orchestrator`, or backend services; no credential leaks; portable paths.
+
 
 ---
 

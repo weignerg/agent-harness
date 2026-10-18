@@ -77,7 +77,7 @@ Full routing guidance: `rules/agent-teams.md`.
 
 ## 🛡️ Operational Rules (loaded automatically from `rules/`)
 1. **Agent Teams** (`rules/agent-teams.md`): Two-tier `supreme-orchestrator` -> `team-orchestrator` -> leaves hierarchy, Mandatory Architect-First & Context-Hygiene, Gemini 3.8 High/Medium/Low effort tiers, `.orchestration/worktrees/<branch>` worktree isolation, Automatic Adversarial Review Loop, Second-Pass Review Scope Gate, and Two-Key Merge Gate.
-2. **Git Workflow** (`rules/git-workflow.md`): Branch governance (`release` as GitHub default branch for stable releases, `develop` permanently checked out in local root and PR target), issue-first, worktree isolation in `.orchestration/worktrees/<branch>`, Conventional Commits.
+2. **Git Workflow** (`rules/git-workflow.md`): Branch governance (`release` as GitHub default branch for stable releases, `develop` permanently checked out in local root and PR target), hierarchical epics and nested issues, dedicated branch/PR per issue, parent-branch branching & rollup merge targets, worktree isolation in `.orchestration/worktrees/<branch>`, Conventional Commits.
 3. **Code Quality** (`rules/code-quality.md`): Two-stage TDD, zero regressions, traceback-to-patch repairs.
 4. **Process Safety** (`rules/process-safety.md`): Never kill or terminate `supreme-orchestrator` or `team-orchestrator` (neither via OS commands like `kill`/`pkill`/`killall` nor via `manage_subagents`/`manage_task` with `Action: "kill"`), no credential leaks, portable paths.
 

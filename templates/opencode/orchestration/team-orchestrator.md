@@ -15,12 +15,14 @@ Role: Team Orchestrator
 Read ~/.config/opencode/orchestration/team-orchestrator.md and follow it.
 
 Issue_Number: {Issue_Number}
+Parent_Issue_Number: {Parent_Issue_Number | none (if top-level epic)}
 Issue_Name: {Issue_Name}
-Branch_Name: {Branch_Name}
+Branch_Name: {Branch_Name (format: <type>/issue-<number>-<description>)}
 Issue_URL: https://github.com/{Owner}/{Repo}/issues/{Issue_Number}
-Target_Branch: develop
+Target_Branch: {parent_branch | develop (if top-level epic)}
 Mode: {implement | review PR #<id> | respond to reviews on PR #<id>}
 Push_Policy: {ask before each push | push after local tests pass}
+Hierarchical_Execution: {sequential: work on nested issues one at a time, merging to parent branch}
 Task_Details:
 ```
 {Task_Details}

@@ -70,17 +70,32 @@ Across all supported runtimes, roles align strictly to model reasoning tiers wit
 1. **Branch Governance (`release` vs `develop`)**:
    - `release` is the **GitHub default branch** reserved exclusively for stable releases (updated only by merging `develop` -> `release`).
    - `develop` is the active integration branch and **must always remain checked out in the local repository root**.
-   - All feature/fix worktrees branch from `develop` and all Pull Requests target `develop`.
-2. **Issue First**: Every task is tracked by a GitHub Issue (`gh issue create`); the issue is the unit of work.
-3. **Worktree Isolation (`<repo>/.orchestration/worktrees/<branch>`)**: Before any implementation work begins, `team-orchestrator` provisions `<type>/issue-<n>-<desc>` inside an isolated worktree at `<repo>/.orchestration/worktrees/<branch>` (via the `worktree_create` MCP tool or `worktree_manager.py`). The repository root remains permanently anchored on `develop`.
-4. **Implement & Verify**: `worker` and `tester` (assisted by `grunt` and `scout`) implement changes, run the TDD pipeline, and make Conventional Commits inside the worktree.
-5. **Automatic Adversarial Review Loop**:
+   - Top-level Epic/integration PRs target `develop`.
+2. **Hierarchical Issue Architecture**:
+   - Work is structured hierarchically: **Epic Issues** represent broad initiatives; Epics contain child **Issues** that complete specific objectives for the Epic; any of those issues may additionally have **Nested Sub-issues** for granular tasks.
+   - Child and nested issues explicitly link to their parent issue (`Parent: #<parent_issue>` or `Part of Epic #<epic_issue>`).
+3. **Branch & Worktree per Issue**:
+   - A dedicated branch and isolated worktree is provisioned for **every issue**: `<type>/issue-<n>-<desc>`.
+   - Top-level Epic branches branch directly from `develop`.
+   - Child and nested issue branches branch directly from **their parent issue's branch** (`base: <parent_branch>`), NOT from `develop`.
+   - The repository root remains permanently anchored on `develop`.
+4. **Sequential Execution Order (One at a Time)**:
+   - Nested issues must be worked on **one at a time** in strict sequential order. Never run concurrent overlapping edits across sibling nested branches.
+5. **Implement & Verify**: `worker` and `tester` (assisted by `grunt` and `scout`) implement changes, run the TDD pipeline, and make Conventional Commits inside the worktree.
+6. **Automatic Adversarial Review Loop**:
    - Before declaring completion or requesting merge approval, `team-orchestrator` automatically dispatches `reviewer` on the worktree diff.
    - If `reviewer` raises findings, `team-orchestrator` automatically dispatches `worker` / `tester` to resolve every finding with commits and re-runs verification.
    - The implementer (`worker`) never reviews its own work.
-6. **Push & PR**: Push the worktree branch to `origin` and open a PR targeting `develop` with `Closes #<issue>`.
-7. **Correlate Issues/PRs**: An issue closes only if the PR fully satisfies scope (post a note on the issue for any remaining gaps).
-8. **Sync at Head**: At completion, `git fetch origin` + rebase the worktree branch onto `origin/develop`; the root stays on `develop`. Force-push is strictly disallowed.
+7. **Hierarchical Push & PR**:
+   - A pull request is created for **every issue**.
+   - The PR for a nested issue targets its **parent issue's branch** (`--base <parent_branch>`), NOT `develop`. Only top-level Epic/integration PRs target `develop`.
+8. **Hierarchical Merge Rollup**:
+   - Work merges only after Two-Key approval (`Approved :heavy_check_mark:`).
+   - As each nested issue completes, its PR is merged into the parent issue's branch.
+   - Only when all child/nested issues are completed and merged into the parent branch does the parent issue open or finalize its PR targeting *its* parent (or `develop` for a top-level Epic).
+9. **Correlate Issues/PRs**: An issue closes only if the PR fully satisfies scope (post a note on the issue for any remaining gaps).
+10. **Sync at Head**: At completion, `git fetch origin` + rebase the worktree branch onto the latest parent branch; the root stays on `develop`. Force-push is strictly disallowed.
+
 
 ---
 

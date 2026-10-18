@@ -30,15 +30,17 @@
 - **1-Agent-Per-Question Research**: When multiple questions need answers, dispatch 1 agent per question (and search the internet/docs as needed).
 
 ## Issue <-> PR workflow (enforced for everyone)
-1. **Issue first** — every task is tracked by a GitHub Issue (`gh issue create`); the issue is the unit of work.
-2. **Branch + worktree** — the **`team-orchestrator`** provisions `<type>/issue-<n>-<desc>` in an isolated worktree at the repository's own `.opencode/worktrees/<branch>` before any work; the local repository root stays permanently checked out on `develop` (while GitHub's default branch is `release` for stable releases).
-3. **Implement** — `worker`/`tester` (with `grunt`/`scout`) make changes and Conventional Commits in the worktree.
-4. **Push + PR** — push to origin and open a PR targeting `develop` with `Closes #<issue>` (all feature/fix PRs target `develop`).
-5. **Review loop** — `reviewer` audits; critiques return to `worker`/`tester` as commits; the two-key gate gates merge:
-   - **Automatic Adversarial Review Loop**: Automatically dispatch `reviewer` after implementation/tests pass -> automatically dispatch `worker` to fix findings -> re-review until clean before asking the human for Key 2 (`Approved :heavy_check_mark:`).
+1. **Hierarchical Issue Model** — every task is tracked by a GitHub Issue (`gh issue create`). Work is structured hierarchically: **Epic Issues** represent overarching goals; Epics contain child **Issues** that complete specific objectives for the Epic; any of those issues may additionally have **Nested Sub-issues** for granular tasks. Child/nested issues explicitly link to their parent (`Parent: #<parent_issue>`).
+2. **Branch + Worktree per Issue** — the **`team-orchestrator`** provisions `<type>/issue-<n>-<desc>` in an isolated worktree at `.opencode/worktrees/<branch>` before any work. Top-level Epic branches originate from `develop`; child/nested issue branches originate directly from **their parent issue's branch** (`base: <parent_branch>`), NOT from `develop`. The local repository root stays permanently checked out on `develop`.
+3. **Sequential Execution Order (One at a Time)** — nested issues are worked on **one at a time** in strict sequential order. Never run concurrent overlapping edits across sibling nested branches.
+4. **Implement & Verify** — `worker`/`tester` (with `grunt`/`scout`) make changes and Conventional Commits in the worktree.
+5. **Hierarchical Push & PR** — a branch and PR is created for **every issue**. The PR for a nested issue targets its **parent issue's branch** (`--base <parent_branch>`), NOT `develop`. Only top-level Epic/integration PRs target `develop`.
+6. **Automatic Adversarial Review Loop** — automatically dispatch `reviewer` after implementation/tests pass -> automatically dispatch `worker` to fix findings -> re-review until clean before requesting Two-Key approval (`Approved :heavy_check_mark:`).
    - **Second-Pass Review Scope Gate**: On the 2nd+ review pass, `reviewer` only re-reviews initial issues; any new minor follow-ups are recorded as notes/follow-up issues unless they are high-priority bugs or security leaks.
-6. **Correlate issues/PRs** — an issue closes only if the PR fully satisfies scope (post a note on the issue for any remaining gaps).
-7. **Sync at head** — at completion, `git fetch origin` + rebase the worktree branch onto `origin/develop`; the root stays on `develop`. Force-push is disallowed.
+7. **Hierarchical Merge Rollup** — after Two-Key approval, the nested issue PR is merged into its parent issue's branch. Once all nested issues for a parent branch are completed, verified, and merged into the parent, the parent issue opens or finalizes its PR targeting *its* parent (or `develop` for a top-level Epic).
+8. **Correlate Issues/PRs** — an issue closes only if the PR fully satisfies scope (post a note on the issue for any remaining gaps).
+9. **Sync at Head** — at completion, `git fetch origin` + rebase the worktree branch onto the latest parent branch; the root stays on `develop`. Force-push is strictly disallowed.
+
 
 ## Handoff convention
 - Each team, on completion, writes `.opencode/handoffs/{session-description}-dd-mm-yyyy-handoff.md`; the supreme-orchestrator writes the master handoff `.opencode/handoffs/supreme-orchestrator-dd-mm-yyyy-handoff.md`.
