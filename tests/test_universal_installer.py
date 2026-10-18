@@ -339,6 +339,125 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(len(rollback_res["removed_files"]), 1)
             self.assertFalse(f1.exists())
 
+    def test_uninstaller_script_preserves_user_modified_files(self):
+        """Test uninstall.sh preserves user-modified and untracked files while removing harness files."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "test_repo"
+            sandbox.mkdir()
+
+            proc_inst = self.run_installer("--target", "all", "--mode", "local", str(sandbox), "--non-interactive")
+            self.assertEqual(proc_inst.returncode, 0)
+            self.assertTrue((sandbox / ".orchestration").is_dir())
+            self.assertTrue((sandbox / ".agents").is_symlink())
+            self.assertTrue((sandbox / ".opencode" / "opencode.json").is_file())
+
+            # User modifies opencode.json
+            custom_opencode = sandbox / ".opencode" / "opencode.json"
+            with open(custom_opencode, "a", encoding="utf-8") as f:
+                f.write("\n// User custom comment\n")
+
+            # User creates an untracked custom rule
+            custom_rule = sandbox / ".orchestration" / "rules" / "my_custom_user_rule.md"
+            custom_rule.write_text("# My Custom User Rule", encoding="utf-8")
+
+            # Execute uninstall.sh directly via run_uninstaller
+            proc_uninst = self.run_uninstaller("--local", str(sandbox), "--yes")
+            self.assertEqual(proc_uninst.returncode, 0, f"Uninstaller failed: {proc_uninst.stderr}\n{proc_uninst.stdout}")
+
+            # User-modified and untracked files must be preserved!
+            self.assertTrue(custom_opencode.is_file(), "User-modified opencode.json must be preserved by uninstall.sh")
+            self.assertTrue(custom_rule.is_file(), "Untracked user rule must be preserved by uninstall.sh")
+            self.assertIn("Preserved user-modified files", proc_uninst.stdout)
+
+            # Unmodified harness files must be removed
+            self.assertFalse((sandbox / ".agents").exists(), ".agents symlink must be removed")
+            self.assertFalse((sandbox / ".claude").exists(), ".claude directory without user files must be removed")
+
+    def test_uninstaller_script_restores_pre_existing_settings_json(self):
+        """Test uninstall.sh restores pre-existing settings.json with user keys and cleans up backup."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "test_repo"
+            claude_dir = sandbox / ".claude"
+            claude_dir.mkdir(parents=True)
+
+            pre_existing = {
+                "theme": "nord",
+                "custom_api_endpoint": "https://api.internal.corp/v1",
+                "my_special_token_id": "tok_991823",
+                "permissions": {"allow": ["custom_cmd"]},
+            }
+            settings_file = claude_dir / "settings.json"
+            settings_file.write_text(json.dumps(pre_existing, indent=2), encoding="utf-8")
+
+            proc_inst = self.run_installer("--target", "claude", "--mode", "local", str(sandbox), "--non-interactive")
+            self.assertEqual(proc_inst.returncode, 0)
+
+            bak_file = claude_dir / "settings.json.pre-harness.bak"
+            self.assertTrue(bak_file.is_file(), "settings.json.pre-harness.bak must be created on install")
+
+            merged = json.loads(settings_file.read_text(encoding="utf-8"))
+            self.assertIn("env", merged, "Merged settings should contain harness defaults")
+            self.assertEqual(merged["theme"], "nord")
+            self.assertEqual(merged["custom_api_endpoint"], "https://api.internal.corp/v1")
+
+            # Execute uninstall.sh directly via run_uninstaller
+            proc_uninst = self.run_uninstaller("--local", str(sandbox), "--yes")
+            self.assertEqual(proc_uninst.returncode, 0, f"Uninstaller failed: {proc_uninst.stderr}\n{proc_uninst.stdout}")
+
+            self.assertTrue(settings_file.is_file(), "settings.json must exist after uninstall")
+            self.assertFalse(bak_file.exists(), "settings.json.pre-harness.bak must be removed after restore")
+
+            restored = json.loads(settings_file.read_text(encoding="utf-8"))
+            self.assertEqual(restored, pre_existing, "settings.json was not restored to its exact pre-harness state")
+            self.assertNotIn("env", restored, "Harness defaults must not remain in restored settings.json")
+
+            # Unmodified harness additions inside .claude must be removed
+            self.assertFalse((claude_dir / "agents").exists())
+            self.assertFalse((claude_dir / "skills").exists())
+            self.assertFalse((claude_dir / "tools").exists())
+
+    def test_pre_existing_agents_dir_backed_up_and_restored(self):
+        """Test pre-existing .agents directory is backed up on install and restored on uninstall."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "test_repo"
+            sandbox.mkdir()
+
+            agents_dir = sandbox / ".agents"
+            agents_dir.mkdir()
+            user_agent_file = agents_dir / "my_custom_agent.md"
+            user_agent_file.write_text("# My Custom Agent", encoding="utf-8")
+
+            proc_inst = self.run_installer("--target", "agy", "--mode", "local", str(sandbox), "--non-interactive")
+            self.assertEqual(proc_inst.returncode, 0)
+            self.assertTrue((sandbox / ".agents").is_symlink(), ".agents should now be a symlink")
+            self.assertTrue((sandbox / ".agents.pre-harness.bak").is_dir(), ".agents directory must be backed up")
+
+            proc_uninst = self.run_uninstaller("--local", str(sandbox), "--yes")
+            self.assertEqual(proc_uninst.returncode, 0)
+            self.assertFalse((sandbox / ".agents").is_symlink(), ".agents must no longer be a symlink")
+            self.assertTrue((sandbox / ".agents").is_dir(), ".agents must be restored as a directory")
+            self.assertTrue((sandbox / ".agents" / "my_custom_agent.md").is_file(), "User agent file must be intact")
+            self.assertFalse((sandbox / ".agents.pre-harness.bak").exists(), "Backup directory must be removed after restore")
+
+    def test_gitignore_trailing_newline_safety(self):
+        """Test .gitignore entries are safely appended even if file lacks a trailing newline."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "test_repo"
+            sandbox.mkdir()
+
+            gitignore = sandbox / ".gitignore"
+            # Write without trailing newline
+            gitignore.write_text("node_modules", encoding="utf-8")
+
+            proc_inst = self.run_installer("--target", "all", "--mode", "local", str(sandbox), "--non-interactive")
+            self.assertEqual(proc_inst.returncode, 0)
+
+            content = gitignore.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            self.assertIn("node_modules", lines)
+            self.assertIn(".agents/", lines)
+            self.assertFalse(any("node_modules.agents" in line for line in lines), "Newline was not inserted between entries")
+
 
 if __name__ == "__main__":
     unittest.main()

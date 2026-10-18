@@ -196,6 +196,7 @@ ensure_gitignore_entries() {
     fi
 
     touch "$gitignore_file"
+    [ -s "$gitignore_file" ] && [ -n "$(tail -c1 "$gitignore_file")" ] && echo "" >> "$gitignore_file"
     for entry in "${entries[@]}"; do
         if ! grep -qxF "$entry" "$gitignore_file" 2>/dev/null; then
             echo "$entry" >> "$gitignore_file"
@@ -348,6 +349,11 @@ install_claude_global() {
     cp -rf "${claude_tmpl}/settings/"* "${claude_dest}/settings/"
     cp -f "${claude_tmpl}/CLAUDE.md" "${claude_dest}/CLAUDE.md"
 
+    local existing_user_settings="${claude_dest}/settings.json"
+    if [ -f "$existing_user_settings" ] && [ ! -f "${existing_user_settings}.pre-harness.bak" ]; then
+        cp -p "$existing_user_settings" "${existing_user_settings}.pre-harness.bak"
+    fi
+
     python3 -m harness.installer.settings merge-claude \
         --user-settings "${claude_dest}/settings.json" \
         --template-settings "${claude_tmpl}/settings/core.json" \
@@ -438,7 +444,21 @@ install_agy_local() {
     cp -f "${agy_tmpl}/GEMINI.md" "${dest_orch}/GEMINI.md"
     cp -f "${agy_tmpl}/AGENTS.md" "${dest_orch}/AGENTS.md"
 
-    rm -rf "${dest_agents}" 2>/dev/null || true
+    if [ -L "${dest_agents}" ]; then
+        rm -f "${dest_agents}"
+    elif [ -d "${dest_agents}" ]; then
+        local bak_agents="${dest_agents}.pre-harness.bak"
+        if [ ! -e "$bak_agents" ]; then
+            mv "$dest_agents" "$bak_agents"
+            echo "  ⚠️ Warning: Pre-existing directory ${dest_agents} backed up to ${bak_agents}"
+        else
+            echo "  ⚠️ Warning: Pre-existing directory ${dest_agents} already backed up at ${bak_agents}"
+        fi
+    elif [ -e "${dest_agents}" ]; then
+        local bak_agents="${dest_agents}.pre-harness.bak"
+        mv "$dest_agents" "$bak_agents"
+        echo "  ⚠️ Warning: Pre-existing file ${dest_agents} backed up to ${bak_agents}"
+    fi
     ln -sfn .orchestration "${dest_agents}"
 
     ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/"
@@ -472,6 +492,11 @@ install_claude_local() {
     chmod +x "${dest_claude}/tools/"*.sh "${dest_claude}/tools/"*.py 2>/dev/null || true
     cp -rf "${claude_tmpl}/settings/"* "${dest_claude}/settings/"
     cp -f "${claude_tmpl}/CLAUDE.md" "${dest_claude}/CLAUDE.md"
+
+    local existing_user_settings="${dest_claude}/settings.json"
+    if [ -f "$existing_user_settings" ] && [ ! -f "${existing_user_settings}.pre-harness.bak" ]; then
+        cp -p "$existing_user_settings" "${existing_user_settings}.pre-harness.bak"
+    fi
 
     python3 -m harness.installer.settings merge-claude \
         --user-settings "${dest_claude}/settings.json" \
@@ -682,6 +707,23 @@ run_uninstall() {
                 fi
             fi
 
+            # Clean symlinks
+            [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
+            [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
+
+            # Safely restore pre-existing settings if backup exists
+            if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
+                mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
+            fi
+
+            # Safely clean empty directories without wiping user modifications
+            for d in "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${GEMINI_CONFIG_DIR}/plugins/agy-harness" "${USER_HOME}/.orchestration" "${AGENTS_HOME_DIR}" "${CLAUDE_HOME_DIR}" "${OPENCODE_HOME_DIR}"; do
+                if [ -d "$d" ]; then
+                    find "$d" -depth -type d -empty -delete 2>/dev/null || true
+                    rmdir "$d" 2>/dev/null || true
+                fi
+            done
+
             if [ "$PURGE" = true ]; then
                 rm -rf "${SGLANG_STACK_DIR}"
                 rm -rf "${BACKEND_DIR}"
@@ -691,10 +733,25 @@ run_uninstall() {
         fi
     else
         if [ "$DRY_RUN" = false ]; then
-            rm -rf "${TARGET_REPO}/.agents" 2>/dev/null || true
-            if [ -d "${TARGET_REPO}/.orchestration" ]; then
-                rmdir "${TARGET_REPO}/.orchestration" 2>/dev/null || true
+            # Safely restore pre-existing settings if backup exists
+            if [ -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak" ]; then
+                mv -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak" "${TARGET_REPO}/.claude/settings.json"
             fi
+            # Only remove .agents if it is a symlink
+            if [ -L "${TARGET_REPO}/.agents" ]; then
+                rm -f "${TARGET_REPO}/.agents"
+            fi
+            # Restore pre-harness .agents directory if backed up
+            if [ -d "${TARGET_REPO}/.agents.pre-harness.bak" ] && [ ! -e "${TARGET_REPO}/.agents" ]; then
+                mv "${TARGET_REPO}/.agents.pre-harness.bak" "${TARGET_REPO}/.agents"
+            fi
+            # Safely clean empty directories only - preserve any user-modified files
+            for d in "${TARGET_REPO}/.agents" "${TARGET_REPO}/.claude" "${TARGET_REPO}/.opencode" "${TARGET_REPO}/.orchestration"; do
+                if [ -d "$d" ]; then
+                    find "$d" -depth -type d -empty -delete 2>/dev/null || true
+                    rmdir "$d" 2>/dev/null || true
+                fi
+            done
             echo "✅ Removed ${TARGET_REPO}/.agents and ${TARGET_REPO}/.orchestration"
         fi
     fi

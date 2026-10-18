@@ -5,6 +5,7 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, Union
@@ -24,6 +25,7 @@ def merge_claude_settings_file(
     user_settings_path: Union[str, Path],
     template_settings_path: Union[str, Path],
     output_path: Union[str, Path],
+    backup_pre_existing: bool = True,
 ) -> Dict[str, Any]:
     """Merge Claude Code user settings with harness template settings.
 
@@ -49,6 +51,15 @@ def merge_claude_settings_file(
                 user_data = json.load(f)
         except Exception:
             user_data = {}
+
+        if backup_pre_existing:
+            bak_p = user_p.with_name(f"{user_p.name}.pre-harness.bak")
+            if not bak_p.exists():
+                shutil.copy2(user_p, bak_p)
+    elif out_p.is_file() and backup_pre_existing:
+        bak_out = out_p.with_name(f"{out_p.name}.pre-harness.bak")
+        if not bak_out.exists():
+            shutil.copy2(out_p, bak_out)
 
     # Merge: template defaults as base, user settings as override (preserving user custom config)
     merged = merge_json_settings(tmpl_data, user_data)

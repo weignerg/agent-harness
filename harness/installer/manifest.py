@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -178,9 +179,12 @@ class ManifestEngine:
             self.record_directory(root)
 
         for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+            dirnames[:] = [d for d in dirnames if not d.endswith(".pre-harness.bak")]
             dp = Path(dirpath).resolve()
             self.record_directory(dp)
             for fn in filenames:
+                if fn.endswith(".pre-harness.bak"):
+                    continue
                 fp = dp / fn
                 if exclude_manifest and fp.resolve() == self.manifest_path.resolve():
                     continue
@@ -231,6 +235,7 @@ class ManifestEngine:
         """Roll back installed files in reverse order."""
         removed_files: List[str] = []
         preserved_files: List[str] = []
+        restored_files: List[str] = []
         already_missing: List[str] = []
         removed_symlinks: List[str] = []
         removed_directories: List[str] = []
@@ -243,6 +248,17 @@ class ManifestEngine:
                 continue
             if not p.is_file():
                 already_missing.append(f_entry["path"])
+                continue
+
+            bak_p = p.with_name(f"{p.name}.pre-harness.bak")
+            if bak_p.is_file():
+                if not dry_run:
+                    try:
+                        shutil.copy2(bak_p, p)
+                        bak_p.unlink()
+                    except OSError:
+                        pass
+                restored_files.append(f_entry["path"])
                 continue
 
             current_hash = compute_sha256(p)
@@ -295,6 +311,7 @@ class ManifestEngine:
         return {
             "removed_files": removed_files,
             "preserved_files": preserved_files,
+            "restored_files": restored_files,
             "already_missing": already_missing,
             "removed_symlinks": removed_symlinks,
             "removed_directories": removed_directories,
@@ -369,8 +386,13 @@ def _run_cli() -> None:
         print("=" * 80)
         print(f"  Files Removed        : {len(res['removed_files'])}")
         print(f"  Files Preserved      : {len(res['preserved_files'])}")
+        print(f"  Files Restored       : {len(res['restored_files'])}")
         print(f"  Symlinks Removed     : {len(res['removed_symlinks'])}")
         print(f"  Directories Removed  : {len(res['removed_directories'])}")
+        if res.get("restored_files"):
+            print("\n  🔄 Restored pre-existing user configurations:")
+            for r in res["restored_files"]:
+                print(f"    - {r}")
         if res["preserved_files"]:
             print("\n  ⚠️ Preserved user-modified files:")
             for p in res["preserved_files"]:
