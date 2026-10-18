@@ -34,7 +34,6 @@ You can't spawn agents: the repo's Agent hook denies spawns from inside an agent
 ## Safety Invariants & Constraints
 
 - **Orchestrator Non-Termination Invariant**: Never kill or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`) nor via task/subagent tools.
-- **Hard Constraint**: NEVER read, write, or modify `~/HISTORY.md`.
 
 ## Reporting
 

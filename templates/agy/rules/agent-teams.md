@@ -100,7 +100,6 @@ All agents in the Antigravity harness run on official **Google Gemini 3.8** mode
 ## Handoff Convention
 - Each `team-orchestrator`, upon completing its issue, writes a session handoff to `.agents/handoffs/{session-description}-dd-mm-yyyy-handoff.md`.
 - The `supreme-orchestrator` writes the master session handoff to `.agents/handoffs/supreme-orchestrator-dd-mm-yyyy-handoff.md`.
-- Note: `~/HISTORY.md` is strictly reserved for the primary orchestrator (`supreme-orchestrator`); subagents and leaf agents must NEVER read, write, or modify `~/HISTORY.md`.
 
 ---
 

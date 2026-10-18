@@ -47,7 +47,6 @@ Follow "Workflow: post review findings" in `~/.claude/orchestration/team-orchest
 ## Safety Invariants & Constraints
 
 - **Orchestrator Non-Termination Invariant**: Never kill or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`) nor via task/subagent tools.
-- **Hard Constraint**: NEVER read, write, or modify `~/HISTORY.md`.
 
 ## Reporting Protocol
 

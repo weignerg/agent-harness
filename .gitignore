@@ -40,6 +40,16 @@ worktrees/
 /opencode.json
 /tui.json
 
+# Session handoffs
+.orchestration/handoffs/*.md
+!.orchestration/handoffs/.gitkeep
+.agents/handoffs/*.md
+!.agents/handoffs/.gitkeep
+.opencode/handoffs/*.md
+!.opencode/handoffs/.gitkeep
+.claude/handoffs/*.md
+!.claude/handoffs/.gitkeep
+
 # Whitelist tracked files and templates
 !.orchestration/handoffs/
 !.orchestration/**/.gitkeep
