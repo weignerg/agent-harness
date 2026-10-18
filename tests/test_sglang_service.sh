@@ -15,6 +15,7 @@ need '--reasoning-parser qwen3' "reasoning parser"
 need '--port 30000' "port 30000"
 need '--host 127.0.0.1' "loopback only"
 need '--context-length (262144|\$\{?SGLANG_CONTEXT_LENGTH)' "256k context (default 262144)"
+need 'Environment="SGLANG_CONTEXT_LENGTH=262144"' "explicit SGLANG_CONTEXT_LENGTH default"
 need 'PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' "expandable_segments allocator"
 need 'CUDA_HOME=/opt/cuda' "CUDA_HOME"
 if grep -qE -- '--context-length [0-9]+\$' "$U"; then fail "corrupted context-length string in template"; else pass "unbroken context-length parameter"; fi

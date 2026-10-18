@@ -55,23 +55,42 @@ class WorktreeManager:
             return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
         if target_runtime == "opencode":
             return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
-        if target_runtime == "agy":
-            return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
-        if target_runtime == "orchestration":
-            return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
 
-        # Priority 1 for unified agent-harness: check if .orchestration exists
-        if (self.repo_dir / ".orchestration").is_dir():
-            return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
-        if (self.repo_dir / ".agents").is_dir():
-            return (self.repo_dir / ".agents" / "worktrees" / branch_name).resolve()
-        if (self.repo_dir / ".claude").is_dir() or (self.repo_dir / "files" / ".claude").is_dir():
-            return (self.repo_dir / ".claude" / "worktrees" / branch_name).resolve()
-        if (self.repo_dir / ".opencode").is_dir():
-            return (self.repo_dir / ".opencode" / "worktrees" / branch_name).resolve()
-
-        # Canonical Priority 1 default fallback for unified agent-harness: .orchestration/worktrees/<branch>
-        return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
+        # Authoritative Directive: Option A (Strict Global Centralization)
+        try:
+            from harness.paths import (
+                is_local_orchestration,
+                resolve_authoritative_orchestration_root,
+                resolve_true_repo_root,
+            )
+            true_repo = resolve_true_repo_root(self.repo_dir) or self.repo_dir
+            orch_root = resolve_authoritative_orchestration_root(true_repo)
+            if is_local_orchestration(true_repo):
+                return (orch_root / "worktrees" / branch_name).resolve()
+            repo_name = true_repo.name
+            return (orch_root / "worktrees" / repo_name / branch_name).resolve()
+        except ImportError:
+            anchors = [
+                self.repo_dir / ".orchestration_root",
+                self.repo_dir / ".orchestration" / ".orchestration_root",
+            ]
+            is_local = False
+            for anchor in anchors:
+                if anchor.is_file():
+                    try:
+                        content = anchor.read_text(encoding="utf-8")
+                        for line in content.splitlines():
+                            line_clean = line.strip().lower()
+                            if line_clean == "mode=local" or line_clean.startswith("mode=local"):
+                                is_local = True
+                                break
+                    except Exception:
+                        pass
+            if is_local:
+                return (self.repo_dir / ".orchestration" / "worktrees" / branch_name).resolve()
+            repo_name = self.repo_dir.name
+            orch_root = Path.home() / ".orchestration"
+            return (orch_root / "worktrees" / repo_name / branch_name).resolve()
 
     def provision_worktree(self, branch_name: str, target_dir: Optional[Path | str] = None, runtime: Optional[str] = None) -> Path:
         resolved_target = Path(target_dir) if target_dir is not None else self.default_worktree_path(branch_name, runtime=runtime)

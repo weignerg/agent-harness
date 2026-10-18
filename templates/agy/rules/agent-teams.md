@@ -71,7 +71,7 @@ All agents in the Antigravity harness run on official **Google Gemini 3.8** mode
    - `develop` is the active integration branch and **must always remain checked out in the local repository root**.
    - All feature/fix worktrees branch from `develop` and all Pull Requests target `develop`.
 2. **Issue First**: Every task is tracked by a GitHub Issue (`gh issue create`); the issue is the unit of work.
-3. **Worktree Isolation (`<repo>/.agents/worktrees/<branch>`)**: Before any implementation work begins, `team-orchestrator` provisions `<type>/issue-<n>-<desc>` inside an isolated worktree at `<repo>/.agents/worktrees/<branch>` (via `worktree_create` MCP tool or `~/.agents/tools/worktree_manager.py`). The repository root remains permanently anchored on `develop`.
+3. **Worktree Isolation (`<repo>/.orchestration/worktrees/<branch>`)**: Before any implementation work begins, `team-orchestrator` provisions `<type>/issue-<n>-<desc>` inside an isolated worktree at `<repo>/.orchestration/worktrees/<branch>` (via `worktree_create` MCP tool or `~/.agents/tools/worktree_manager.py`). The repository root remains permanently anchored on `develop`.
 4. **Implement & Verify**: `worker` and `tester` (assisted by `grunt` and `scout`) implement changes, run the TDD pipeline, and make Conventional Commits inside the worktree.
 5. **Automatic Adversarial Review Loop**:
    - Before declaring completion or requesting merge approval, `team-orchestrator` automatically dispatches `reviewer` (`Model: "flash"`) on the worktree diff.

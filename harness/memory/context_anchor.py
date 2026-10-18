@@ -74,11 +74,12 @@ class ContextAnchorInjector:
                     return cand
 
         # Global anchor file ~/.orchestration/.orchestration_root or ~/.orchestration/rules/agent-teams.md
-        global_anchor = Path.home() / ".orchestration" / ".orchestration_root"
-        if global_anchor.is_file():
-            parsed = parse_anchor_file(global_anchor)
-            if parsed and (parsed / "rules" / "agent-teams.md").is_file():
-                return parsed / "rules" / "agent-teams.md"
+        if not base_dir:
+            global_anchor = Path.home() / ".orchestration" / ".orchestration_root"
+            if global_anchor.is_file():
+                parsed = parse_anchor_file(global_anchor)
+                if parsed and (parsed / "rules" / "agent-teams.md").is_file():
+                    return parsed / "rules" / "agent-teams.md"
 
         return None
 

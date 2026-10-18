@@ -705,6 +705,416 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ATTENTION: INSTALLATION INCOMPLETE - MANUAL INTERVENTION REQUIRED", proc.stdout)
             self.assertIn("sudo ufw allow 4096/tcp comment OpenCode Server", proc.stdout)
 
+    def test_issue7_post_install_terminal_box_and_password(self):
+        """Test Issue #7: Post-install UX, automatic password generation (0600), and terminal box."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--non-interactive",
+                env=env,
+            )
+
+            # 1. Verify env file exists with mode 0600
+            env_file = sandbox / ".config" / "opencode-backends" / "env"
+            self.assertTrue(env_file.is_file())
+            self.assertEqual(oct(env_file.stat().st_mode)[-3:], "600")
+
+            # 2. Verify 16-character alphanumeric password
+            content = env_file.read_text(encoding="utf-8")
+            pass_line = [line for line in content.splitlines() if line.startswith("OPENCODE_SERVER_PASSWORD=")]
+            self.assertTrue(len(pass_line) == 1)
+            gen_pass = pass_line[0].split("=")[1]
+            self.assertEqual(len(gen_pass), 16)
+            self.assertTrue(gen_pass.isalnum())
+
+            # 3. Verify terminal box
+            self.assertIn("IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL", proc.stdout)
+            self.assertIn("opencode", proc.stdout)
+
+            # 4. Verify password displayed in summary
+            self.assertIn(f"password: {gen_pass} (auto-generated)", proc.stdout)
+
+    def test_issue7_download_models_flags(self):
+        """Test Issue #7: --download-models and --no-download-models flags."""
+        proc_dl = self.run_installer("--dry-run", "--target", "opencode", "--download-models")
+        self.assertEqual(proc_dl.returncode, 0)
+        self.assertIn("Download Opt  : true", proc_dl.stdout)
+        self.assertIn("Would verify model weights", proc_dl.stdout)
+
+        proc_nodl = self.run_installer("--dry-run", "--target", "opencode", "--no-download-models")
+        self.assertEqual(proc_nodl.returncode, 0)
+        self.assertIn("Download Opt  : false", proc_nodl.stdout)
+        self.assertIn("Would verify model weights", proc_nodl.stdout)
+
+    def test_issue7_default_firewall_flag(self):
+        """Test Issue #7: Default firewall enabled and --no-firewall bypass."""
+        proc_def = self.run_installer("--dry-run", "--target", "opencode")
+        self.assertEqual(proc_def.returncode, 0)
+        self.assertIn("Applying UFW firewall rules", proc_def.stdout)
+
+        proc_nofw = self.run_installer("--dry-run", "--target", "opencode", "--no-firewall")
+        self.assertEqual(proc_nofw.returncode, 0)
+        self.assertIn("Firewall rule management skipped (--no-firewall", proc_nofw.stdout)
+
+    def test_issue7_healthcheck_bypass_flags(self):
+        """Test Issue #7: --healthcheck and --no-healthcheck flags."""
+        proc_skip = self.run_installer("--dry-run", "--target", "opencode", "--skip-healthcheck")
+        self.assertEqual(proc_skip.returncode, 0)
+        self.assertIn("Backend healthchecks skipped (--no-healthcheck)", proc_skip.stdout)
+
+    def test_issue7_sglang_context_length_service_fallback(self):
+        """Test Issue #7: opencode-sglang-ornith-35b.service defines guaranteed SGLANG_CONTEXT_LENGTH fallback."""
+        service_file = REPO_ROOT / "config" / "systemd" / "opencode-sglang-ornith-35b.service"
+        self.assertTrue(service_file.is_file())
+        content = service_file.read_text(encoding="utf-8")
+        self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', content)
+        self.assertIn('--context-length ${SGLANG_CONTEXT_LENGTH}', content)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+            deployed_service = sandbox / ".config" / "systemd" / "user" / "opencode-sglang-ornith-35b.service"
+            self.assertTrue(deployed_service.is_file())
+            deployed_content = deployed_service.read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=', deployed_content)
+            self.assertIn('--context-length ${SGLANG_CONTEXT_LENGTH}', deployed_content)
+
+    def test_issue7_sglang_venv_auto_healing(self):
+        """Test Issue #7: SGLang venv auto-heals when import sglang initially fails in venv."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            # Mock candidate local sglang repository
+            mock_sglang = sandbox / "git" / "sglang" / "python"
+            mock_sglang.mkdir(parents=True)
+            (mock_sglang / "pyproject.toml").touch()
+
+            # Mock venv with python3 script that simulates broken sglang until pip install -e is called
+            mock_stack = sandbox / ".local" / "share" / "opencode-sglang-stack"
+            venv_bin = mock_stack / "venv" / "bin"
+            venv_bin.mkdir(parents=True)
+
+            py_mock = venv_bin / "python3"
+            py_mock.write_text(
+                '#!/bin/sh\n'
+                'STATE_FILE="$(dirname "$0")/sglang_state"\n'
+                'if [ "$1" = "-c" ] && [ "$2" = "import sglang" ]; then\n'
+                '    if [ -f "$STATE_FILE" ]; then\n'
+                '        exit 0\n'
+                '    else\n'
+                '        echo "ModuleNotFoundError: No module named sglang" >&2\n'
+                '        exit 1\n'
+                '    fi\n'
+                'elif [ "$1" = "-m" ] && [ "$2" = "pip" ] && [ "$3" = "install" ]; then\n'
+                '    touch "$STATE_FILE"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            py_mock.chmod(0o755)
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+            self.assertIn("sglang import check failed", proc.stdout)
+            self.assertIn("Successfully auto-healed sglang via editable install", proc.stdout)
+
+    def test_issue7_nvidia_driver_mismatch_detection(self):
+        """Test Issue #7: NVIDIA driver mismatch detection emits clean minimal reboot instruction box."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            mock_nv = mock_bin / "nvidia-smi"
+            mock_nv.write_text(
+                '#!/bin/sh\n'
+                'echo "Failed to initialize NVML: Driver/library version mismatch" >&2\n'
+                'exit 18\n',
+                encoding="utf-8",
+            )
+            mock_nv.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+                "COLBERT_TIMER_RETRIES": "1",
+                "OPENCODE_SERVER_RETRIES": "1",
+                "SGLANG_HEALTHCHECK_RETRIES": "1",
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            # Healthcheck is expected to fail with non-zero exit code due to live service failure
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("REBOOT REQUIRED: NVIDIA DRIVER UPGRADE DETECTED", proc.stderr)
+            self.assertIn("sudo reboot", proc.stderr)
+            self.assertIn("After reboot, resume installation with:", proc.stderr)
+            self.assertIn("install.sh", proc.stderr)
+            self.assertNotIn("Kernel Module Version:", proc.stderr)
+            self.assertNotIn("Diagnostic Information:", proc.stderr)
+
+    def test_issue7_sglang_warmup_flags(self):
+        """Test Issue #7: --skip-warmup and --warmup flag documentation and behavior."""
+        proc_help = self.run_installer("--help")
+        self.assertEqual(proc_help.returncode, 0)
+        self.assertIn("--skip-warmup / --warmup", proc_help.stdout)
+
+        proc_skip = self.run_installer("--dry-run", "--target", "opencode", "--skip-warmup")
+        self.assertEqual(proc_skip.returncode, 0)
+        self.assertIn("SGLang model warmup skipped (--skip-warmup)", proc_skip.stdout)
+
+    def test_issue7_sglang_healthcheck_loading_progress_and_success(self):
+        """Test Issue #7: SGLang healthcheck displays live loading progress and succeeds once model is loaded."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            state_file = mock_bin / "curl_calls.txt"
+
+            mock_curl = mock_bin / "curl"
+            mock_curl.write_text(
+                '#!/bin/sh\n'
+                f'STATE="{state_file}"\n'
+                'for arg in "$@"; do\n'
+                '    if echo "$arg" | grep -q "30000/v1/models"; then\n'
+                '        COUNT=0\n'
+                '        [ -f "$STATE" ] && COUNT=$(cat "$STATE")\n'
+                '        COUNT=$((COUNT + 1))\n'
+                '        echo "$COUNT" > "$STATE"\n'
+                '        if [ "$COUNT" -eq 1 ]; then\n'
+                '            if echo "$*" | grep -q "%{http_code}"; then\n'
+                '                printf "\\n503"\n'
+                '            else\n'
+                '                printf \'{"error":"Loading model weights"}\'\n'
+                '            fi\n'
+                '            exit 0\n'
+                '        else\n'
+                '            if echo "$*" | grep -q "%{http_code}"; then\n'
+                '                printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200\'\n'
+                '            else\n'
+                '                printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n\'\n'
+                '            fi\n'
+                '            exit 0\n'
+                '        fi\n'
+                '    elif echo "$arg" | grep -q "4096"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "OpenCode Server\\n200"\n'
+                '        else\n'
+                '            printf "OpenCode Server\\n"\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    fi\n'
+                'done\n'
+                'exit 1\n',
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            mock_systemctl = mock_bin / "systemctl"
+            mock_systemctl.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
+                '    echo "active"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            mock_systemctl.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+            self.assertIn("SGLang is loading model weights into VRAM", proc.stdout)
+            self.assertIn("SGLang inference engine is active and serving on port 30000.", proc.stdout)
+            self.assertIn("All backend service healthchecks passed!", proc.stdout)
+
+    def test_issue7_sglang_healthcheck_early_failure_on_failed_service(self):
+        """Test Issue #7: SGLang healthcheck detects systemd service failure immediately and aborts without waiting 120s."""
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            mock_curl = mock_bin / "curl"
+            mock_curl.write_text(
+                '#!/bin/sh\n'
+                'for arg in "$@"; do\n'
+                '    if echo "$arg" | grep -q "4096"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "OpenCode Server\\n200"\n'
+                '        else\n'
+                '            printf "OpenCode Server\\n"\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    fi\n'
+                'done\n'
+                'exit 1\n',
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            mock_systemctl = mock_bin / "systemctl"
+            mock_systemctl.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
+                '    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then\n'
+                '        echo "failed"\n'
+                '        exit 1\n'
+                '    fi\n'
+                '    echo "active"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            mock_systemctl.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            start_time = time.time()
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            duration = time.time() - start_time
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertLess(duration, 15.0, "Early failure should abort immediately, not wait 120s")
+            self.assertIn("SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait.", proc.stdout)
+            self.assertIn("SGLang inference engine failed healthcheck.", proc.stdout)
+            self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
+
+    def test_issue7_opencode_server_healthcheck_early_failure(self):
+        """Test Issue #7: OpenCode server healthcheck detects systemd service failure immediately and aborts without waiting 30s."""
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            mock_curl = mock_bin / "curl"
+            mock_curl.write_text(
+                '#!/bin/sh\n'
+                'for arg in "$@"; do\n'
+                '    if echo "$arg" | grep -q "30000"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200\'\n'
+                '        else\n'
+                '            printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n\'\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    fi\n'
+                'done\n'
+                'exit 1\n',
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            mock_systemctl = mock_bin / "systemctl"
+            mock_systemctl.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
+                '    if [ "$3" = "opencode-server.service" ] || [ "$4" = "opencode-server.service" ]; then\n'
+                '        echo "failed"\n'
+                '        exit 1\n'
+                '    fi\n'
+                '    echo "active"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            mock_systemctl.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            start_time = time.time()
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            duration = time.time() - start_time
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertLess(duration, 15.0, "Early failure should abort immediately, not wait 30s")
+            self.assertIn("OpenCode server (opencode-server.service) status is failed; aborting wait.", proc.stdout)
+            self.assertIn("OpenCode server failed healthcheck.", proc.stdout)
+            self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

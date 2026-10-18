@@ -23,6 +23,7 @@ tests/tmp/
 
 # Worktree directories
 .orchestration/worktrees/
+.orchestration/worktrees/*
 .orchestration/tmp/
 .orchestration/logs/*.log
 .orchestration/memory/*.db

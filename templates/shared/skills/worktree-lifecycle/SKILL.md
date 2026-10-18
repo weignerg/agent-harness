@@ -14,7 +14,7 @@ Use this skill to create and manage isolated git worktrees for development tasks
 ## Commands & Workflows
 1. **Provision Worktree**:
    ```bash
-   python3 ~/.agents/tools/worktree_manager.py create feat/issue-42 .agents/worktrees/feat/issue-42
+   python3 ~/.agents/tools/worktree_manager.py create feat/issue-42 .orchestration/worktrees/feat/issue-42
    ```
 2. **List Worktrees**:
    ```bash
@@ -22,7 +22,7 @@ Use this skill to create and manage isolated git worktrees for development tasks
    ```
 3. **Prune Worktree**:
    ```bash
-   python3 ~/.agents/tools/worktree_manager.py prune .agents/worktrees/feat/issue-42
+   python3 ~/.agents/tools/worktree_manager.py prune .orchestration/worktrees/feat/issue-42
    ```
 
-When the `worktree-manager` MCP server is active, call `worktree_create`, `worktree_list`, and `worktree_remove` directly (default worktree path is `.agents/worktrees/<branch>`).
+When the `worktree-manager` MCP server is active, call `worktree_create`, `worktree_list`, and `worktree_remove` directly (default worktree path is `.orchestration/worktrees/<branch>`).
