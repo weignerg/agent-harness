@@ -250,6 +250,9 @@ if [ "$MODE" = "global" ]; then
         fi
     fi
 
+    # Clean anchor file
+    rm -f "${USER_HOME}/.orchestration/.orchestration_root"
+
     # Safely clean empty directories without wiping user modifications
     for d in "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${GEMINI_CONFIG_DIR}/plugins/agy-harness" "${USER_HOME}/.orchestration" "${AGENTS_HOME_DIR}" "${CLAUDE_HOME_DIR}" "${OPENCODE_HOME_DIR}"; do
         if [ -d "$d" ]; then
@@ -275,6 +278,9 @@ else
     if [ -f "$manifest_file" ]; then
         python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" "${manifest_args[@]}"
     fi
+
+    # Clean anchor files
+    rm -f "${repo_path}/.orchestration_root" "${repo_path}/.orchestration/.orchestration_root"
 
     # Only remove .agents if it is a symlink
     if [ -L "${repo_path}/.agents" ]; then

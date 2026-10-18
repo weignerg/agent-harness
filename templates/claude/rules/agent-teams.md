@@ -42,6 +42,7 @@ All agents in the Antigravity harness run on official **Google Gemini 3.8** mode
 
 ## Orchestrator Non-Termination Invariant
 - **Never Kill `supreme-orchestrator` or `team-orchestrator`**: Every agent is strictly prohibited from killing, stopping, or terminating `supreme-orchestrator` or any `team-orchestrator` instance — neither via OS commands (`kill`, `pkill`, `killall`, `systemctl stop`) nor via Antigravity subagent/task management tools (`manage_subagents` with `Action: "kill"` or `manage_task` with `Action: "kill"`).
+- **Directory Discipline Invariant**: Never create, resolve, or write to an ad-hoc `.orchestration` directory inside a git worktree or arbitrary working subdirectory. All task handoffs, memory indices, logs, and worktrees must strictly bind to the authoritative anchored `.orchestration` root (either `<main_repo>/.orchestration` for local harnesses or `~/.orchestration` for global harnesses).
 
 ---
 

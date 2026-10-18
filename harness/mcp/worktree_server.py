@@ -32,8 +32,9 @@ class WorktreeCommitInput(StrictModel):
 
 @server.tool(name="worktree_create", description="Provision an isolated git worktree for a branch")
 def worktree_create(branch: str, path: Optional[str] = None, base: Optional[str] = "develop") -> Dict[str, Any]:
+    from harness.paths import resolve_true_repo_root
     from scripts.worktree_manager import WorktreeManager
-    manager = WorktreeManager()
+    manager = WorktreeManager(repo_dir=resolve_true_repo_root())
     target_path = Path(path).resolve() if path else manager.default_worktree_path(branch)
     try:
         manager.provision_worktree(branch_name=branch, target_dir=target_path)
@@ -51,7 +52,9 @@ def worktree_create(branch: str, path: Optional[str] = None, base: Optional[str]
 
 @server.tool(name="worktree_list", description="List all active git worktrees")
 def worktree_list() -> List[Dict[str, str]]:
-    res = subprocess.run(["git", "worktree", "list", "--porcelain"], capture_output=True, text=True, check=False)
+    from harness.paths import resolve_true_repo_root
+    repo_dir = resolve_true_repo_root() or Path.cwd()
+    res = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=repo_dir, capture_output=True, text=True, check=False)
     worktrees = []
     current: Dict[str, str] = {}
     for line in res.stdout.splitlines():
@@ -69,8 +72,9 @@ def worktree_list() -> List[Dict[str, str]]:
 
 @server.tool(name="worktree_remove", description="Prune and remove an isolated git worktree")
 def worktree_remove(path: str) -> Dict[str, Any]:
+    from harness.paths import resolve_true_repo_root
     from scripts.worktree_manager import WorktreeManager
-    manager = WorktreeManager()
+    manager = WorktreeManager(repo_dir=resolve_true_repo_root())
     target_path = Path(path).resolve()
     manager.prune_worktree(target_dir=target_path)
     return {
@@ -80,8 +84,9 @@ def worktree_remove(path: str) -> Dict[str, Any]:
 
 @server.tool(name="worktree_commit", description="Create or amend a Conventional Commit in a worktree")
 def worktree_commit(commit_type: str, scope: str, message: str, path: Optional[str] = None) -> Dict[str, Any]:
+    from harness.paths import resolve_true_repo_root
     from scripts.worktree_manager import WorktreeManager
-    manager = WorktreeManager()
+    manager = WorktreeManager(repo_dir=resolve_true_repo_root())
     target_path = Path(path).resolve() if path else Path.cwd()
     manager.semantic_squash_commit(commit_type, scope, message, cwd=target_path)
     return {

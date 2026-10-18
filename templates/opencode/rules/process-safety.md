@@ -1,6 +1,7 @@
 # Rule: Process, Credential & Execution Safety
 
 - **Orchestrator Non-Termination Invariant**: Never kill, stop, or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`, `systemctl stop`) nor via subagent/task management tools (`manage_subagents` with `Action: "kill"` or `manage_task` with `Action: "kill"`).
+- **Directory Discipline Invariant**: Never create, resolve, or write to an ad-hoc `.orchestration` directory inside a git worktree or arbitrary working subdirectory. All task handoffs, memory indices, logs, and worktrees must strictly bind to the authoritative anchored `.orchestration` root (either `<main_repo>/.orchestration` for local harnesses or `~/.orchestration` for global harnesses).
 - **Process Protection**: Never kill or restart parent orchestrator sessions, background terminals, or active inference services (`opencode-sglang-ornith-35b.service` / `ornith-30000.service`).
 - **Credential Protection**: Never print, leak, or commit `HF_TOKEN`, API keys, or credentials. Read environment files only from `%h/.config/opencode-backends/env` or secure keyrings.
 - **Portability**: Never hardcode host-specific mount paths (network mounts, absolute user home directories). Resolve paths via `$HOME` or XDG variables.

@@ -6,10 +6,47 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+try:
+    from harness.paths import resolve_true_repo_root
+except ImportError:
+    def resolve_true_repo_root(start_path: Optional[str | Path] = None) -> Optional[Path]:
+        start = Path(start_path).resolve() if start_path else Path.cwd()
+        if start.is_file():
+            start = start.parent
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cwd=start,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode != 0:
+                res = subprocess.run(
+                    ["git", "rev-parse", "--git-common-dir"],
+                    cwd=start,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            if res.returncode == 0 and res.stdout.strip():
+                p = Path(res.stdout.strip())
+                if not p.is_absolute():
+                    p = (start / p).resolve()
+                if p.name == ".git":
+                    return p.parent
+                return p
+        except Exception:
+            pass
+        for d in [start] + list(start.parents):
+            if (d / ".git").exists() or (d / ".orchestration").is_dir():
+                return d
+        return None
+
 
 class WorktreeManager:
     def __init__(self, repo_dir: Optional[str | Path] = None, runtime: Optional[str] = None):
-        self.repo_dir = Path(repo_dir) if repo_dir else Path.cwd()
+        self.repo_dir = Path(repo_dir).resolve() if repo_dir else (resolve_true_repo_root(Path.cwd()) or Path.cwd())
         self.runtime = runtime
 
     def default_worktree_path(self, branch_name: str, runtime: Optional[str] = None) -> Path:

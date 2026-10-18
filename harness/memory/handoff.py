@@ -1,10 +1,16 @@
 """Durable external IDE handoff protocol generating discrete per-task handoff files."""
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
 from typing import List, Optional
+
+from harness.paths import (
+    resolve_authoritative_orchestration_root,
+    resolve_true_repo_root,
+)
 
 
 def sanitize_task_id(name: str) -> str:
@@ -17,17 +23,40 @@ class TaskHandoff:
     """Manages discrete per-task handoffs stored in polymorphic handoff directory.
     
     Priority resolution:
-    1. .orchestration/handoffs (Harness-agnostic canonical)
+    1. .orchestration/handoffs (Authoritative canonical)
     2. .agents/handoffs
     3. .claude/handoffs
     4. .opencode/handoffs
-    Defaults cleanly to .orchestration/handoffs if none exists yet.
+    Defaults cleanly to authoritative .orchestration/handoffs if none exists yet.
     """
 
     @staticmethod
     def detect_handoff_dir(base_dir: Optional[str | Path] = None) -> Path:
-        """Auto-detect existing handoff directory across supported runtimes, defaulting to .orchestration/handoffs/."""
-        root = Path(base_dir) if base_dir else Path.cwd()
+        """Auto-detect existing handoff directory across supported runtimes, defaulting to authoritative orch_root/handoffs/.
+        
+        Anchors strictly to the authoritative orchestration root, preventing worktree-local ad-hoc handoff dirs.
+        """
+        env_root = os.environ.get("ORCHESTRATION_ROOT")
+        if env_root and env_root.strip():
+            return (Path(env_root.strip()).expanduser().resolve() / "handoffs").resolve()
+
+        true_repo = resolve_true_repo_root(base_dir)
+        target_dir = true_repo if true_repo else (Path(base_dir).resolve() if base_dir else None)
+
+        if target_dir:
+            candidate_dirs = [
+                target_dir / ".orchestration" / "handoffs",
+                target_dir / ".agents" / "handoffs",
+                target_dir / ".claude" / "handoffs",
+                target_dir / ".opencode" / "handoffs",
+            ]
+            for candidate in candidate_dirs:
+                if candidate.is_dir():
+                    return candidate.resolve()
+            return (target_dir / ".orchestration" / "handoffs").resolve()
+
+        # When target_dir is None (no base_dir, not in git repo): check relative cwd
+        root = Path.cwd()
         candidate_dirs = [
             root / ".orchestration" / "handoffs",
             root / ".agents" / "handoffs",
@@ -36,8 +65,9 @@ class TaskHandoff:
         ]
         for candidate in candidate_dirs:
             if candidate.is_dir():
-                return candidate
-        return (root / ".orchestration" / "handoffs") if base_dir else Path(".orchestration/handoffs")
+                return candidate.resolve()
+
+        return (Path(base_dir) / ".orchestration" / "handoffs") if base_dir else Path(".orchestration/handoffs")
 
     def __init__(
         self,
