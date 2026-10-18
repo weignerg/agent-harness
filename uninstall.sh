@@ -12,6 +12,9 @@
 # ==============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
+
 USER_HOME="${USER_HOME:-${HOME}}"
 GEMINI_CONFIG_DIR="${GEMINI_CONFIG_DIR:-${USER_HOME}/.gemini/config}"
 AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
@@ -71,6 +74,18 @@ done
 
 if [ "$DRY_RUN" = true ]; then
     echo "[DRY-RUN] SIMULATING uninstallation of agent-harness components..."
+    if [ "$MODE" = "local" ]; then
+        repo_path="$(python3 -c "import os, sys; print(os.path.abspath(sys.argv[1]))" "${TARGET_REPO:-$(pwd)}")"
+        manifest_file="${repo_path}/.orchestration/install_manifest.json"
+        if [ -f "$manifest_file" ]; then
+            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" --dry-run
+        fi
+    else
+        manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
+        if [ -f "$manifest_file" ]; then
+            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" --dry-run
+        fi
+    fi
     if [ "$PURGE" = true ]; then
         echo "Purging backend stacks and configuration..."
         echo "[DRY-RUN] Would remove directory ${SGLANG_STACK_DIR}"
@@ -80,7 +95,14 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 if [ "$MODE" = "global" ]; then
+    manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
+    if [ -f "$manifest_file" ]; then
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
+    fi
+
+    rm -rf "${GEMINI_CONFIG_DIR}/plugins/agent-harness"
     rm -rf "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
+    rm -rf "${USER_HOME}/.orchestration"
     rm -rf "${AGENTS_HOME_DIR}"
     rm -f "${USER_HOME}/AGENTS.md"
 
@@ -116,7 +138,13 @@ if [ "$MODE" = "global" ]; then
     echo "✅ Removed global harness files."
 else
     repo_path="$(mkdir -p "$TARGET_REPO" && cd "$TARGET_REPO" && pwd)"
+    manifest_file="${repo_path}/.orchestration/install_manifest.json"
+    if [ -f "$manifest_file" ]; then
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
+    fi
     rm -rf "${repo_path}/.agents"
+    rm -rf "${repo_path}/.claude"
+    rm -rf "${repo_path}/.opencode"
     rm -rf "${repo_path}/.orchestration"
     echo "✅ Removed ${repo_path}/.agents and ${repo_path}/.orchestration"
 fi
