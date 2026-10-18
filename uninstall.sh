@@ -6,6 +6,8 @@
 #   --global (default)       Remove global harness plugins, tools, and rules
 #   --local [<repo_path>]    Remove .agents/ and .orchestration/ from repository
 #   --purge                  Purge backend virtual environments and configuration directory
+#   --no-backup              Skip restoring pre-harness backups during uninstall
+#   --wipe-backups           Purge .pre-harness.bak files/dirs (requires literal "yes" or -y)
 #   -n, --dry-run            Simulate uninstallation without deleting files
 #   -y, --yes                Skip confirmation prompts
 #   -h, --help               Show usage help
@@ -28,9 +30,27 @@ MODE="global"
 TARGET_REPO=""
 DRY_RUN=false
 PURGE=false
+NO_BACKUP=false
+WIPE_BACKUPS=false
+NON_INTERACTIVE=false
 
 show_help() {
-    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    cat << 'EOF'
+uninstall.sh - Cleanly remove installed Agent Harness files
+
+Usage:
+  ./uninstall.sh [options]
+
+Options:
+  --global (default)       Remove global harness plugins, tools, and rules
+  --local [<repo_path>]    Remove .agents/ and .orchestration/ from repository
+  --purge                  Purge backend virtual environments and configuration directory
+  --no-backup              Skip restoring pre-harness backups during uninstall
+  --wipe-backups           Purge .pre-harness.bak files/dirs (requires literal "yes" or -y)
+  -n, --dry-run            Simulate uninstallation without deleting files
+  -y, --yes                Skip confirmation prompts
+  -h, --help               Show usage help
+EOF
 }
 
 while [[ $# -gt 0 ]]; do
@@ -49,8 +69,21 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        --local=*|--repo=*)
+            MODE="local"
+            TARGET_REPO="${1#*=}"
+            shift
+            ;;
         --purge)
             PURGE=true
+            shift
+            ;;
+        --no-backup)
+            NO_BACKUP=true
+            shift
+            ;;
+        --wipe-backups)
+            WIPE_BACKUPS=true
             shift
             ;;
         -n|--dry-run)
@@ -58,6 +91,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -y|--yes|--non-interactive)
+            NON_INTERACTIVE=true
             shift
             ;;
         -h|--help)
@@ -72,19 +106,85 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Wipe backups confirmation gate
+if [ "$WIPE_BACKUPS" = true ]; then
+    if [ "$NON_INTERACTIVE" != true ]; then
+        if [ -t 0 ]; then
+            printf "⚠️  WARNING: You are about to permanently purge all .pre-harness.bak backup files and directories.\n"
+            printf "Type 'yes' to confirm: "
+            read -r confirmation
+            if [ "$confirmation" != "yes" ]; then
+                echo "❌ Backup wipe cancelled by user."
+                exit 1
+            fi
+        else
+            echo "❌ Error: --wipe-backups in non-interactive environment requires -y / --yes flag." >&2
+            exit 1
+        fi
+    fi
+fi
+
+if [ "$MODE" = "local" ]; then
+    RESOLVED_REPO="$(python3 -c "import os, sys; print(os.path.abspath(sys.argv[1]))" "${TARGET_REPO:-$(pwd)}")"
+else
+    RESOLVED_REPO=""
+fi
+
+# Dual-stream logging setup (only when not dry-run)
+if [ "$DRY_RUN" != true ]; then
+    TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+    if [ "$MODE" = "local" ]; then
+        LOG_DIR="${RESOLVED_REPO}/.orchestration/logs"
+    else
+        LOG_DIR="${USER_HOME}/.orchestration/logs"
+    fi
+    mkdir -p "$LOG_DIR"
+    LOG_FILE="${LOG_DIR}/uninstall-${TIMESTAMP}.log"
+    LATEST_LOG_LINK="${LOG_DIR}/uninstall.log"
+    ln -sfn "uninstall-${TIMESTAMP}.log" "$LATEST_LOG_LINK"
+
+    finish_logging() {
+        exec 1>&- 2>&-
+        wait 2>/dev/null || true
+    }
+    trap finish_logging EXIT
+
+    exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$LOG_FILE" >&2)
+fi
+
+wipe_pre_harness_backups() {
+    local target_dir="$1"
+    if [ -d "$target_dir" ]; then
+        find "$target_dir" -name "*.pre-harness.bak" 2>/dev/null | while read -r b; do
+            if [ -d "$b" ] && [ ! -L "$b" ]; then
+                rm -rf "$b"
+            else
+                rm -f "$b"
+            fi
+        done
+    fi
+}
+
+manifest_args=()
+[ "$DRY_RUN" = true ] && manifest_args+=(--dry-run)
+[ "$NO_BACKUP" = true ] && manifest_args+=(--no-backup)
+[ "$WIPE_BACKUPS" = true ] && manifest_args+=(--wipe-backups)
+
 if [ "$DRY_RUN" = true ]; then
     echo "[DRY-RUN] SIMULATING uninstallation of agent-harness components..."
     if [ "$MODE" = "local" ]; then
-        repo_path="$(python3 -c "import os, sys; print(os.path.abspath(sys.argv[1]))" "${TARGET_REPO:-$(pwd)}")"
-        manifest_file="${repo_path}/.orchestration/install_manifest.json"
+        manifest_file="${RESOLVED_REPO}/.orchestration/install_manifest.json"
         if [ -f "$manifest_file" ]; then
-            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" --dry-run
+            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" "${manifest_args[@]}"
         fi
     else
         manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
         if [ -f "$manifest_file" ]; then
-            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" --dry-run
+            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" "${manifest_args[@]}"
         fi
+    fi
+    if [ "$WIPE_BACKUPS" = true ]; then
+        echo "[DRY-RUN] Would purge all .pre-harness.bak backup files and directories"
     fi
     if [ "$PURGE" = true ]; then
         echo "Purging backend stacks and configuration..."
@@ -97,7 +197,7 @@ fi
 if [ "$MODE" = "global" ]; then
     manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
     if [ -f "$manifest_file" ]; then
-        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" "${manifest_args[@]}"
     else
         # Legacy fallback cleanup for unmanifested installations
         rm -f "${USER_HOME}/AGENTS.md"
@@ -132,12 +232,22 @@ if [ "$MODE" = "global" ]; then
     [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
     [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
 
-    # Safely restore pre-existing settings and agents if backup exists
-    if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
-        mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
-    fi
-    if [ -d "${AGENTS_HOME_DIR}.pre-harness.bak" ] && [ ! -e "${AGENTS_HOME_DIR}" ]; then
-        mv -f "${AGENTS_HOME_DIR}.pre-harness.bak" "${AGENTS_HOME_DIR}"
+    # Handle pre-existing settings and backup restoration/wiping
+    if [ "$WIPE_BACKUPS" = true ]; then
+        rm -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak"
+        rm -rf "${AGENTS_HOME_DIR}.pre-harness.bak"
+        wipe_pre_harness_backups "${USER_HOME}/.orchestration"
+        wipe_pre_harness_backups "${GEMINI_CONFIG_DIR}"
+        wipe_pre_harness_backups "${CLAUDE_HOME_DIR}"
+        wipe_pre_harness_backups "${OPENCODE_HOME_DIR}"
+        echo "✅ Purged pre-harness backup files and directories."
+    elif [ "$NO_BACKUP" = false ]; then
+        if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
+            mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
+        fi
+        if [ -d "${AGENTS_HOME_DIR}.pre-harness.bak" ] && [ ! -e "${AGENTS_HOME_DIR}" ]; then
+            mv -f "${AGENTS_HOME_DIR}.pre-harness.bak" "${AGENTS_HOME_DIR}"
+        fi
     fi
 
     # Safely clean empty directories without wiping user modifications
@@ -160,15 +270,10 @@ if [ "$MODE" = "global" ]; then
     fi
     echo "✅ Removed global harness files."
 else
-    repo_path="$(mkdir -p "$TARGET_REPO" && cd "$TARGET_REPO" && pwd)"
+    repo_path="$(mkdir -p "$RESOLVED_REPO" && cd "$RESOLVED_REPO" && pwd)"
     manifest_file="${repo_path}/.orchestration/install_manifest.json"
     if [ -f "$manifest_file" ]; then
-        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
-    fi
-
-    # Restore pre-harness settings backup if present
-    if [ -f "${repo_path}/.claude/settings.json.pre-harness.bak" ]; then
-        mv -f "${repo_path}/.claude/settings.json.pre-harness.bak" "${repo_path}/.claude/settings.json"
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" "${manifest_args[@]}"
     fi
 
     # Only remove .agents if it is a symlink
@@ -176,9 +281,26 @@ else
         rm -f "${repo_path}/.agents"
     fi
 
-    # Restore pre-harness .agents directory if backed up
-    if [ -d "${repo_path}/.agents.pre-harness.bak" ] && [ ! -e "${repo_path}/.agents" ]; then
-        mv "${repo_path}/.agents.pre-harness.bak" "${repo_path}/.agents"
+    # Handle pre-existing settings and backup restoration/wiping
+    if [ "$WIPE_BACKUPS" = true ]; then
+        rm -f "${repo_path}/.claude/settings.json.pre-harness.bak"
+        rm -rf "${repo_path}/.agents.pre-harness.bak"
+        wipe_pre_harness_backups "${repo_path}/.orchestration"
+        wipe_pre_harness_backups "${repo_path}/.claude"
+        wipe_pre_harness_backups "${repo_path}/.opencode"
+        echo "✅ Purged pre-harness backup files and directories in ${repo_path}."
+    elif [ "$NO_BACKUP" = false ]; then
+        if [ -f "${repo_path}/.claude/settings.json.pre-harness.bak" ]; then
+            mv -f "${repo_path}/.claude/settings.json.pre-harness.bak" "${repo_path}/.claude/settings.json"
+        fi
+        if [ -d "${repo_path}/.agents.pre-harness.bak" ] && [ ! -e "${repo_path}/.agents" ]; then
+            mv "${repo_path}/.agents.pre-harness.bak" "${repo_path}/.agents"
+        fi
+    fi
+
+    # In local mode, remove uninstaller logs and directories if clean
+    if [ -d "${repo_path}/.orchestration/logs" ]; then
+        rm -rf "${repo_path}/.orchestration/logs"
     fi
 
     # Safely clean empty directories only - preserve any user-modified files

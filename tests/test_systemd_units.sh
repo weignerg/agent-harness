@@ -80,6 +80,15 @@ if [ "$STRUCT_ERRORS" -gt 0 ]; then
 fi
 echo "✅ Passed: All ${NUM_FILES} service unit files contain valid [Unit], [Service], and [Install] sections."
 
+# 6. Check opencode-colbert-reindex.timer configuration
+echo "[CHECK 6] Verifying opencode-colbert-reindex.timer 5-minute interval..."
+TIMER_FILE="${CONFIG_DIR}/opencode-colbert-reindex.timer"
+if ! grep -q 'OnBootSec=2min' "$TIMER_FILE" || ! grep -q 'OnUnitActiveSec=5min' "$TIMER_FILE" || ! grep -q 'RandomizedDelaySec=15' "$TIMER_FILE"; then
+    echo "❌ FAIL: opencode-colbert-reindex.timer missing 5-minute cadence configuration."
+    exit 1
+fi
+echo "✅ Passed: opencode-colbert-reindex.timer configured with OnBootSec=2min, OnUnitActiveSec=5min, RandomizedDelaySec=15."
+
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
 echo "================================================================================"

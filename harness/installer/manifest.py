@@ -184,13 +184,15 @@ class ManifestEngine:
             dp = Path(dirpath).resolve()
             self.record_directory(dp)
             for fn in filenames:
-                if fn.endswith(".pre-harness.bak"):
+                if fn.endswith(".pre-harness.bak") or fn.endswith(".log"):
                     continue
                 fp = dp / fn
                 if exclude_manifest and fp.resolve() == self.manifest_path.resolve():
                     continue
                 if fp.is_symlink():
-                    self.record_symlink(fp, os.readlink(fp))
+                    target = os.readlink(fp)
+                    if not (target.endswith(".log") or fp.name.endswith(".log")):
+                        self.record_symlink(fp, target)
                 elif fp.is_file():
                     self.record_file(fp)
             for dn in dirnames:
@@ -232,7 +234,65 @@ class ManifestEngine:
             "is_valid": is_valid,
         }
 
-    def uninstall(self, dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
+    def wipe_all_backups(self, dry_run: bool = False) -> List[str]:
+        """Discover and purge all .pre-harness.bak files and directories associated with the manifest."""
+        wiped: List[str] = []
+        scan_dirs: set[Path] = set()
+
+        for d in self.manifest.directories:
+            p = Path(d)
+            if p.exists():
+                scan_dirs.add(p)
+        for f in self.manifest.files:
+            p = Path(f["path"]).parent
+            if p.exists():
+                scan_dirs.add(p)
+        if self.manifest_path.parent.exists():
+            scan_dirs.add(self.manifest_path.parent)
+            scan_dirs.add(self.manifest_path.parent.parent)
+
+        seen_targets: set[str] = set()
+        for sdir in scan_dirs:
+            if not sdir.exists():
+                continue
+            if sdir.name.endswith(".pre-harness.bak") and str(sdir) not in seen_targets:
+                seen_targets.add(str(sdir))
+                if not dry_run:
+                    if sdir.is_dir() and not sdir.is_symlink():
+                        shutil.rmtree(sdir, ignore_errors=True)
+                    else:
+                        sdir.unlink(missing_ok=True)
+                wiped.append(str(sdir))
+
+            try:
+                for root, dirs, files in os.walk(sdir, topdown=False, followlinks=False):
+                    for fn in files:
+                        if fn.endswith(".pre-harness.bak"):
+                            fp = Path(root) / fn
+                            if str(fp) not in seen_targets:
+                                seen_targets.add(str(fp))
+                                if not dry_run:
+                                    fp.unlink(missing_ok=True)
+                                wiped.append(str(fp))
+                    for dn in dirs:
+                        if dn.endswith(".pre-harness.bak"):
+                            dp = Path(root) / dn
+                            if str(dp) not in seen_targets:
+                                seen_targets.add(str(dp))
+                                if not dry_run:
+                                    shutil.rmtree(dp, ignore_errors=True)
+                                wiped.append(str(dp))
+            except OSError:
+                pass
+        return sorted(wiped)
+
+    def uninstall(
+        self,
+        dry_run: bool = False,
+        force: bool = False,
+        restore_backups: bool = True,
+        wipe_backups: bool = False,
+    ) -> Dict[str, Any]:
         """Roll back installed files in reverse order."""
         removed_files: List[str] = []
         preserved_files: List[str] = []
@@ -240,6 +300,7 @@ class ManifestEngine:
         already_missing: List[str] = []
         removed_symlinks: List[str] = []
         removed_directories: List[str] = []
+        wiped_backups: List[str] = []
 
         # 1. Process files in reverse
         for f_entry in reversed(self.manifest.files):
@@ -253,14 +314,24 @@ class ManifestEngine:
 
             bak_p = p.with_name(f"{p.name}.pre-harness.bak")
             if bak_p.is_file():
-                if not dry_run:
-                    try:
-                        shutil.copy2(bak_p, p)
-                        bak_p.unlink()
-                    except OSError:
-                        pass
-                restored_files.append(f_entry["path"])
-                continue
+                if wipe_backups:
+                    if not dry_run:
+                        try:
+                            bak_p.unlink()
+                            wiped_backups.append(str(bak_p))
+                        except OSError:
+                            pass
+                    else:
+                        wiped_backups.append(str(bak_p))
+                elif restore_backups:
+                    if not dry_run:
+                        try:
+                            shutil.copy2(bak_p, p)
+                            bak_p.unlink()
+                        except OSError:
+                            pass
+                    restored_files.append(f_entry["path"])
+                    continue
 
             current_hash = compute_sha256(p)
             if current_hash == f_entry["sha256"] or force:
@@ -303,14 +374,21 @@ class ManifestEngine:
                 else:
                     removed_directories.append(d_path)
 
-        # 4. Reload systemd daemon if units were removed
+        # 4. If wipe_backups, purge any remaining .pre-harness.bak across scanned roots
+        if wipe_backups:
+            extra_wiped = self.wipe_all_backups(dry_run=dry_run)
+            for ew in extra_wiped:
+                if ew not in wiped_backups:
+                    wiped_backups.append(ew)
+
+        # 5. Reload systemd daemon if units were removed
         if not dry_run and any(Path(f).suffix in (".service", ".timer", ".slice") for f in removed_files):
             try:
                 subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, check=False)
             except Exception:
                 pass
 
-        # 5. Remove manifest file if clean
+        # 6. Remove manifest file if clean
         if not dry_run and len(preserved_files) == 0:
             if self.manifest_path.is_file():
                 try:
@@ -329,6 +407,7 @@ class ManifestEngine:
             "already_missing": already_missing,
             "removed_symlinks": removed_symlinks,
             "removed_directories": removed_directories,
+            "wiped_backups": wiped_backups,
             "dry_run": dry_run,
         }
 
@@ -346,6 +425,8 @@ def _run_cli() -> None:
     uninstall_p.add_argument("--manifest-path", required=True, help="Path to install_manifest.json")
     uninstall_p.add_argument("--dry-run", action="store_true", help="Simulate rollback without deleting")
     uninstall_p.add_argument("--force", action="store_true", help="Force deletion even if modified")
+    uninstall_p.add_argument("--no-backup", action="store_true", help="Skip restoring pre-harness backups")
+    uninstall_p.add_argument("--wipe-backups", action="store_true", help="Purge pre-harness backup files and directories")
 
     # record
     record_p = subparsers.add_parser("record", help="Record installed directories into manifest")
@@ -394,7 +475,12 @@ def _run_cli() -> None:
             sys.stderr.write(f"⚠️ Notice: Manifest not found: {m_path}. Nothing to roll back.\n")
             sys.exit(0)
         engine = ManifestEngine(m_path)
-        res = engine.uninstall(dry_run=args.dry_run, force=args.force)
+        res = engine.uninstall(
+            dry_run=args.dry_run,
+            force=args.force,
+            restore_backups=not args.no_backup,
+            wipe_backups=args.wipe_backups,
+        )
         prefix = "[DRY-RUN] " if args.dry_run else ""
         print("=" * 80)
         print(f"🗑️ {prefix}ROLLING BACK HARNESS MANIFEST: {m_path}")
@@ -404,10 +490,16 @@ def _run_cli() -> None:
         print(f"  Files Restored       : {len(res['restored_files'])}")
         print(f"  Symlinks Removed     : {len(res['removed_symlinks'])}")
         print(f"  Directories Removed  : {len(res['removed_directories'])}")
+        if res.get("wiped_backups"):
+            print(f"  Backups Purged       : {len(res['wiped_backups'])}")
         if res.get("restored_files"):
             print("\n  🔄 Restored pre-existing user configurations:")
             for r in res["restored_files"]:
                 print(f"    - {r}")
+        if res.get("wiped_backups"):
+            print("\n  🧹 Purged pre-harness backup files/directories:")
+            for w in res["wiped_backups"]:
+                print(f"    - {w}")
         if res["preserved_files"]:
             print("\n  ⚠️ Preserved user-modified files:")
             for p in res["preserved_files"]:

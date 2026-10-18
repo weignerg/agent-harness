@@ -26,6 +26,8 @@ EXPECTED_AGENTS = {
     "reviewer.md": ("flash", "gemini-3.8-flash-medium", "Gemini 3.8 Medium"),
     "scout.md": ("flash_lite", "gemini-3.8-flash-low", "Gemini 3.8 Low"),
     "grunt.md": ("flash_lite", "gemini-3.8-flash-low", "Gemini 3.8 Low"),
+    "compaction.md": ("flash_lite", "gemini-3.8-flash-low", "Gemini 3.8 Low"),
+    "summary.md": ("flash_lite", "gemini-3.8-flash-low", "Gemini 3.8 Low"),
 }
 
 EXPECTED_SKILLS = {

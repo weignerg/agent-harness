@@ -17,12 +17,16 @@ TEMPLATE_DIR = REPO_ROOT / "templates" / "claude"
 AGENTS_DIR = TEMPLATE_DIR / "agents"
 
 EXPECTED_AGENTS = {
+    "supreme-orchestrator.md": ("opus", "supreme-orchestrator"),
+    "team-orchestrator.md": ("opus", "team-orchestrator"),
     "architect.md": ("opus", "architect"),
     "worker.md": ("sonnet", "worker"),
     "reviewer.md": ("sonnet", "reviewer"),
     "tester.md": ("sonnet", "tester"),
     "scout.md": ("haiku", "scout"),
     "grunt.md": ("haiku", "grunt"),
+    "compaction.md": ("haiku", "compaction"),
+    "summary.md": ("haiku", "summary"),
 }
 
 EXPECTED_SKILLS = {

@@ -43,3 +43,16 @@ Follow "Workflow: post review findings" in `~/.claude/orchestration/team-orchest
 - Cite `file:line` evidence, and include a concrete failure scenario: the inputs or steps, then the wrong result.
 - Don't report what the diff and the source don't support. A gap that existed before the change and isn't made worse is 🟢 BEST PRACTICE at most.
 - Write in active voice, sentence case, plain language, with no humor.
+
+## Safety Invariants & Constraints
+
+- **Orchestrator Non-Termination Invariant**: Never kill or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`) nor via task/subagent tools.
+- **Hard Constraint**: NEVER read, write, or modify `~/HISTORY.md`.
+
+## Reporting Protocol
+
+Send your report to your caller via `SendMessage` and end every reply with:
+## Result
+## Evidence
+## Requests for team-orchestrator
+## Blockers / questions for the human

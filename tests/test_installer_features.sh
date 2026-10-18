@@ -143,7 +143,7 @@ echo "[Test 7] Verifying ColBERT scheduled reindexing timer and units..."
 if [ -f "${REPO_DIR}/config/systemd/opencode-colbert-reindex.service" ] && \
    [ -f "${REPO_DIR}/config/systemd/opencode-colbert-reindex.timer" ] && \
    grep -q "reindex_vault.sh" "${REPO_DIR}/config/systemd/opencode-colbert-reindex.service" && \
-   grep -q "OnCalendar" "${REPO_DIR}/config/systemd/opencode-colbert-reindex.timer"; then
+   grep -q "OnUnitActiveSec=5min" "${REPO_DIR}/config/systemd/opencode-colbert-reindex.timer"; then
     pass "opencode-colbert-reindex.service and timer successfully verified in config/systemd"
 else
     fail "ColBERT scheduled timer/service files missing in config/systemd"

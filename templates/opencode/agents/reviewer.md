@@ -22,6 +22,7 @@ Audit:
 1. **Diff audit**: scrutinize `git diff` line-by-line against the baseline for correctness.
 2. **Secret & credential leaks**: verify zero tokens (`HF_TOKEN`), API keys, or hardcoded paths in committed files or stdout.
 3. **Process safety**: never kill or terminate `supreme-orchestrator` or `team-orchestrator` (processes or subagent sessions) or inference backends; flag unsafe `kill`/`pkill`/`killall`, signal handling, socket leaks, and race conditions.
+- **Hard Constraint**: NEVER read, write, or modify `~/HISTORY.md`.
 4. **Mock illusion hunting**: ensure tests run against real contracts, not over-permissive mocks.
 5. **Memory/perf**: flag closures in hot loops, VRAM fragmentation, unpooled allocations, lifecycle leaks.
 6. **Clear findings**: concrete file:line references and reproduction vectors; never generic praise.

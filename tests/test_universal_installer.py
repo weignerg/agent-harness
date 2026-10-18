@@ -630,6 +630,81 @@ class TestUniversalInstaller(unittest.TestCase):
             prof_data = json.loads(gpu_prof_file.read_text(encoding="utf-8"))
             self.assertEqual(prof_data["profile"], "rtx-5090")
 
+    def test_installer_parity_flags(self):
+        """Test installer accepts and respects parity feature toggles."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(sandbox / ".config" / "systemd" / "user"),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--no-obsidian",
+                "--no-vault",
+                "--no-firewall",
+                "--no-backends",
+                "--dry-run",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0)
+            self.assertIn("Backend SGLang systemd units skipped (--no-backends)", proc.stdout)
+            self.assertIn("Obsidian installation skipped (--no-obsidian)", proc.stdout)
+            self.assertIn("Vault scaffolding skipped (--no-vault)", proc.stdout)
+            self.assertIn("Firewall rule management skipped (--no-firewall", proc.stdout)
+
+    def test_uninstaller_no_backup_and_wipe_backups_flags(self):
+        """Test uninstaller --no-backup and --wipe-backups flags."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "test_repo"
+            sandbox.mkdir()
+
+            # Install
+            self.run_installer("--target", "all", "--mode", "local", str(sandbox), "--non-interactive")
+            # Dry-run uninstall with --wipe-backups
+            proc_uninst = self.run_uninstaller("--local", str(sandbox), "--wipe-backups", "--dry-run", "--yes")
+            self.assertEqual(proc_uninst.returncode, 0)
+
+    def test_non_interactive_sudo_fallback(self):
+        """Test non-interactive sudo fallback outputs clear warnings to stderr and copy-paste commands."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_bin = Path(tmp_dir) / "bin"
+            fake_bin.mkdir()
+            fake_sudo = fake_bin / "sudo"
+            fake_sudo.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            fake_sudo.chmod(0o755)
+
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+
+            env = {
+                "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(sandbox / ".config" / "systemd" / "user"),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--with-firewall",
+                "--no-backends",
+                "--non-interactive",
+                env=env,
+            )
+            # The installer should proceed without fatal exit and emit warnings to stderr
+            self.assertIn("SUDO PRIVILEGE REQUIRED - NON-INTERACTIVE / NON-ROOT ENVIRONMENT", proc.stderr)
+            self.assertIn("INSTALLATION IS INCOMPLETE WITHOUT MANUAL ROOT INTERVENTION", proc.stderr)
+            self.assertIn("ATTENTION: INSTALLATION INCOMPLETE - MANUAL INTERVENTION REQUIRED", proc.stdout)
+            self.assertIn("sudo ufw allow 4096/tcp comment OpenCode Server", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
