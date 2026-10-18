@@ -5,6 +5,11 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
+from harness.paths import (
+    resolve_authoritative_orchestration_root,
+    resolve_true_repo_root,
+)
+
 
 class BaseRuntimeAdapter(ABC):
     """Abstract base class specifying the interface for agent harness runtime engine adapters."""
@@ -47,23 +52,30 @@ class BaseRuntimeAdapter(ABC):
 
     def get_charter_path(self, repo_path: Union[str, Path] = ".") -> Path:
         """Return the path to the runtime charter file within a repository."""
-        return Path(repo_path).resolve() / self.charter_filename
+        true_repo = resolve_true_repo_root(repo_path) or Path(repo_path).resolve()
+        return true_repo / self.charter_filename
 
     def get_config_dir(self, repo_path: Union[str, Path] = ".") -> Path:
         """Return the project-local config directory path."""
-        return Path(repo_path).resolve() / self.config_dir_name
+        true_repo = resolve_true_repo_root(repo_path) or Path(repo_path).resolve()
+        return true_repo / self.config_dir_name
 
     def get_handoff_path(self, repo_path: Union[str, Path] = ".") -> Path:
         """Return the handoff directory path."""
-        return self.get_config_dir(repo_path) / "handoffs"
+        orch_root = resolve_authoritative_orchestration_root(repo_path)
+        return orch_root / "handoffs"
 
     def get_rules_path(self, repo_path: Union[str, Path] = ".") -> Path:
         """Return the rules directory path."""
+        orch_root = resolve_authoritative_orchestration_root(repo_path)
+        if (orch_root / "rules").is_dir():
+            return orch_root / "rules"
         return self.get_config_dir(repo_path) / "rules"
 
     def get_worktree_path(self, repo_path: Union[str, Path] = ".", branch_name: str = "") -> Path:
         """Return target worktree path for branch isolation."""
-        return self.get_config_dir(repo_path) / "worktrees" / branch_name
+        true_repo = resolve_true_repo_root(repo_path) or Path(repo_path).resolve()
+        return self.get_config_dir(true_repo) / "worktrees" / branch_name
 
     def get_tool_definitions(self) -> List[str]:
         """List canonical operational tool script names provided for this runtime."""
@@ -79,5 +91,5 @@ class BaseRuntimeAdapter(ABC):
 
     def is_detected(self, repo_path: Union[str, Path] = ".") -> bool:
         """Check if this runtime engine is active or configured in the specified repo."""
-        root = Path(repo_path).resolve()
-        return (root / self.charter_filename).is_file() or (root / self.config_dir_name).is_dir()
+        true_repo = resolve_true_repo_root(repo_path) or Path(repo_path).resolve()
+        return (true_repo / self.charter_filename).is_file() or (true_repo / self.config_dir_name).is_dir()
