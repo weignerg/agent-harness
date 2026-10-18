@@ -24,6 +24,13 @@
 # ==============================================================================
 set -euo pipefail
 
+ORIGINAL_ARGS=("$@")
+ORIGINAL_CMD="$0"
+if [ $# -gt 0 ]; then
+    ORIGINAL_CMD="$0 $*"
+fi
+ORIGINAL_INVOCATION="${ORIGINAL_CMD}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
@@ -52,10 +59,18 @@ WITH_VAULT="${WITH_VAULT:-true}"
 WITH_FIREWALL="${WITH_FIREWALL:-true}"
 WITH_BACKENDS="${WITH_BACKENDS:-true}"
 DOWNLOAD_MODELS="${DOWNLOAD_MODELS:-}"
+SKIP_WARMUP=false
+EXPLICIT_WARMUP=false
 WITH_HEALTHCHECK="${WITH_HEALTHCHECK:-true}"
 EXPLICIT_HEALTHCHECK=false
 NO_BACKUP=false
 WIPE_BACKUPS=false
+
+PROBED_MODEL_NAME=""
+PROBED_MODEL_PATH=""
+PROBED_SERVICE_NAME=""
+PROBED_CONTEXT_LENGTH=""
+PROBED_MEM_FRACTION=""
 
 show_help() {
     cat << 'EOF'
@@ -83,6 +98,7 @@ Parity & Modules:
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096 & 30000 (default: with)
   --with-backends / --no-backends      Toggle SGLang systemd units & backend venv (default: with)
   --download-models / --no-download-models Toggle automatic HF model weights acquisition (default: with backends)
+  --skip-warmup / --warmup             Toggle foreground SGLang warmup & live weight download (default: with)
   --healthcheck / --no-healthcheck, --skip-healthcheck Toggle live systemd & port healthcheck verification (default: with)
   --no-backup                          Skip restoring pre-harness backups during uninstall
   --wipe-backups                       Purge .pre-harness.bak files/dirs during uninstall
@@ -234,6 +250,16 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-download-models|--without-download-models)
             DOWNLOAD_MODELS=false
+            shift
+            ;;
+        --skip-warmup|--no-warmup|--without-warmup)
+            SKIP_WARMUP=true
+            EXPLICIT_WARMUP=false
+            shift
+            ;;
+        --warmup|--with-warmup)
+            SKIP_WARMUP=false
+            EXPLICIT_WARMUP=true
             shift
             ;;
         --healthcheck|--with-healthcheck)
@@ -933,6 +959,94 @@ verify_or_acquire_model_weights() {
     echo ""
 }
 
+render_reboot_box() {
+    local cmd="${1:-./install.sh}"
+    python3 -c '
+import sys, unicodedata
+
+def display_width(s):
+    w = 0
+    for ch in s:
+        if ch == "\ufe0f":
+            continue
+        eaw = unicodedata.east_asian_width(ch)
+        if eaw in ("W", "F") or ch in ("\u26a0", "\U0001f680"):
+            w += 2
+        elif unicodedata.category(ch).startswith("M"):
+            pass
+        else:
+            w += 1
+    return w
+
+def make_line(content):
+    cw = display_width(content)
+    padding = max(0, 72 - cw)
+    return f"│{content}" + (" " * padding) + "│"
+
+cmd = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else "./install.sh"
+print("┌" + "─" * 72 + "┐")
+print(make_line(" ⚠️  REBOOT REQUIRED: NVIDIA DRIVER UPGRADE DETECTED"))
+print("├" + "─" * 72 + "┤")
+print(make_line(" Your system NVIDIA driver was upgraded and requires a reboot to load."))
+print(make_line(""))
+print(make_line(" 1. Reboot your system:"))
+print(make_line("    sudo reboot"))
+print(make_line(""))
+print(make_line(" 2. After reboot, resume installation with:"))
+prefix = "    "
+max_w = 68
+if display_width(cmd) <= max_w:
+    print(make_line(prefix + cmd))
+else:
+    words = cmd.split(" ")
+    current = prefix
+    for word in words:
+        if display_width(current + (" " if current != prefix else "") + word) <= 71:
+            current += (" " if current != prefix else "") + word
+        else:
+            print(make_line(current))
+            current = prefix + word
+    if current.strip():
+        print(make_line(current))
+print("└" + "─" * 72 + "┘")
+' "$cmd"
+}
+
+print_next_step_box() {
+    local cmd="${1:-opencode}"
+    python3 -c '
+import sys, unicodedata
+
+def display_width(s):
+    w = 0
+    for ch in s:
+        if ch == "\ufe0f":
+            continue
+        eaw = unicodedata.east_asian_width(ch)
+        if eaw in ("W", "F") or ch in ("\u26a0", "\U0001f680"):
+            w += 2
+        elif unicodedata.category(ch).startswith("M"):
+            pass
+        else:
+            w += 1
+    return w
+
+def make_line(content):
+    cw = display_width(content)
+    padding = max(0, 72 - cw)
+    return f"│{content}" + (" " * padding) + "│"
+
+cmd = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else "opencode"
+print("┌" + "─" * 72 + "┐")
+print(make_line(""))
+print(make_line("   🚀 IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL:"))
+print(make_line(""))
+print(make_line(f"                   {cmd}"))
+print(make_line(""))
+print("└" + "─" * 72 + "┘")
+' "$cmd"
+}
+
 print_grandma_proof_summary() {
     local lan_ip
     lan_ip="$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")"
@@ -966,77 +1080,254 @@ print_grandma_proof_summary() {
     fi
     local user_display="${CURRENT_SERVER_USERNAME:-${USER:-opencode}}"
 
+    local probed_model_disp="${PROBED_MODEL_NAME:-ornith-1.5-35b}"
+    local probed_model_path_disp="${PROBED_MODEL_PATH:-ornith-ai/Ornith-1.5-35B-A3B-NVFP4}"
+    local probed_ctx_disp="${PROBED_CONTEXT_LENGTH:-262144}"
+    local probed_mem_disp="${PROBED_MEM_FRACTION:-0.88}"
+
     echo ""
     echo "================================================================================"
     echo "👵 GRANDMA-PROOF AGENT HARNESS DEPLOYMENT DASHBOARD"
     echo "================================================================================"
-    echo "✅ Multi-Agent Harness Components Installed:"
+    echo "📋 Multi-Agent Harness Inventory & Configuration:"
     if [ "$MODE" = "global" ]; then
-        case "$TARGET" in
-            agy|antigravity|gemini)
-                echo "   [✓] Google Gemini Antigravity (Gemini 3.8 Multi-Agent System)"
-                ;;
-            claude|anthropic)
-                echo "   [✓] Claude Code Harness (Claude Code Experimental Agent Teams)"
-                ;;
-            opencode|sglang)
-                echo "   [✓] OpenCode Local Stack (10-Component System & Slash Commands)"
-                ;;
-            all)
-                echo "   [✓] Google Gemini Antigravity (Gemini 3.8 Multi-Agent System)"
-                echo "   [✓] Claude Code Harness (Claude Code Experimental Agent Teams)"
-                echo "   [✓] OpenCode Local Stack (10-Component System & Slash Commands)"
-                ;;
-        esac
-        echo "   [✓] Knowledge Vault Scaffolding (~/Vaults/home)"
-        echo "   [✓] ColBERT Semantic Memory Indexer & FastMCP Integration"
+        echo "   [✓] Antigravity Plugin      : ${GEMINI_CONFIG_DIR}/plugins/agent-harness"
+        echo "       Symlink Integration    : ${USER_HOME}/.agents -> ${USER_HOME}/.orchestration"
+        echo "   [✓] Claude Code Harness     : ${CLAUDE_HOME_DIR}/ (settings.json, agents, rules, skills)"
+        echo "   [✓] OpenCode Configuration  : ${OPENCODE_HOME_DIR}/ (opencode.json, AGENTS.md, slash commands)"
+        echo "       Slash Commands Deployed : /handoff, /colbert, /reindex, /escalate"
+        if [ "$WITH_BACKENDS" = true ]; then
+            echo "   [✓] Systemd User Services   : ${SYSTEMD_USER_DIR}/"
+            echo "       Installed Units         : opencode-server.service, opencode-agent.slice,"
+            echo "                                 opencode-colbert-reindex.service, opencode-colbert-reindex.timer,"
+            echo "                                 ${svc_name}"
+            echo "   [✓] Probed Inference Model  : ${probed_model_disp} (${probed_model_path_disp})"
+            echo "       Hardware Configuration  : Context: ${probed_ctx_disp} tokens | MemFraction: ${probed_mem_disp}"
+        fi
+        echo "   [✓] Knowledge Vault Memory  : ~/Vaults/home (Obsidian config registered)"
+        echo "   [✓] ColBERT Semantic Engine : ~/.local/share/opencode-sglang-stack/ (FastMCP integration)"
         if [ "$WITH_FIREWALL" = true ]; then
-            echo "   [✓] Network Firewall Security: Ports 4096 & 30000 permitted"
+            echo "   [✓] Network Firewall Hardening: Ports 4096 (OpenCode) & 30000 (SGLang loopback) permitted"
         else
-            echo "   [-] Network Firewall Security: Skipped (--no-firewall)"
+            echo "   [-] Network Firewall Hardening: Skipped (--no-firewall)"
         fi
     else
         echo "   [✓] Local Repository Orchestration (${TARGET_REPO:-.}/.orchestration)"
         echo "   [✓] Target: ${TARGET}"
     fi
 
+    echo ""
+    echo "🚀 Tool Launch Commands (Run in terminal):"
+    echo "   OpenCode     : opencode"
+    echo "   Claude Code  : claude"
+    echo "   Antigravity  : agy"
+    echo "   Obsidian     : obsidian ~/Vaults/home"
+    echo "   ColBERT      : ~/.local/share/opencode-sglang-stack/reindex_vault.sh (or '/reindex' in OpenCode)"
+
     if [ "$WITH_BACKENDS" = true ] && [ "$TARGET" != "agy" ] && [ "$TARGET" != "claude" ]; then
         echo ""
-        echo "📡 Live Service Endpoints & Authentication:"
-        echo "   Local Inference API  : http://127.0.0.1:30000/v1 [${sglang_svc_status}]"
-        echo "   Remote Server WebUI  : http://${lan_ip}:4096 [${server_svc_status}]"
-        echo "   Remote Server Auth   : username: ${user_display} | password: ${pass_display}"
+        echo "📡 Server Endpoints & Launch Commands:"
+        echo "   OpenCode Headless Server : http://${lan_ip}:4096 [${server_svc_status}]"
+        echo "                              username: ${user_display} | password: ${pass_display}"
+        echo "   SGLang Inference Server  : http://127.0.0.1:30000/v1 [${sglang_svc_status}]"
+        echo "   Antigravity Remote       : agy remote-control start"
+        echo "   Claude Code Server       : claude server"
+    fi
+
+    local next_cmd="opencode"
+    if [ "$TARGET" = "agy" ]; then
+        next_cmd="agy"
+    elif [ "$TARGET" = "claude" ]; then
+        next_cmd="claude"
     fi
 
     echo ""
-    echo "🚀 1-Line Quick-Start Commands (Run in terminal):"
-    echo "   gemini       Launch Google Gemini 3.8 Antigravity CLI"
-    echo "   claude       Launch Claude Code with Agent Teams"
-    echo "   opencode     Launch OpenCode TUI connected to local SGLang"
+    print_next_step_box "$next_cmd"
     echo ""
-    echo "┌────────────────────────────────────────────────────────────────────────┐"
-    echo "│                                                                        │"
-    echo "│   🚀 IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL:           │"
-    echo "│                                                                        │"
-    if [ "$TARGET" = "agy" ]; then
-        echo "│                   gemini                                               │"
-    elif [ "$TARGET" = "claude" ]; then
-        echo "│                   claude                                               │"
-    else
-        echo "│                   opencode                                             │"
-    fi
-    echo "│                                                                        │"
-    echo "└────────────────────────────────────────────────────────────────────────┘"
+    echo "📖 Documentation & Deep Dives:"
+    echo "   Multi-Platform Remote Connections : docs/remote_connections.md"
+    echo "   Obsidian Vaults & ColBERT Memory  : docs/vault_and_memory_guide.md"
+    echo "   Inference & Hardware Tuning Guide : docs/inference_architecture.md"
+    echo "   Full Architecture & Specification : README.md"
     echo ""
     echo "🔧 Useful Operational Commands:"
     if [ "$WITH_BACKENDS" = true ]; then
         echo "   systemctl --user status ${svc_name}"
         echo "   systemctl --user status opencode-server.service"
+        echo "   systemctl --user status opencode-colbert-reindex.timer"
     fi
     echo "   ./install.sh --verify       (Verify harness file integrity)"
     echo "   ./install.sh --uninstall    (Safely rollback installation)"
     echo "================================================================================"
     echo ""
+}
+
+warmup_sglang_service() {
+    if [ "$SKIP_WARMUP" = true ]; then
+        echo "  ℹ️  SGLang model warmup skipped (--skip-warmup)."
+        return 0
+    fi
+
+    if [ "$WITH_BACKENDS" != true ]; then
+        return 0
+    fi
+
+    if [ "$TARGET" = "agy" ] || [ "$TARGET" = "claude" ]; then
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY-RUN] Would perform foreground SGLang warmup & weight verification"
+        return 0
+    fi
+
+    # Auto-skip if in sandbox / test environment unless EXPLICIT_WARMUP is true
+    if [ "${EXPLICIT_WARMUP:-false}" != true ]; then
+        if { [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; }; then
+            echo "  ℹ️  SGLang model warmup skipped (isolated sandbox test environment)."
+            return 0
+        fi
+
+        # Auto-skip if non-interactive without TTY
+        if [ "$NON_INTERACTIVE" = true ] && [ ! -t 0 ] && [ ! -t 1 ]; then
+            echo "  ℹ️  SGLang model warmup skipped (non-interactive headless environment without TTY)."
+            return 0
+        fi
+    fi
+
+    # Check if driver mismatch is already present
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        if nvidia-smi 2>&1 | grep -qi "version mismatch"; then
+            render_reboot_box "${ORIGINAL_INVOCATION}" >&2
+            exit 1
+        fi
+    fi
+
+    local sglang_port="${SGLANG_PORT:-30000}"
+
+    # Auto-skip if port is already active
+    if curl -s -f -m 2 "http://127.0.0.1:${sglang_port}/v1/models" >/dev/null 2>&1; then
+        echo "  ℹ️  SGLang inference server already active on port ${sglang_port}; skipping warmup."
+        return 0
+    fi
+
+    local sglang_cmd=()
+    if [ -x "${STACK_DIR}/venv/bin/sglang" ]; then
+        sglang_cmd=("${STACK_DIR}/venv/bin/sglang")
+    elif [ -x "${STACK_DIR}/venv/bin/python3" ]; then
+        sglang_cmd=("${STACK_DIR}/venv/bin/python3" "-m" "sglang.launch_server")
+    elif [ -x "${STACK_DIR}/venv/bin/python" ]; then
+        sglang_cmd=("${STACK_DIR}/venv/bin/python" "-m" "sglang.launch_server")
+    else
+        echo "  ℹ️  SGLang binary not found in ${STACK_DIR}/venv; skipping warmup."
+        return 0
+    fi
+
+    local model_path="${PROBED_MODEL_PATH:-}"
+    local model_name="${PROBED_MODEL_NAME:-}"
+    local ctx_len="${PROBED_CONTEXT_LENGTH:-}"
+    local mem_frac="${PROBED_MEM_FRACTION:-}"
+
+    if [ -z "$model_path" ] && [ -f "${BACKEND_DIR}/gpu_profile.json" ]; then
+        model_path="$(python3 -c "import json, sys; d=json.load(open(sys.argv[1])); print(d.get('model_path', 'ornith-ai/Ornith-1.5-35B-A3B-NVFP4'))" "${BACKEND_DIR}/gpu_profile.json" 2>/dev/null || echo "ornith-ai/Ornith-1.5-35B-A3B-NVFP4")"
+        model_name="$(python3 -c "import json, sys; d=json.load(open(sys.argv[1])); print(d.get('model', 'ornith-1.5-35b'))" "${BACKEND_DIR}/gpu_profile.json" 2>/dev/null || echo "ornith-1.5-35b")"
+        ctx_len="$(python3 -c "import json, sys; d=json.load(open(sys.argv[1])); print(d.get('max_context', 262144))" "${BACKEND_DIR}/gpu_profile.json" 2>/dev/null || echo 262144)"
+        mem_frac="$(python3 -c "import json, sys; d=json.load(open(sys.argv[1])); print(d.get('memory_fraction', 0.88))" "${BACKEND_DIR}/gpu_profile.json" 2>/dev/null || echo 0.88)"
+    fi
+
+    model_path="${model_path:-ornith-ai/Ornith-1.5-35B-A3B-NVFP4}"
+    model_name="${model_name:-ornith-1.5-35b}"
+    ctx_len="${ctx_len:-262144}"
+    mem_frac="${mem_frac:-0.88}"
+
+    echo ""
+    echo "================================================================================"
+    echo "🔄 SGLang Model Warmup & Weight Verification (Live Progress)"
+    echo "================================================================================"
+    echo "  Starting temporary SGLang warmup server (port ${sglang_port})..."
+    echo "  Live weight loading, download progress, and CUDA allocation will display below:"
+    echo ""
+
+    local run_args=()
+    if [[ "${sglang_cmd[*]}" =~ sglang$ ]]; then
+        run_args=("serve")
+    fi
+    run_args+=(
+        --model-path "${model_path}"
+        --served-model-name "${model_name}"
+        --tool-call-parser qwen3_coder
+        --reasoning-parser qwen3
+        --mem-fraction-static "${mem_frac}"
+        --context-length "${ctx_len}"
+        --chunked-prefill-size 2048
+        --max-running-requests 1
+        --port "${sglang_port}"
+        --host 127.0.0.1
+    )
+
+    (
+        export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+        [ -d "/opt/cuda/bin" ] && export PATH="/opt/cuda/bin:$PATH"
+        [ -d "/opt/cuda" ] && export CUDA_HOME="/opt/cuda"
+        if [ -f "${BACKEND_DIR}/env" ]; then
+            set -a
+            . "${BACKEND_DIR}/env"
+            set +a
+        fi
+        exec "${sglang_cmd[@]}" "${run_args[@]}"
+    ) &
+    local warmup_pid=$!
+
+    local warmup_success=false
+    local elapsed=0
+    local timeout="${SGLANG_WARMUP_TIMEOUT:-180}"
+
+    while [ $elapsed -lt $timeout ]; do
+        if ! kill -0 "$warmup_pid" 2>/dev/null; then
+            echo "  ⚠️  SGLang warmup process exited prematurely."
+            break
+        fi
+        if curl -s -f -m 2 "http://127.0.0.1:${sglang_port}/v1/models" >/dev/null 2>&1; then
+            warmup_success=true
+            break
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    if [ "$warmup_success" = true ]; then
+        echo ""
+        echo "  ✅ SGLang warmup successful: Model is loaded and healthy."
+        echo "  Releasing port ${sglang_port} for background systemd service..."
+        kill -15 "$warmup_pid" 2>/dev/null || true
+        local stop_wait=0
+        while kill -0 "$warmup_pid" 2>/dev/null && [ $stop_wait -lt 15 ]; do
+            sleep 1
+            stop_wait=$((stop_wait + 1))
+        done
+        if kill -0 "$warmup_pid" 2>/dev/null; then
+            kill -9 "$warmup_pid" 2>/dev/null || true
+        fi
+        for _ in $(seq 1 10); do
+            if ! curl -s -m 1 "http://127.0.0.1:${sglang_port}/v1/models" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+        done
+        echo "  ✅ SGLang port ${sglang_port} released cleanly."
+    else
+        if command -v nvidia-smi >/dev/null 2>&1; then
+            if nvidia-smi 2>&1 | grep -qi "version mismatch"; then
+                kill -9 "$warmup_pid" 2>/dev/null || true
+                render_reboot_box "${ORIGINAL_INVOCATION}" >&2
+                exit 1
+            fi
+        fi
+        echo "  ⚠️  SGLang warmup did not verify within ${timeout}s; terminating warmup process."
+        kill -15 "$warmup_pid" 2>/dev/null || true
+        sleep 2
+        kill -9 "$warmup_pid" 2>/dev/null || true
+    fi
 }
 
 verify_backend_healthchecks() {
@@ -1072,6 +1363,16 @@ verify_backend_healthchecks() {
     echo "🩺 VERIFYING BACKEND SERVICE HEALTHCHECKS"
     echo "================================================================================"
 
+    # Check for NVIDIA driver mismatch immediately
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        local nv_early_probe=""
+        nv_early_probe="$(nvidia-smi 2>&1 || true)"
+        if echo "$nv_early_probe" | grep -qi "version mismatch"; then
+            render_reboot_box "${ORIGINAL_INVOCATION}" >&2
+            exit 1
+        fi
+    fi
+
     local svc_name="${PROBED_SERVICE_NAME:-opencode-sglang-ornith-35b.service}"
     local health_failed=false
     local failure_reasons=()
@@ -1083,7 +1384,7 @@ verify_backend_healthchecks() {
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
     fi
 
-    # 2. Poll ColBERT timer
+    # 3. Poll ColBERT timer
     echo "  Checking ColBERT reindexing timer..."
     local timer_active=false
     if command -v systemctl >/dev/null 2>&1; then
@@ -1103,7 +1404,7 @@ verify_backend_healthchecks() {
         echo "  ❌ ColBERT reindexing timer is inactive."
     fi
 
-    # 3. Poll OpenCode server (systemctl and 127.0.0.1:4096)
+    # 4. Poll OpenCode server (systemctl and 127.0.0.1:4096)
     echo "  Checking OpenCode headless server (port 4096)..."
     local server_active=false
     local server_listening=false
@@ -1132,7 +1433,7 @@ verify_backend_healthchecks() {
         echo "  ❌ OpenCode server failed healthcheck."
     fi
 
-    # 4. Poll SGLang (systemctl and 127.0.0.1:30000/v1/models)
+    # 5. Poll SGLang (systemctl and 127.0.0.1:30000/v1/models)
     echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
     local sglang_active=false
     local sglang_listening=false
@@ -1170,22 +1471,8 @@ verify_backend_healthchecks() {
         fi
 
         if [ "$driver_mismatch" = true ]; then
-            cat << 'EOF' >&2
-
-================================================================================
-⚠️  NVIDIA DRIVER/LIBRARY VERSION MISMATCH DETECTED
-================================================================================
-Your system NVIDIA drivers were recently upgraded and require a system reboot
-to load the new kernel module into memory.
-Until rebooted, CUDA and NVML cannot initialize, causing SGLang to fail.
-
-Remediation:
-  1. Save your open work.
-  2. Reboot your computer: sudo reboot
-  3. After reboot, SGLang will start automatically or run:
-     systemctl --user start opencode-sglang-ornith-35b.service
-================================================================================
-EOF
+            render_reboot_box "${ORIGINAL_INVOCATION}" >&2
+            exit 1
         fi
 
         cat << 'EOF' >&2
@@ -1201,13 +1488,6 @@ EOF
 
         echo "" >&2
         echo "📋 Diagnostic Information:" >&2
-        if [ "$driver_mismatch" = true ]; then
-            echo "--- NVIDIA Driver/Library Diagnostic ---" >&2
-            nvidia-smi 2>&1 | head -n 5 >&2 || true
-            if [ -f /proc/driver/nvidia/version ]; then
-                echo "Kernel Module Version: $(cat /proc/driver/nvidia/version 2>/dev/null | head -n 1)" >&2
-            fi
-        fi
         if command -v systemctl >/dev/null 2>&1; then
             echo "--- Systemd User Unit Statuses ---" >&2
             systemctl --user status opencode-colbert-reindex.timer opencode-server.service "${svc_name}" --no-pager 2>&1 | head -n 30 >&2 || true
@@ -1219,9 +1499,6 @@ EOF
 
         echo "" >&2
         echo "🔧 Remediation Steps:" >&2
-        if [ "$driver_mismatch" = true ]; then
-            echo "  ⚠️  PRIORITY: Reboot system (sudo reboot) to load upgraded NVIDIA kernel module" >&2
-        fi
         echo "  1. Check unit journal logs: journalctl --user -u ${svc_name} -u opencode-server.service -n 50" >&2
         echo "  2. Ensure model weights are downloaded (run with --download-models)" >&2
         echo "  3. Manually start services: systemctl --user start ${svc_name} opencode-server.service opencode-colbert-reindex.timer" >&2
@@ -1380,6 +1657,8 @@ deploy_opencode_backend_and_units() {
     PROBED_MODEL_NAME="$probed_model"
     PROBED_MODEL_PATH="$probed_model_path"
     PROBED_SERVICE_NAME="$probed_service"
+    PROBED_CONTEXT_LENGTH="$max_context"
+    PROBED_MEM_FRACTION="$mem_fraction"
 
     echo "  ✅ Probed GPU resources: Model=${probed_model}, Context=${max_context}, Service=${probed_service}"
 
@@ -1800,9 +2079,10 @@ EOF
                 --symlinks "${recorded_symlinks[@]}" \
                 "${file_args[@]}"
         fi
+        warmup_sglang_service
+        verify_backend_healthchecks
         print_pending_sudo_summary
         print_grandma_proof_summary
-        verify_backend_healthchecks
         echo "🎉 Local Agent Harness installation complete!"
     else
         manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
@@ -1871,9 +2151,10 @@ EOF
                 --symlinks "${recorded_symlinks[@]}" \
                 "${file_args[@]}"
         fi
+        warmup_sglang_service
+        verify_backend_healthchecks
         print_pending_sudo_summary
         print_grandma_proof_summary
-        verify_backend_healthchecks
         echo "🎉 Global Agent Harness installation complete!"
     fi
 }

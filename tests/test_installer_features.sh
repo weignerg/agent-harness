@@ -422,8 +422,8 @@ else
     fail "SGLang venv auto-heal failed"
 fi
 
-# --- Test 24: Verify NVIDIA Driver Mismatch Detection Banner -------------------
-echo "[Test 24] Verifying NVIDIA Driver Mismatch Detection Banner..."
+# --- Test 24: Verify Minimal NVIDIA Driver Mismatch Reboot Box ----------------
+echo "[Test 24] Verifying Minimal NVIDIA Driver Mismatch Reboot Box..."
 SANDBOX_NV="$(mktemp -d /tmp/installer-test-nv-XXXXXX)"
 trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}"' EXIT
 
@@ -437,12 +437,73 @@ EOF
 chmod 0755 "${MOCK_NV_BIN}/nvidia-smi"
 
 NV_OUT="$(PATH="${MOCK_NV_BIN}:${PATH}" COLBERT_TIMER_RETRIES=1 OPENCODE_SERVER_RETRIES=1 SGLANG_HEALTHCHECK_RETRIES=1 USER_HOME="${SANDBOX_NV}" HOME="${SANDBOX_NV}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
-if echo "$NV_OUT" | grep -q "NVIDIA DRIVER/LIBRARY VERSION MISMATCH DETECTED" && \
+if echo "$NV_OUT" | grep -q "REBOOT REQUIRED: NVIDIA DRIVER UPGRADE DETECTED" && \
    echo "$NV_OUT" | grep -q "sudo reboot" && \
-   echo "$NV_OUT" | grep -q "systemctl --user start opencode-sglang-ornith-35b.service"; then
-    pass "High-contrast NVIDIA driver mismatch banner and reboot remediation emitted"
+   echo "$NV_OUT" | grep -q "After reboot, resume installation with:" && \
+   echo "$NV_OUT" | grep -q "install.sh" && \
+   ! echo "$NV_OUT" | grep -q "Kernel Module Version:" && \
+   ! echo "$NV_OUT" | grep -q "Diagnostic Information:"; then
+    pass "High-contrast clean minimal NVIDIA driver mismatch reboot instruction box emitted"
 else
-    fail "NVIDIA driver mismatch banner not emitted"
+    fail "Minimal NVIDIA driver mismatch reboot instruction box not emitted or contained diagnostic wall of text"
+fi
+
+# --- Test 25: Verify SGLang Warmup CLI flags & live warmup execution ----------
+echo "[Test 25] Verifying SGLang Warmup CLI flags & live warmup execution..."
+HELP_WARMUP="$("${INSTALL_SCRIPT}" --help)"
+if echo "$HELP_WARMUP" | grep -q -- "--skip-warmup"; then
+    pass "install.sh --help documents --skip-warmup / --warmup"
+else
+    fail "install.sh --help missing --skip-warmup"
+fi
+
+SANDBOX_WARMUP="$(mktemp -d /tmp/installer-test-warmup-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}"' EXIT
+
+# Prepare mock stack with mock sglang binary that simulates a mock server on port 30000
+MOCK_WARMUP_STACK="${SANDBOX_WARMUP}/.local/share/opencode-sglang-stack"
+mkdir -p "${MOCK_WARMUP_STACK}/venv/bin"
+
+# Mock python3 that succeeds import check
+cat << 'EOF' > "${MOCK_WARMUP_STACK}/venv/bin/python3"
+#!/bin/sh
+if [ "$1" = "-c" ] && [ "$2" = "import sglang" ]; then
+    exit 0
+fi
+exec /usr/bin/python3 "$@"
+EOF
+chmod 0755 "${MOCK_WARMUP_STACK}/venv/bin/python3"
+
+# Mock sglang binary that starts a simple HTTP server on 127.0.0.1:30000 returning /v1/models 200
+cat << 'EOF' > "${MOCK_WARMUP_STACK}/venv/bin/sglang"
+#!/usr/bin/env python3
+import sys
+import http.server
+import socketserver
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/v1/models':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(('127.0.0.1', 30099), Handler) as httpd:
+    httpd.serve_forever()
+EOF
+chmod 0755 "${MOCK_WARMUP_STACK}/venv/bin/sglang"
+
+WARMUP_RUN="$(USER_HOME="${SANDBOX_WARMUP}" HOME="${SANDBOX_WARMUP}" SGLANG_PORT=30099 SGLANG_WARMUP_TIMEOUT=10 "${INSTALL_SCRIPT}" --target=opencode --warmup --skip-healthcheck --non-interactive 2>&1 || true)"
+if echo "$WARMUP_RUN" | grep -q "SGLang Model Warmup & Weight Verification (Live Progress)" && \
+   echo "$WARMUP_RUN" | grep -q "SGLang warmup successful: Model is loaded and healthy."; then
+    pass "SGLang foreground warmup pass executed and verified model healthcheck"
+else
+    fail "SGLang foreground warmup pass failed"
 fi
 
 echo "================================================================================"

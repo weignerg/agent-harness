@@ -853,7 +853,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("Successfully auto-healed sglang via editable install", proc.stdout)
 
     def test_issue7_nvidia_driver_mismatch_detection(self):
-        """Test Issue #7: NVIDIA driver mismatch detection emits high-contrast banner and remediation."""
+        """Test Issue #7: NVIDIA driver mismatch detection emits clean minimal reboot instruction box."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             sandbox = Path(tmp_dir) / "home"
             sandbox.mkdir()
@@ -887,9 +887,22 @@ class TestUniversalInstaller(unittest.TestCase):
             )
             # Healthcheck is expected to fail with non-zero exit code due to live service failure
             self.assertNotEqual(proc.returncode, 0)
-            self.assertIn("NVIDIA DRIVER/LIBRARY VERSION MISMATCH DETECTED", proc.stderr)
+            self.assertIn("REBOOT REQUIRED: NVIDIA DRIVER UPGRADE DETECTED", proc.stderr)
             self.assertIn("sudo reboot", proc.stderr)
-            self.assertIn("systemctl --user start opencode-sglang-ornith-35b.service", proc.stderr)
+            self.assertIn("After reboot, resume installation with:", proc.stderr)
+            self.assertIn("install.sh", proc.stderr)
+            self.assertNotIn("Kernel Module Version:", proc.stderr)
+            self.assertNotIn("Diagnostic Information:", proc.stderr)
+
+    def test_issue7_sglang_warmup_flags(self):
+        """Test Issue #7: --skip-warmup and --warmup flag documentation and behavior."""
+        proc_help = self.run_installer("--help")
+        self.assertEqual(proc_help.returncode, 0)
+        self.assertIn("--skip-warmup / --warmup", proc_help.stdout)
+
+        proc_skip = self.run_installer("--dry-run", "--target", "opencode", "--skip-warmup")
+        self.assertEqual(proc_skip.returncode, 0)
+        self.assertIn("SGLang model warmup skipped (--skip-warmup)", proc_skip.stdout)
 
 
 if __name__ == "__main__":

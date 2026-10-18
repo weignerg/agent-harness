@@ -8,6 +8,12 @@
 [![Inference](https://img.shields.io/badge/inference-SGLang_RadixAttention-orange.svg)](docs/sglang-inference-stack.md)
 [![Service](https://img.shields.io/badge/systemd-user_units-lightgrey.svg)](config/systemd)
 
+### 📖 Documentation & Deep Dives
+- 📡 [Multi-Platform Remote Connections](docs/remote_connections.md) (`docs/remote_connections.md`) — Headless OpenCode server, Mobile pairing, `agy remote-control start`, and `claude server`.
+- 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
+- ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
+- 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
+
 ---
 
 ## 1. Architectural Overview
@@ -116,8 +122,16 @@ Uninstallation uses the atomic manifest engine to roll back deployed files in re
 The installer is engineered for zero-friction end-to-end deployment ("I want my grandma to be able to install this"):
 - **Zero Ambiguity**: Running `./install.sh` automatically probes host GPU capabilities, provisions the backend virtual environment, deploys the required systemd user services, configures secure 16-character server credentials (`OPENCODE_SERVER_PASSWORD`), and starts the units.
 - **Model Verification & Acquisition**: Auto-detects local Hugging Face model weight caches (`.safetensors`). If weights are missing, you can download them automatically via `--download-models` (with `HF_TOKEN`) or inspect explicit manual download instructions.
+- **Transparent First-Run SGLang Warmup Pass**: Performs a foreground model warmup and weight download pass before activating background systemd units, streaming live progress directly to the console. To bypass (e.g. for CI/CD or resource-constrained environments), pass `--skip-warmup`.
+- **Clean NVIDIA Driver Mismatch Reboot Handling**: If an un-rebooted NVIDIA kernel module mismatch is detected (e.g. following `apt upgrade`), the installer halts cleanly with exit code 1 and renders a high-contrast, perfectly-aligned reboot instruction box reproducing the exact invocation command to resume after reboot, omitting unhelpful diagnostic dumps.
 - **Strict Healthcheck Completion Invariant**: Before reporting completion, the installer verifies that local systemd daemons (`opencode-server.service`, SGLang inference on port 30000, and the ColBERT reindexing timer) are active and responding. Can be skipped in non-systemd sandboxes or via `--skip-healthcheck`.
-- **Immediate Next Step Terminal Box**: Concludes with a high-contrast, impossible-to-miss terminal box instructing the user on the single command to run next (`opencode`).
+- **Master All-In-One Deployment Dashboard**: Concludes with a comprehensive summary card surfacing:
+  - **Inventory & Configuration**: Antigravity plugins, Claude Code harness, OpenCode 10-component hierarchy, systemd user services, probed model/hardware, knowledge vault, ColBERT engine, and firewall rules.
+  - **Tool Launch Commands**: Terminal launch syntax for `opencode`, `claude`, `agy` (Antigravity), `obsidian ~/Vaults/home`, and `~/.local/share/opencode-sglang-stack/reindex_vault.sh` (or `/reindex` in OpenCode).
+  - **Server Endpoints & Launch Commands**: Headless OpenCode server with credentials (`http://<LAN_IP>:4096`), SGLang endpoint (`http://127.0.0.1:30000/v1`), Antigravity remote control (`agy remote-control start`), and Claude Code server (`claude server`).
+  - **Immediate Next Step Terminal Box**: High-contrast, 100% precision aligned box instructing the user on the single command to run next (`opencode`).
+  - **Documentation & Deep Dives**: Direct links to `docs/remote_connections.md`, `docs/vault_and_memory_guide.md`, `docs/inference_architecture.md`, and `README.md`.
+  - **Operational Commands**: Useful `systemctl --user status` and installer verification/uninstall commands.
 
 #### 7. Default Host Firewall Protection
 Security is enabled by default (`WITH_FIREWALL=true`). The installer stages host UFW rules allowing SSH and OpenCode server (port 4096) access from the local area network (LAN) while keeping backend inference ports bound to local loopback:

@@ -139,11 +139,22 @@ Once tunneled, configure your local client tools to access the forwarded ports:
 - **SGLang OpenAI Compatible Endpoint**: `http://localhost:30000/v1`
 - **MCP Vault Server**: Run directly over SSH or via stdio MCP bridge.
 
+### 4.3 Antigravity Remote Control Server (`agy remote-control start`)
+
+To expose the Antigravity session directly for remote client or browser control without manual port tunnels:
+
+```bash
+# Launch Antigravity remote control daemon
+agy remote-control start
+```
+
+This starts the Antigravity remote control listener, allowing authorized remote clients to attach directly to the running harness session.
+
 ---
 
-## 5. Claude Code Headless Operation
+## 5. Claude Code Headless & Server Operation
 
-Claude Code can operate in headless mode on the host server or remotely via SSH:
+Claude Code can operate in interactive terminal mode, headless CLI mode, or as a background server:
 
 ### 5.1 Headless Host Execution
 When running inside headless environments (such as terminal multiplexers like `tmux` or `screen`), launch Claude Code with:
@@ -153,7 +164,15 @@ When running inside headless environments (such as terminal multiplexers like `t
 claude --print "Explain the architectural boundary between SGLang and OpenCode server"
 ```
 
-### 5.2 Environment Variable Pass-Through
+### 5.2 Claude Code Server Daemon (`claude server`)
+Claude Code includes a native server mode to process agent commands over local sockets or network bridges:
+
+```bash
+# Launch Claude Code server daemon
+claude server
+```
+
+### 5.3 Environment Variable Pass-Through
 Ensure the shell session loads the authoritative backend configuration:
 
 ```bash
