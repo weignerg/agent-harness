@@ -12,6 +12,9 @@
 # ==============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
+
 USER_HOME="${USER_HOME:-${HOME}}"
 GEMINI_CONFIG_DIR="${GEMINI_CONFIG_DIR:-${USER_HOME}/.gemini/config}"
 AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
@@ -71,6 +74,18 @@ done
 
 if [ "$DRY_RUN" = true ]; then
     echo "[DRY-RUN] SIMULATING uninstallation of agent-harness components..."
+    if [ "$MODE" = "local" ]; then
+        repo_path="$(python3 -c "import os, sys; print(os.path.abspath(sys.argv[1]))" "${TARGET_REPO:-$(pwd)}")"
+        manifest_file="${repo_path}/.orchestration/install_manifest.json"
+        if [ -f "$manifest_file" ]; then
+            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" --dry-run
+        fi
+    else
+        manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
+        if [ -f "$manifest_file" ]; then
+            python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" --dry-run
+        fi
+    fi
     if [ "$PURGE" = true ]; then
         echo "Purging backend stacks and configuration..."
         echo "[DRY-RUN] Would remove directory ${SGLANG_STACK_DIR}"
@@ -80,21 +95,15 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 if [ "$MODE" = "global" ]; then
-    rm -rf "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
-    rm -rf "${AGENTS_HOME_DIR}"
-    rm -f "${USER_HOME}/AGENTS.md"
+    manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
+    if [ -f "$manifest_file" ]; then
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
+    fi
 
     # Clean legacy launchers
     for l in opencode-local opencode-architect-local opencode-worker-local opencode-reviewer-local opencode-sub-agent-local; do
         rm -f "${USER_HOME}/.local/bin/$l"
     done
-
-    # Clean OpenCode configs
-    rm -f "${OPENCODE_HOME_DIR}/opencode.json"
-    rm -f "${OPENCODE_HOME_DIR}/tui.json"
-    rm -f "${OPENCODE_HOME_DIR}/AGENTS.md"
-    rm -f "${BACKEND_DIR}/gpu_profile.json"
-    rm -f "${BACKEND_DIR}/models_catalog.json"
 
     # Clean harness systemd user units
     if [ -d "${SYSTEMD_USER_DIR}" ]; then
@@ -108,6 +117,28 @@ if [ "$MODE" = "global" ]; then
         fi
     fi
 
+    # Clean symlinks
+    [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
+    [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
+
+    # Safely restore pre-existing settings if backup exists
+    if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
+        mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
+    fi
+
+    # Safely clean empty directories without wiping user modifications
+    for d in "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${GEMINI_CONFIG_DIR}/plugins/agy-harness" "${USER_HOME}/.orchestration" "${AGENTS_HOME_DIR}" "${CLAUDE_HOME_DIR}" "${OPENCODE_HOME_DIR}"; do
+        if [ -d "$d" ]; then
+            find "$d" -depth -type d -empty -delete 2>/dev/null || true
+            rmdir "$d" 2>/dev/null || true
+        fi
+    done
+
+    # Remove backend profiles if empty
+    rm -f "${BACKEND_DIR}/gpu_profile.json" 2>/dev/null || true
+    rm -f "${BACKEND_DIR}/models_catalog.json" 2>/dev/null || true
+    rmdir "${BACKEND_DIR}" 2>/dev/null || true
+
     if [ "$PURGE" = true ]; then
         rm -rf "${SGLANG_STACK_DIR}"
         rm -rf "${BACKEND_DIR}"
@@ -116,7 +147,32 @@ if [ "$MODE" = "global" ]; then
     echo "✅ Removed global harness files."
 else
     repo_path="$(mkdir -p "$TARGET_REPO" && cd "$TARGET_REPO" && pwd)"
-    rm -rf "${repo_path}/.agents"
-    rm -rf "${repo_path}/.orchestration"
-    echo "✅ Removed ${repo_path}/.agents and ${repo_path}/.orchestration"
+    manifest_file="${repo_path}/.orchestration/install_manifest.json"
+    if [ -f "$manifest_file" ]; then
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file"
+    fi
+
+    # Restore pre-harness settings backup if present
+    if [ -f "${repo_path}/.claude/settings.json.pre-harness.bak" ]; then
+        mv -f "${repo_path}/.claude/settings.json.pre-harness.bak" "${repo_path}/.claude/settings.json"
+    fi
+
+    # Only remove .agents if it is a symlink
+    if [ -L "${repo_path}/.agents" ]; then
+        rm -f "${repo_path}/.agents"
+    fi
+
+    # Restore pre-harness .agents directory if backed up
+    if [ -d "${repo_path}/.agents.pre-harness.bak" ] && [ ! -e "${repo_path}/.agents" ]; then
+        mv "${repo_path}/.agents.pre-harness.bak" "${repo_path}/.agents"
+    fi
+
+    # Safely clean empty directories only - preserve any user-modified files
+    for d in "${repo_path}/.agents" "${repo_path}/.claude" "${repo_path}/.opencode" "${repo_path}/.orchestration"; do
+        if [ -d "$d" ]; then
+            find "$d" -depth -type d -empty -delete 2>/dev/null || true
+            rmdir "$d" 2>/dev/null || true
+        fi
+    done
+    echo "✅ Removed local harness files from ${repo_path}"
 fi
