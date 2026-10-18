@@ -24,7 +24,7 @@ Rather than maintaining fragmented scripts, skills, and configuration rules acro
 - **Polymorphic Memory Engine**: Combines CPU-accelerated ColBERTv2 late-interaction neural search over Obsidian knowledge vaults with RadixAttention prefix caching and standardized markdown task handoffs.
 - **Dynamic Runtime Adapters**: Pluggable adapters (`AgyRuntimeAdapter`, `ClaudeRuntimeAdapter`, `OpenCodeRuntimeAdapter`) seamlessly translate unified agent charters, tools, and rules into engine-native schemas.
 - **Master Universal Installer**: Atomic manifest-driven installer and uninstaller supporting global and localized repository deployments with cryptographic SHA-256 rollback protection.
-- **Local SGLang Backend Parity**: Turnkey systemd user service deployment for high-throughput local LLM serving, automatic GPU hardware probing, cgroup agent slicing, and OOM watchdog recovery.
+- **Local SGLang Backend Parity**: Automated systemd user service deployment for high-throughput local LLM serving, automatic GPU hardware probing, cgroup agent slicing, and OOM watchdog recovery.
 
 ```
 agent-harness/
@@ -118,8 +118,8 @@ Uninstallation uses the atomic manifest engine to roll back deployed files in re
 ./uninstall.sh --local /path/to/target-repo -y
 ```
 
-#### 6. Grandma-Proof Turnkey Installation & Post-Install UX
-The installer is engineered for zero-friction end-to-end deployment ("I want my grandma to be able to install this"):
+#### 6. Installation & Post-Install UX
+The installer provides complete end-to-end deployment:
 - **Zero Ambiguity**: Running `./install.sh` automatically probes host GPU capabilities, provisions the backend virtual environment, deploys the required systemd user services, configures secure 16-character server credentials (`OPENCODE_SERVER_PASSWORD`), and starts the units.
 - **Model Verification & Acquisition**: Auto-detects local Hugging Face model weight caches (`.safetensors`). If weights are missing, you can download them automatically via `--download-models` (with `HF_TOKEN`) or inspect explicit manual download instructions.
 - **Transparent First-Run SGLang Warmup Pass**: Performs a foreground model warmup and weight download pass before activating background systemd units, streaming live progress directly to the console. To bypass (e.g. for CI/CD or resource-constrained environments), pass `--skip-warmup`.

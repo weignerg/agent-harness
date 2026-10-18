@@ -1047,7 +1047,7 @@ print("└" + "─" * 72 + "┘")
 ' "$cmd"
 }
 
-print_grandma_proof_summary() {
+print_completion_summary() {
     local lan_ip
     lan_ip="$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")"
     lan_ip="${lan_ip:-127.0.0.1}"
@@ -1087,7 +1087,7 @@ print_grandma_proof_summary() {
 
     echo ""
     echo "================================================================================"
-    echo "👵 GRANDMA-PROOF AGENT HARNESS DEPLOYMENT DASHBOARD"
+    echo "📋 AGENT HARNESS DEPLOYMENT DASHBOARD"
     echo "================================================================================"
     echo "📋 Multi-Agent Harness Inventory & Configuration:"
     if [ "$MODE" = "global" ]; then
@@ -2126,7 +2126,7 @@ EOF
         warmup_sglang_service
         verify_backend_healthchecks
         print_pending_sudo_summary
-        print_grandma_proof_summary
+        print_completion_summary
         echo "🎉 Local Agent Harness installation complete!"
     else
         manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
@@ -2198,7 +2198,7 @@ EOF
         warmup_sglang_service
         verify_backend_healthchecks
         print_pending_sudo_summary
-        print_grandma_proof_summary
+        print_completion_summary
         echo "🎉 Global Agent Harness installation complete!"
     fi
 }

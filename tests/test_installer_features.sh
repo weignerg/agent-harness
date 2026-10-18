@@ -349,9 +349,9 @@ else
     fail "--no-download-models flag failed to set download option to false"
 fi
 
-# --- Test 22: Verify Grandma-Proof UX, Password Generation & Terminal Box -----
-echo "[Test 22] Verifying Grandma-Proof post-install UX and automatic password generation..."
-SANDBOX_GP="$(mktemp -d /tmp/installer-test-grandma-XXXXXX)"
+# --- Test 22: Verify Post-Install Summary, Password Generation & Terminal Box -----
+echo "[Test 22] Verifying post-install summary UX and automatic password generation..."
+SANDBOX_GP="$(mktemp -d /tmp/installer-test-summary-XXXXXX)"
 trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}"' EXIT
 
 GP_OUT="$(HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
@@ -378,9 +378,9 @@ fi
 
 # 3. Verify auto-generated password is surfaced to user in summary
 if echo "$GP_OUT" | grep -q "password: ${GEN_PASS} (auto-generated)"; then
-    pass "Auto-generated password surfaced in Grandma-Proof summary box"
+    pass "Auto-generated password surfaced in completion summary box"
 else
-    fail "Auto-generated password not surfaced in Grandma-Proof summary"
+    fail "Auto-generated password not surfaced in completion summary"
 fi
 
 # --- Test 23: Verify SGLang venv auto-healing with local repository -----------

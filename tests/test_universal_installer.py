@@ -705,8 +705,8 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ATTENTION: INSTALLATION INCOMPLETE - MANUAL INTERVENTION REQUIRED", proc.stdout)
             self.assertIn("sudo ufw allow 4096/tcp comment OpenCode Server", proc.stdout)
 
-    def test_issue7_grandma_proof_terminal_box_and_password(self):
-        """Test Issue #7: Grandma-proof UX, automatic password generation (0600), and terminal box."""
+    def test_issue7_post_install_terminal_box_and_password(self):
+        """Test Issue #7: Post-install UX, automatic password generation (0600), and terminal box."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             sandbox = Path(tmp_dir) / "home"
             sandbox.mkdir()
@@ -736,7 +736,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(len(gen_pass), 16)
             self.assertTrue(gen_pass.isalnum())
 
-            # 3. Verify Grandma-Proof terminal box
+            # 3. Verify terminal box
             self.assertIn("IMMEDIATE NEXT STEP: RUN THIS COMMAND IN YOUR TERMINAL", proc.stdout)
             self.assertIn("opencode", proc.stdout)
 
