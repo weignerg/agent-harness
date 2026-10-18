@@ -904,6 +904,215 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertEqual(proc_skip.returncode, 0)
         self.assertIn("SGLang model warmup skipped (--skip-warmup)", proc_skip.stdout)
 
+    def test_issue7_sglang_healthcheck_loading_progress_and_success(self):
+        """Test Issue #7: SGLang healthcheck displays live loading progress and succeeds once model is loaded."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            state_file = mock_bin / "curl_calls.txt"
+
+            mock_curl = mock_bin / "curl"
+            mock_curl.write_text(
+                '#!/bin/sh\n'
+                f'STATE="{state_file}"\n'
+                'for arg in "$@"; do\n'
+                '    if echo "$arg" | grep -q "30000/v1/models"; then\n'
+                '        COUNT=0\n'
+                '        [ -f "$STATE" ] && COUNT=$(cat "$STATE")\n'
+                '        COUNT=$((COUNT + 1))\n'
+                '        echo "$COUNT" > "$STATE"\n'
+                '        if [ "$COUNT" -eq 1 ]; then\n'
+                '            if echo "$*" | grep -q "%{http_code}"; then\n'
+                '                printf "\\n503"\n'
+                '            else\n'
+                '                printf \'{"error":"Loading model weights"}\'\n'
+                '            fi\n'
+                '            exit 0\n'
+                '        else\n'
+                '            if echo "$*" | grep -q "%{http_code}"; then\n'
+                '                printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200\'\n'
+                '            else\n'
+                '                printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n\'\n'
+                '            fi\n'
+                '            exit 0\n'
+                '        fi\n'
+                '    elif echo "$arg" | grep -q "4096"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "OpenCode Server\\n200"\n'
+                '        else\n'
+                '            printf "OpenCode Server\\n"\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    fi\n'
+                'done\n'
+                'exit 1\n',
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            mock_systemctl = mock_bin / "systemctl"
+            mock_systemctl.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
+                '    echo "active"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            mock_systemctl.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+            self.assertIn("SGLang is loading model weights into VRAM", proc.stdout)
+            self.assertIn("SGLang inference engine is active and serving on port 30000.", proc.stdout)
+            self.assertIn("All backend service healthchecks passed!", proc.stdout)
+
+    def test_issue7_sglang_healthcheck_early_failure_on_failed_service(self):
+        """Test Issue #7: SGLang healthcheck detects systemd service failure immediately and aborts without waiting 120s."""
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            mock_curl = mock_bin / "curl"
+            mock_curl.write_text(
+                '#!/bin/sh\n'
+                'for arg in "$@"; do\n'
+                '    if echo "$arg" | grep -q "4096"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "OpenCode Server\\n200"\n'
+                '        else\n'
+                '            printf "OpenCode Server\\n"\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    fi\n'
+                'done\n'
+                'exit 1\n',
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            mock_systemctl = mock_bin / "systemctl"
+            mock_systemctl.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
+                '    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then\n'
+                '        echo "failed"\n'
+                '        exit 1\n'
+                '    fi\n'
+                '    echo "active"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            mock_systemctl.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            start_time = time.time()
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            duration = time.time() - start_time
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertLess(duration, 15.0, "Early failure should abort immediately, not wait 120s")
+            self.assertIn("SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait.", proc.stdout)
+            self.assertIn("SGLang inference engine failed healthcheck.", proc.stdout)
+            self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
+
+    def test_issue7_opencode_server_healthcheck_early_failure(self):
+        """Test Issue #7: OpenCode server healthcheck detects systemd service failure immediately and aborts without waiting 30s."""
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            mock_bin = Path(tmp_dir) / "bin"
+            mock_bin.mkdir()
+
+            mock_curl = mock_bin / "curl"
+            mock_curl.write_text(
+                '#!/bin/sh\n'
+                'for arg in "$@"; do\n'
+                '    if echo "$arg" | grep -q "30000"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200\'\n'
+                '        else\n'
+                '            printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n\'\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    fi\n'
+                'done\n'
+                'exit 1\n',
+                encoding="utf-8",
+            )
+            mock_curl.chmod(0o755)
+
+            mock_systemctl = mock_bin / "systemctl"
+            mock_systemctl.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
+                '    if [ "$3" = "opencode-server.service" ] || [ "$4" = "opencode-server.service" ]; then\n'
+                '        echo "failed"\n'
+                '        exit 1\n'
+                '    fi\n'
+                '    echo "active"\n'
+                '    exit 0\n'
+                'fi\n'
+                'exit 0\n',
+                encoding="utf-8",
+            )
+            mock_systemctl.chmod(0o755)
+
+            env = {
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+
+            start_time = time.time()
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--healthcheck",
+                "--non-interactive",
+                env=env,
+            )
+            duration = time.time() - start_time
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertLess(duration, 15.0, "Early failure should abort immediately, not wait 30s")
+            self.assertIn("OpenCode server (opencode-server.service) status is failed; aborting wait.", proc.stdout)
+            self.assertIn("OpenCode server failed healthcheck.", proc.stdout)
+            self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

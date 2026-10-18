@@ -1415,26 +1415,41 @@ verify_backend_healthchecks() {
 
     # 4. Poll OpenCode server (systemctl and 127.0.0.1:4096)
     echo "  Checking OpenCode headless server (port 4096)..."
-    local server_active=false
-    local server_listening=false
-    for _ in $(seq 1 "${OPENCODE_SERVER_RETRIES:-10}"); do
-        if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet opencode-server.service 2>/dev/null; then
-            server_active=true
-        fi
-        if curl -s -f -m 2 "http://127.0.0.1:4096" >/dev/null 2>&1 || curl -s -m 2 "http://127.0.0.1:4096" 2>&1 | grep -qi "opencode"; then
-            server_listening=true
-        elif command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 4096 2>/dev/null; then
-            server_listening=true
-        elif (echo > /dev/tcp/127.0.0.1/4096) 2>/dev/null; then
-            server_listening=true
-        fi
-        if [ "$server_active" = true ] && [ "$server_listening" = true ]; then
+    local server_ok=false
+    local max_server_wait="${OPENCODE_SERVER_TIMEOUT:-${OPENCODE_SERVER_RETRIES:-30}}"
+    local server_elapsed=0
+
+    while [ "$server_elapsed" -lt "$max_server_wait" ]; do
+        local server_out=""
+        server_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:4096" 2>/dev/null || true)"
+        local server_code="${server_out##*$'\n'}"
+        local server_resp="${server_out%$'\n'*}"
+
+        if [ "$server_code" = "200" ] || [ "$server_code" = "401" ] || \
+           curl -s -f -m 2 "http://127.0.0.1:4096" >/dev/null 2>&1 || \
+           echo "$server_resp" | grep -qi "opencode" || \
+           (echo > /dev/tcp/127.0.0.1/4096) 2>/dev/null; then
+            server_ok=true
             break
         fi
-        sleep 1
+
+        local server_status=""
+        if command -v systemctl >/dev/null 2>&1; then
+            server_status="$(systemctl --user is-active opencode-server.service 2>/dev/null || true)"
+        fi
+
+        if [ "$server_status" = "failed" ]; then
+            echo "  ❌ OpenCode server (opencode-server.service) status is failed; aborting wait."
+            break
+        elif [ "$server_status" = "active" ] || [ "$server_status" = "activating" ]; then
+            echo "  [$(date +%T)] ⏳ OpenCode server starting up (elapsed: ${server_elapsed}s / max: ${max_server_wait}s)..."
+        fi
+
+        sleep 2
+        server_elapsed=$((server_elapsed + 2))
     done
 
-    if [ "$server_active" = true ] && [ "$server_listening" = true ]; then
+    if [ "$server_ok" = true ]; then
         echo "  ✅ OpenCode server is active and listening on port 4096."
     else
         health_failed=true
@@ -1444,24 +1459,40 @@ verify_backend_healthchecks() {
 
     # 5. Poll SGLang (systemctl and 127.0.0.1:30000/v1/models)
     echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
-    local sglang_active=false
-    local sglang_listening=false
-    for _ in $(seq 1 "${SGLANG_HEALTHCHECK_RETRIES:-15}"); do
-        if command -v systemctl >/dev/null 2>&1 && systemctl --user is-active --quiet "${svc_name}" 2>/dev/null; then
-            sglang_active=true
-        fi
-        if curl -s -f -m 2 "http://127.0.0.1:30000/v1/models" >/dev/null 2>&1; then
-            sglang_listening=true
-        elif (echo > /dev/tcp/127.0.0.1/30000) 2>/dev/null; then
-            sglang_listening=true
-        fi
-        if [ "$sglang_active" = true ] && [ "$sglang_listening" = true ]; then
+    local sglang_ok=false
+    local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-120}}}"
+    local elapsed=0
+    local model_name="${PROBED_MODEL_NAME:-ornith}"
+
+    while [ "$elapsed" -lt "$max_sglang_wait" ]; do
+        local sglang_out=""
+        sglang_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:30000/v1/models" 2>/dev/null || true)"
+        local sglang_code="${sglang_out##*$'\n'}"
+        local sglang_resp="${sglang_out%$'\n'*}"
+
+        if [ "$sglang_code" = "200" ] || echo "$sglang_resp" | grep -q '"data"' || { [ -n "$model_name" ] && echo "$sglang_resp" | grep -qi "$model_name"; }; then
+            sglang_ok=true
             break
         fi
-        sleep 1
+
+        # If not yet ready, check systemd status
+        local sglang_status=""
+        if command -v systemctl >/dev/null 2>&1; then
+            sglang_status="$(systemctl --user is-active "${svc_name}" 2>/dev/null || true)"
+        fi
+
+        if [ "$sglang_status" = "failed" ]; then
+            echo "  ❌ SGLang service (${svc_name}) status is failed; aborting wait."
+            break
+        elif [ "$sglang_status" = "active" ] || [ "$sglang_status" = "activating" ]; then
+            echo "  [$(date +%T)] ⏳ SGLang is loading model weights into VRAM (elapsed: ${elapsed}s / max: ${max_sglang_wait}s)..."
+        fi
+
+        sleep 2
+        elapsed=$((elapsed + 2))
     done
 
-    if [ "$sglang_active" = true ] && [ "$sglang_listening" = true ]; then
+    if [ "$sglang_ok" = true ]; then
         echo "  ✅ SGLang inference engine is active and serving on port 30000."
     else
         health_failed=true

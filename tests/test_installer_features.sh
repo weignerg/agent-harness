@@ -506,6 +506,121 @@ else
     fail "SGLang foreground warmup pass failed"
 fi
 
+# --- Test 26: Verify SGLang healthcheck live model loading progress & readiness ---
+echo "[Test 26] Verifying SGLang healthcheck live model loading progress & readiness..."
+SANDBOX_HC_PROG="$(mktemp -d /tmp/installer-test-hc-prog-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}"' EXIT
+
+MOCK_HC_BIN="${SANDBOX_HC_PROG}/bin"
+mkdir -p "${MOCK_HC_BIN}"
+STATE_HC="${MOCK_HC_BIN}/curl_calls.txt"
+
+cat << EOF > "${MOCK_HC_BIN}/curl"
+#!/bin/sh
+STATE="${STATE_HC}"
+for arg in "\$@"; do
+    if echo "\$arg" | grep -q "30000/v1/models"; then
+        COUNT=0
+        [ -f "\$STATE" ] && COUNT=\$(cat "\$STATE")
+        COUNT=\$((COUNT + 1))
+        echo "\$COUNT" > "\$STATE"
+        if [ "\$COUNT" -eq 1 ]; then
+            if echo "\$*" | grep -q "%{http_code}"; then
+                printf "\\n503"
+            else
+                printf '{"error":"Loading model weights"}'
+            fi
+            exit 0
+        else
+            if echo "\$*" | grep -q "%{http_code}"; then
+                printf '{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200'
+            else
+                printf '{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n'
+            fi
+            exit 0
+        fi
+    elif echo "\$arg" | grep -q "4096"; then
+        if echo "\$*" | grep -q "%{http_code}"; then
+            printf "OpenCode Server\\n200"
+        else
+            printf "OpenCode Server\\n"
+        fi
+        exit 0
+    fi
+done
+exit 1
+EOF
+chmod 0755 "${MOCK_HC_BIN}/curl"
+
+cat << 'EOF' > "${MOCK_HC_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    echo "active"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_HC_BIN}/systemctl"
+
+HC_PROG_OUT="$(PATH="${MOCK_HC_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_PROG}" HOME="${SANDBOX_HC_PROG}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+if echo "$HC_PROG_OUT" | grep -q "SGLang is loading model weights into VRAM" && \
+   echo "$HC_PROG_OUT" | grep -q "SGLang inference engine is active and serving on port 30000." && \
+   echo "$HC_PROG_OUT" | grep -q "All backend service healthchecks passed!"; then
+    pass "SGLang healthcheck emits live loading progress and succeeds upon model readiness"
+else
+    fail "SGLang healthcheck live loading progress or readiness verification failed"
+fi
+
+# --- Test 27: Verify SGLang healthcheck early failure detection --------------
+echo "[Test 27] Verifying SGLang healthcheck early failure detection..."
+SANDBOX_HC_FAIL="$(mktemp -d /tmp/installer-test-hc-fail-XXXXXX)"
+trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}" "${SANDBOX_HC_FAIL}"' EXIT
+
+MOCK_FAIL_BIN="${SANDBOX_HC_FAIL}/bin"
+mkdir -p "${MOCK_FAIL_BIN}"
+
+cat << 'EOF' > "${MOCK_FAIL_BIN}/curl"
+#!/bin/sh
+for arg in "$@"; do
+    if echo "$arg" | grep -q "4096"; then
+        if echo "$*" | grep -q "%{http_code}"; then
+            printf "OpenCode Server\n200"
+        else
+            printf "OpenCode Server\n"
+        fi
+        exit 0
+    fi
+done
+exit 1
+EOF
+chmod 0755 "${MOCK_FAIL_BIN}/curl"
+
+cat << 'EOF' > "${MOCK_FAIL_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then
+        echo "failed"
+        exit 1
+    fi
+    echo "active"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_FAIL_BIN}/systemctl"
+
+FAIL_START_TIME=$(date +%s)
+HC_FAIL_OUT="$(PATH="${MOCK_FAIL_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_FAIL}" HOME="${SANDBOX_HC_FAIL}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+FAIL_DURATION=$(( $(date +%s) - FAIL_START_TIME ))
+
+if echo "$HC_FAIL_OUT" | grep -q "SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait." && \
+   echo "$HC_FAIL_OUT" | grep -q "SGLang inference engine failed healthcheck." && \
+   [ "$FAIL_DURATION" -lt 15 ]; then
+    pass "SGLang healthcheck aborted immediately upon failed unit state without waiting full timeout"
+else
+    fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
+fi
+
 echo "================================================================================"
 echo "📊 TEST RESULTS: ${TESTS_PASSED} Passed, ${TESTS_FAILED} Failed"
 echo "================================================================================"
