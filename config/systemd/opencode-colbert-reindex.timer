@@ -2,9 +2,10 @@
 Description=OpenCode ColBERTv2 Semantic Memory Vault Reindexing Timer
 
 [Timer]
-OnCalendar=hourly
+OnBootSec=2min
+OnUnitActiveSec=5min
 Persistent=true
-RandomizedDelaySec=60
+RandomizedDelaySec=15
 
 [Install]
 WantedBy=timers.target

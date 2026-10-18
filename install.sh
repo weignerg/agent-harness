@@ -46,6 +46,12 @@ REINSTALL=false
 PURGE=false
 OVERRIDE_GPU=""
 ENABLE_SYSTEMD="${ENABLE_SYSTEMD:-false}"
+WITH_OBSIDIAN="${WITH_OBSIDIAN:-true}"
+WITH_VAULT="${WITH_VAULT:-true}"
+WITH_FIREWALL="${WITH_FIREWALL:-false}"
+WITH_BACKENDS="${WITH_BACKENDS:-true}"
+NO_BACKUP=false
+WIPE_BACKUPS=false
 
 show_help() {
     cat << 'EOF'
@@ -66,6 +72,14 @@ Actions:
   --action install|uninstall|verify    Action to execute (default: install)
   --verify                             Verify integrity of files recorded in install manifest
   --uninstall                          Safely roll back installed files using install manifest
+
+Parity & Modules:
+  --with-obsidian / --no-obsidian      Toggle Obsidian detection & pacman install (default: with)
+  --with-vault / --no-vault            Toggle ~/Vaults/home starter scaffolding (default: with)
+  --with-firewall / --no-firewall      Toggle UFW/iptables rules for ports 4096 & 30000 (default: no)
+  --with-backends / --no-backends      Toggle SGLang systemd units & backend venv (default: with)
+  --no-backup                          Skip restoring pre-harness backups during uninstall
+  --wipe-backups                       Purge .pre-harness.bak files/dirs during uninstall
 
 Options:
   -n, --dry-run                        Simulate operations without modifying files
@@ -176,6 +190,46 @@ while [[ $# -gt 0 ]]; do
             ENABLE_SYSTEMD=true
             shift
             ;;
+        --with-obsidian)
+            WITH_OBSIDIAN=true
+            shift
+            ;;
+        --no-obsidian)
+            WITH_OBSIDIAN=false
+            shift
+            ;;
+        --with-vault)
+            WITH_VAULT=true
+            shift
+            ;;
+        --no-vault)
+            WITH_VAULT=false
+            shift
+            ;;
+        --with-firewall)
+            WITH_FIREWALL=true
+            shift
+            ;;
+        --no-firewall)
+            WITH_FIREWALL=false
+            shift
+            ;;
+        --with-backends)
+            WITH_BACKENDS=true
+            shift
+            ;;
+        --no-backends)
+            WITH_BACKENDS=false
+            shift
+            ;;
+        --no-backup)
+            NO_BACKUP=true
+            shift
+            ;;
+        --wipe-backups)
+            WIPE_BACKUPS=true
+            shift
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -203,6 +257,243 @@ if [ "$MODE" = "local" ]; then
         TARGET_REPO="$(mkdir -p "$TARGET_REPO" && cd "$TARGET_REPO" && pwd)"
     fi
 fi
+
+# Wipe backups confirmation gate for uninstallation
+if [ "$WIPE_BACKUPS" = true ] && [ "$ACTION" = "uninstall" ]; then
+    if [ "$NON_INTERACTIVE" != true ]; then
+        if [ -t 0 ]; then
+            printf "⚠️  WARNING: You are about to permanently purge all .pre-harness.bak backup files and directories.\n"
+            printf "Type 'yes' to confirm: "
+            read -r confirmation
+            if [ "$confirmation" != "yes" ]; then
+                echo "❌ Backup wipe cancelled by user."
+                exit 1
+            fi
+        else
+            echo "❌ Error: --wipe-backups in non-interactive environment requires -y / --yes flag." >&2
+            exit 1
+        fi
+    fi
+fi
+
+# Dual-stream logging setup
+if [ "$DRY_RUN" != true ]; then
+    TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+    if [ "$MODE" = "local" ]; then
+        LOG_DIR="${TARGET_REPO}/.orchestration/logs"
+    else
+        LOG_DIR="${USER_HOME}/.orchestration/logs"
+    fi
+    mkdir -p "$LOG_DIR"
+    if [ "$ACTION" = "uninstall" ]; then
+        LOG_FILE="${LOG_DIR}/uninstall-${TIMESTAMP}.log"
+        LATEST_LOG_LINK="${LOG_DIR}/uninstall.log"
+        ln -sfn "uninstall-${TIMESTAMP}.log" "$LATEST_LOG_LINK"
+    else
+        LOG_FILE="${LOG_DIR}/install-${TIMESTAMP}.log"
+        LATEST_LOG_LINK="${LOG_DIR}/install.log"
+        ln -sfn "install-${TIMESTAMP}.log" "$LATEST_LOG_LINK"
+    fi
+
+    finish_logging() {
+        exec 1>&- 2>&-
+        wait 2>/dev/null || true
+    }
+    trap finish_logging EXIT
+
+    exec > >(tee -a "$LOG_FILE") 2> >(tee -a "$LOG_FILE" >&2)
+fi
+
+PENDING_SUDO_COMMANDS=()
+
+run_sudo() {
+    local cmd=("$@")
+    local cmd_str="${cmd[*]}"
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY-RUN] Would execute with sudo: sudo ${cmd_str}"
+        return 0
+    fi
+
+    # Check if passwordless sudo is permitted
+    if sudo -n true 2>/dev/null; then
+        sudo "${cmd[@]}"
+        return $?
+    fi
+
+    # Check if running interactively
+    if [ -t 0 ] && [ "$NON_INTERACTIVE" != true ]; then
+        if sudo -v 2>/dev/null; then
+            sudo "${cmd[@]}"
+            return $?
+        fi
+    fi
+
+    # Non-interactive shell OR no passwordless sudo privilege
+    PENDING_SUDO_COMMANDS+=("$cmd_str")
+
+    # Prominent warning directly to stderr
+    cat << EOF >&2
+⚠️  ========================================================================
+⚠️  SUDO PRIVILEGE REQUIRED - NON-INTERACTIVE / NON-ROOT ENVIRONMENT
+⚠️  ========================================================================
+⚠️  The following root command could not be executed automatically:
+⚠️      sudo ${cmd_str}
+⚠️
+⚠️  INSTALLATION IS INCOMPLETE WITHOUT MANUAL ROOT INTERVENTION.
+⚠️  Please execute the manual root command above to complete this step.
+⚠️  ========================================================================
+EOF
+
+    # Also log clearly to stdout and install log
+    echo "⚠️  [PENDING ROOT ACTION] Installation is INCOMPLETE without manual intervention."
+    echo "    To complete this step, run: sudo ${cmd_str}"
+
+    return 0
+}
+
+print_pending_sudo_summary() {
+    if [ ${#PENDING_SUDO_COMMANDS[@]} -gt 0 ]; then
+        cat << 'EOF' >&2
+
+❌ ========================================================================
+❌ ATTENTION: INSTALLATION INCOMPLETE - MANUAL INTERVENTION REQUIRED
+❌ ========================================================================
+The installer completed non-root configuration steps, but one or more
+actions required root privileges in a non-interactive environment.
+
+Please run the following commands manually to complete setup:
+EOF
+        for c in "${PENDING_SUDO_COMMANDS[@]}"; do
+            echo "  sudo $c" >&2
+        done
+        cat << 'EOF' >&2
+========================================================================
+EOF
+
+        echo ""
+        echo "❌ ========================================================================"
+        echo "❌ ATTENTION: INSTALLATION INCOMPLETE - MANUAL INTERVENTION REQUIRED"
+        echo "❌ ========================================================================"
+        echo "The installer completed non-root configuration steps, but one or more"
+        echo "actions required root privileges in a non-interactive environment."
+        echo ""
+        echo "Please run the following commands manually to complete setup:"
+        for c in "${PENDING_SUDO_COMMANDS[@]}"; do
+            echo "  sudo $c"
+        done
+        echo "========================================================================"
+    fi
+}
+
+install_obsidian() {
+    echo "================================================================================"
+    echo "📦 CONFIGURING OBSIDIAN DESKTOP KNOWLEDGE VAULT"
+    echo "================================================================================"
+    if [ "$WITH_OBSIDIAN" != true ]; then
+        echo "  ℹ️  Obsidian installation skipped (--no-obsidian)."
+        return 0
+    fi
+
+    local obsidian_installed=false
+    local obsidian_path=""
+    if command -v obsidian >/dev/null 2>&1; then
+        obsidian_installed=true
+        obsidian_path="$(command -v obsidian)"
+    elif command -v flatpak >/dev/null 2>&1 && flatpak list 2>/dev/null | grep -qi "obsidian"; then
+        obsidian_installed=true
+        obsidian_path="Flatpak (md.obsidian.Obsidian)"
+    fi
+
+    if [ "$obsidian_installed" = true ]; then
+        echo "  ✅ Obsidian Knowledge Vault manager already installed: ${obsidian_path}"
+    else
+        echo "  📦 Installing Obsidian Knowledge Vault manager via pacman..."
+        if command -v pacman >/dev/null 2>&1; then
+            run_sudo pacman -S --needed --noconfirm obsidian
+        elif command -v flatpak >/dev/null 2>&1; then
+            echo "  ℹ️  Pacman not available; flatpak detected. To install via Flatpak:"
+            echo "      flatpak install -y flathub md.obsidian.Obsidian"
+        else
+            echo "  ℹ️  No supported package manager found for automatic Obsidian install."
+        fi
+    fi
+}
+
+provision_home_vault() {
+    echo "================================================================================"
+    echo "📚 PROVISIONING KNOWLEDGE VAULT (~/Vaults/home)"
+    echo "================================================================================"
+    if [ "$WITH_VAULT" != true ]; then
+        echo "  ℹ️  Vault scaffolding skipped (--no-vault)."
+        return 0
+    fi
+
+    local template_vault="${SCRIPT_DIR}/vault"
+    local home_vault="${USER_HOME}/Vaults/home"
+    local repos_root="${USER_HOME}/Vaults/repos"
+
+    if [ ! -d "$template_vault" ]; then
+        echo "  ⚠️  Repository vault templates not found at ${template_vault}; skipping."
+        return 0
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY-RUN] Would scaffold ${home_vault} and ${repos_root} from ${template_vault}"
+        return 0
+    fi
+
+    mkdir -p "${home_vault}/entities" "${home_vault}/templates" \
+             "${home_vault}/decisions" "${home_vault}/protocols" \
+             "${home_vault}/projects" "${home_vault}/.obsidian" "$repos_root"
+
+    local populated=false
+    if [ -n "$(find "${home_vault}" -type f ! -path "*/.index/*" 2>/dev/null)" ]; then
+        populated=true
+    fi
+
+    while IFS= read -r src; do
+        rel="${src#"${template_vault}"/}"
+        case "$rel" in
+            *.index/*) continue ;;
+        esac
+        local dest="${home_vault}/${rel}"
+        if [ ! -e "$dest" ]; then
+            mkdir -p "$(dirname "$dest")"
+            cp -p "$src" "$dest" 2>/dev/null || cp "$src" "$dest"
+        fi
+    done < <(find "$template_vault" -type f)
+
+    if [ "$populated" = true ]; then
+        echo "  ✅ ~/Vaults/home verified and populated with missing templates."
+    else
+        echo "  ✅ Provisioned ~/Vaults/home from starter templates (repos skeleton created)."
+    fi
+}
+
+configure_firewall() {
+    echo "================================================================================"
+    echo "🛡️ CONFIGURING LOCAL FIREWALL RULES (PORTS 4096 & 30000)"
+    echo "================================================================================"
+    if [ "$WITH_FIREWALL" != true ]; then
+        echo "  ℹ️  Firewall rule management skipped (--no-firewall or default disabled)."
+        return 0
+    fi
+
+    if command -v ufw >/dev/null 2>&1; then
+        echo "  Applying UFW firewall rules for ports 4096/tcp and 30000/tcp..."
+        run_sudo ufw allow 4096/tcp comment 'OpenCode Server'
+        run_sudo ufw allow 30000/tcp comment 'OpenCode SGLang Server'
+        echo "  ✅ UFW rules processed."
+    elif command -v iptables >/dev/null 2>&1; then
+        echo "  Applying iptables rules for ports 4096/tcp and 30000/tcp..."
+        run_sudo iptables -I INPUT -p tcp --dport 4096 -j ACCEPT
+        run_sudo iptables -I INPUT -p tcp --dport 30000 -j ACCEPT
+        echo "  ✅ iptables rules processed."
+    else
+        echo "  ℹ️  Neither UFW nor iptables detected; skipping firewall rules."
+    fi
+}
 
 ensure_gitignore_entries() {
     local gitignore_file="$1"
@@ -393,6 +684,11 @@ deploy_opencode_backend_and_units() {
     local systemd_dest="$1"
     local backend_env_dir="$2"
 
+    if [ "$WITH_BACKENDS" != true ]; then
+        echo "  ℹ️  Backend SGLang systemd units skipped (--no-backends)."
+        return 0
+    fi
+
     if [ "$DRY_RUN" = true ]; then
         echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
         return 0
@@ -520,12 +816,16 @@ install_opencode_global() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would ensure ${backend_env_dir}/env exists for backend services"
-        echo "  [DRY-RUN] Would probe GPU hardware via scripts/gpu_probe.sh and save to ${backend_env_dir}/gpu_profile.json"
-        echo "  [DRY-RUN] Would update ${backend_env_dir}/env with PROBED_* sizing parameters"
+        if [ "$WITH_BACKENDS" != true ]; then
+            echo "  ℹ️  Backend SGLang systemd units skipped (--no-backends)."
+        else
+            echo "  [DRY-RUN] Would ensure ${backend_env_dir}/env exists for backend services"
+            echo "  [DRY-RUN] Would probe GPU hardware via scripts/gpu_probe.sh and save to ${backend_env_dir}/gpu_profile.json"
+            echo "  [DRY-RUN] Would update ${backend_env_dir}/env with PROBED_* sizing parameters"
+            echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
+        fi
         echo "  [DRY-RUN] Would prune legacy launchers in ${USER_HOME}/.local/bin/"
         echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, opencode.json to ${opencode_dest}/"
-        echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
         return 0
     fi
 
@@ -805,6 +1105,7 @@ run_install() {
                 --symlinks "${recorded_symlinks[@]}" \
                 "${file_args[@]}"
         fi
+        print_pending_sudo_summary
         echo "🎉 Local Agent Harness installation complete!"
     else
         manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
@@ -828,6 +1129,9 @@ run_install() {
                         recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                     fi
                 done
+                install_obsidian
+                provision_home_vault
+                configure_firewall
                 ;;
             all)
                 install_all_global
@@ -838,6 +1142,9 @@ run_install() {
                         recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                     fi
                 done
+                install_obsidian
+                provision_home_vault
+                configure_firewall
                 ;;
             *)
                 echo "❌ Error: Unknown target '${TARGET}'. Supported: agy, claude, opencode, all" >&2
@@ -858,6 +1165,7 @@ run_install() {
                 --symlinks "${recorded_symlinks[@]}" \
                 "${file_args[@]}"
         fi
+        print_pending_sudo_summary
         echo "🎉 Global Agent Harness installation complete!"
     fi
 }
@@ -892,12 +1200,19 @@ run_uninstall() {
     echo "   Dry Run   : ${DRY_RUN}"
     echo "================================================================================"
 
+    local manifest_args=()
+    if [ "$DRY_RUN" = true ]; then
+        manifest_args+=(--dry-run)
+    fi
+    if [ "$NO_BACKUP" = true ]; then
+        manifest_args+=(--no-backup)
+    fi
+    if [ "$WIPE_BACKUPS" = true ]; then
+        manifest_args+=(--wipe-backups)
+    fi
+
     if [ -f "$manifest_file" ]; then
-        local dry_flag=""
-        if [ "$DRY_RUN" = true ]; then
-            dry_flag="--dry-run"
-        fi
-        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" $dry_flag
+        python3 -m harness.installer.manifest uninstall --manifest-path "$manifest_file" "${manifest_args[@]}"
     elif [ "$DRY_RUN" = true ]; then
         echo "[DRY-RUN] SIMULATING uninstallation of agent-harness components..."
         if [ "$PURGE" = true ]; then
@@ -935,9 +1250,19 @@ run_uninstall() {
             [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
             [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
 
-            # Safely restore pre-existing settings if backup exists
-            if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
-                mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
+            # Handle pre-existing settings and backup restoration/wiping
+            if [ "$WIPE_BACKUPS" = true ]; then
+                rm -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak"
+                rm -rf "${AGENTS_HOME_DIR}.pre-harness.bak"
+                find "${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}" "${CLAUDE_HOME_DIR}" "${OPENCODE_HOME_DIR}" -name "*.pre-harness.bak" -exec rm -rf {} + 2>/dev/null || true
+                echo "✅ Purged pre-harness backup files and directories."
+            elif [ "$NO_BACKUP" = false ]; then
+                if [ -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" ]; then
+                    mv -f "${CLAUDE_HOME_DIR}/settings.json.pre-harness.bak" "${CLAUDE_HOME_DIR}/settings.json"
+                fi
+                if [ -d "${AGENTS_HOME_DIR}.pre-harness.bak" ] && [ ! -e "${AGENTS_HOME_DIR}" ]; then
+                    mv -f "${AGENTS_HOME_DIR}.pre-harness.bak" "${AGENTS_HOME_DIR}"
+                fi
             fi
 
             # Safely clean empty directories without wiping user modifications
@@ -957,18 +1282,31 @@ run_uninstall() {
         fi
     else
         if [ "$DRY_RUN" = false ]; then
-            # Safely restore pre-existing settings if backup exists
-            if [ -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak" ]; then
-                mv -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak" "${TARGET_REPO}/.claude/settings.json"
-            fi
             # Only remove .agents if it is a symlink
             if [ -L "${TARGET_REPO}/.agents" ]; then
                 rm -f "${TARGET_REPO}/.agents"
             fi
-            # Restore pre-harness .agents directory if backed up
-            if [ -d "${TARGET_REPO}/.agents.pre-harness.bak" ] && [ ! -e "${TARGET_REPO}/.agents" ]; then
-                mv "${TARGET_REPO}/.agents.pre-harness.bak" "${TARGET_REPO}/.agents"
+
+            # Handle pre-existing settings and backup restoration/wiping
+            if [ "$WIPE_BACKUPS" = true ]; then
+                rm -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak"
+                rm -rf "${TARGET_REPO}/.agents.pre-harness.bak"
+                find "${TARGET_REPO}/.orchestration" "${TARGET_REPO}/.claude" "${TARGET_REPO}/.opencode" -name "*.pre-harness.bak" -exec rm -rf {} + 2>/dev/null || true
+                echo "✅ Purged pre-harness backup files and directories in ${TARGET_REPO}."
+            elif [ "$NO_BACKUP" = false ]; then
+                if [ -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak" ]; then
+                    mv -f "${TARGET_REPO}/.claude/settings.json.pre-harness.bak" "${TARGET_REPO}/.claude/settings.json"
+                fi
+                if [ -d "${TARGET_REPO}/.agents.pre-harness.bak" ] && [ ! -e "${TARGET_REPO}/.agents" ]; then
+                    mv "${TARGET_REPO}/.agents.pre-harness.bak" "${TARGET_REPO}/.agents"
+                fi
             fi
+
+            # In local mode, remove uninstaller logs and directories if clean
+            if [ -d "${TARGET_REPO}/.orchestration/logs" ]; then
+                rm -rf "${TARGET_REPO}/.orchestration/logs"
+            fi
+
             # Safely clean empty directories only - preserve any user-modified files
             for d in "${TARGET_REPO}/.agents" "${TARGET_REPO}/.claude" "${TARGET_REPO}/.opencode" "${TARGET_REPO}/.orchestration"; do
                 if [ -d "$d" ]; then
