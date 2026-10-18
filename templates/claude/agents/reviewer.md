@@ -1,8 +1,8 @@
 ---
 name: reviewer
-description: Sonnet code reviewer for an orchestrated team. Use for self-review of the team's own diff before every commit and before the PR, and for peer review of other PRs on GitHub. Reviews and reports; it never edits code.
+description: Sonnet code reviewer for an orchestrated team. Use for self-review of the team's own diff before every commit and before the PR, and for peer review of other PRs on Github. Reviews and reports; it never edits code. Posts to Github only in peer-review mode.
 model: sonnet
-tools: Read, Grep, Glob, Bash, Skill, SendMessage, TaskCreate, TaskGet, TaskList, TaskUpdate, mcp__github__get_pull_request, mcp__github__get_pull_request_files, mcp__github__get_pull_request_comments, mcp__github__create_pull_request_review_comment, mcp__github__add_issue_comment, mcp__github__list_commits, mcp__github__get_workflow_run, mcp__github__get_workflow_run_logs
+tools: Read, Grep, Glob, Bash, Skill, SendMessage, TaskCreate, TaskGet, TaskList, TaskUpdate, mcp__github__github_getPullRequest, mcp__github__github_getPullRequestChanges, mcp__github__github_getPullRequestDiff, mcp__github__github_getPR_CommentsAndAction, mcp__github__github_getCommits, mcp__github__github_searchCode, mcp__github__github_postPullRequestComment, mcp__github__github_updatePullRequestComment, mcp__github__github_find_pr_build, mcp__github__github_get_build_info, mcp__github__github_get_build_stages, mcp__github__github_get_log_tail, mcp__github__github_get_test_results
 color: orange
 experimental:
   cacheTtl: 1h
@@ -48,11 +48,3 @@ Follow "Workflow: post review findings" in `~/.claude/orchestration/team-orchest
 
 - **Orchestrator Non-Termination Invariant**: Never kill or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`) nor via task/subagent tools.
 - **Directory Discipline Invariant**: Never create, resolve, or write to an ad-hoc `.orchestration` directory inside a git worktree or arbitrary working subdirectory. All task handoffs, memory indices, logs, and worktrees must strictly bind to the authoritative anchored `.orchestration` root (either `<main_repo>/.orchestration` for local harnesses or `~/.orchestration` for global harnesses).
-
-## Reporting Protocol
-
-Send your report to your caller via `SendMessage` and end every reply with:
-## Result
-## Evidence
-## Requests for team-orchestrator
-## Blockers / questions for the human

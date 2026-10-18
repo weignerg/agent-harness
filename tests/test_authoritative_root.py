@@ -416,13 +416,13 @@ class TestDirectoryDisciplineInvariant(unittest.TestCase):
         expected = "Directory Discipline Invariant"
 
         agent_dirs = [
-            repo_root / "templates" / "agy" / "plugins" / "agy-harness" / "agents",
-            repo_root / "templates" / "claude" / "agents",
-            repo_root / "templates" / "opencode" / "agents",
+            (repo_root / "templates" / "agy" / "plugins" / "agy-harness" / "agents", 10),
+            (repo_root / "templates" / "claude" / "agents", 3),
+            (repo_root / "templates" / "opencode" / "agents", 10),
         ]
-        for ad in agent_dirs:
+        for ad, expected_count in agent_dirs:
             md_files = list(ad.glob("*.md"))
-            self.assertEqual(len(md_files), 10, f"Expected 10 agent files in {ad}, found {len(md_files)}")
+            self.assertEqual(len(md_files), expected_count, f"Expected {expected_count} agent files in {ad}, found {len(md_files)}")
             for af in md_files:
                 self.assertIn(expected, af.read_text(encoding="utf-8"), f"Invariant missing in {af}")
 

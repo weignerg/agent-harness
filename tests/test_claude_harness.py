@@ -17,16 +17,9 @@ TEMPLATE_DIR = REPO_ROOT / "templates" / "claude"
 AGENTS_DIR = TEMPLATE_DIR / "agents"
 
 EXPECTED_AGENTS = {
-    "supreme-orchestrator.md": ("opus", "supreme-orchestrator"),
-    "team-orchestrator.md": ("opus", "team-orchestrator"),
     "architect.md": ("opus", "architect"),
     "worker.md": ("sonnet", "worker"),
     "reviewer.md": ("sonnet", "reviewer"),
-    "tester.md": ("sonnet", "tester"),
-    "scout.md": ("haiku", "scout"),
-    "grunt.md": ("haiku", "grunt"),
-    "compaction.md": ("haiku", "compaction"),
-    "summary.md": ("haiku", "summary"),
 }
 
 EXPECTED_SKILLS = {
@@ -62,12 +55,23 @@ class TestClaudeHarnessStructure(unittest.TestCase):
             self.assertIn(required_entry, gitignore_text)
 
     def test_all_canonical_agents_defined_with_proper_models(self):
+        present_agents = {p.name for p in AGENTS_DIR.glob("*.md")}
+        self.assertEqual(present_agents, set(EXPECTED_AGENTS.keys()))
         for filename, (expected_model, expected_name) in EXPECTED_AGENTS.items():
             agent_file = AGENTS_DIR / filename
             self.assertTrue(agent_file.is_file(), f"Missing canonical agent: {filename}")
             content = agent_file.read_text(encoding="utf-8")
             self.assertIn(f"name: {expected_name}", content)
             self.assertIn(f"model: {expected_model}", content)
+
+    def test_orchestration_roles_defined_in_orchestration_dir(self):
+        orch_dir = TEMPLATE_DIR / "orchestration"
+        self.assertTrue(orch_dir.is_dir(), "Missing orchestration directory in templates/claude")
+        for filename in ("supreme-orchestrator.md", "team-orchestrator.md"):
+            role_file = orch_dir / filename
+            self.assertTrue(role_file.is_file(), f"Missing orchestration role: {filename}")
+            content = role_file.read_text(encoding="utf-8")
+            self.assertTrue(len(content) > 100, f"Role file unexpectedly empty: {filename}")
 
     def test_skills_catalog_complete(self):
         skills_dir = TEMPLATE_DIR / "skills"
