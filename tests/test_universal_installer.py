@@ -122,6 +122,8 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((claude_dir / "CLAUDE.md").is_file())
             self.assertTrue((claude_dir / "skills" / "vault-retrieval" / "SKILL.md").is_file())
             self.assertTrue((claude_dir / "tools" / "tdd_pipeline.py").is_file())
+            self.assertTrue((claude_dir / "orchestration" / "supreme-orchestrator.md").is_file())
+            self.assertTrue((claude_dir / "orchestration" / "team-orchestrator.md").is_file())
 
             # Verify settings merge preserved user configuration
             merged_data = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -158,6 +160,9 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((opencode_dir / "rules" / "agent-teams.md").is_file())
             self.assertTrue((opencode_dir / "plugins" / "README.md").is_file())
             self.assertTrue((opencode_dir / "themes" / "blackwell.json").is_file())
+            self.assertTrue((opencode_dir / "orchestration" / "supreme-orchestrator.md").is_file())
+            self.assertTrue((opencode_dir / "orchestration" / "kickoffs" / "README.md").is_file())
+            self.assertTrue((opencode_dir / "orchestration" / "handoffs" / "README.md").is_file())
 
             # Manifest recorded
             manifest_path = sandbox / ".orchestration" / "install_manifest.json"
@@ -498,12 +503,22 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("HF_TOKEN=test_hf_token_sample", env_content)
             self.assertIn("ANTHROPIC_API_KEY=test_ant_key_sample", env_content)
 
-            # Verify opencode.json cloud fallback providers
+            # Verify opencode.json cloud fallback providers and global instructions
             opencode_cfg = sandbox / ".config" / "opencode" / "opencode.json"
             self.assertTrue(opencode_cfg.is_file())
             cfg_data = json.loads(opencode_cfg.read_text(encoding="utf-8"))
             self.assertIn("anthropic", cfg_data.get("provider", {}))
             self.assertIn("google", cfg_data.get("provider", {}))
+            self.assertEqual(
+                cfg_data.get("instructions"),
+                [
+                    str(sandbox / ".config" / "opencode" / "AGENTS.md"),
+                    str(sandbox / ".config" / "opencode" / "rules" / "*.md"),
+                ],
+            )
+            self.assertTrue((sandbox / ".config" / "opencode" / "orchestration" / "supreme-orchestrator.md").is_file())
+            self.assertTrue((sandbox / ".config" / "opencode" / "orchestration" / "kickoffs" / "README.md").is_file())
+            self.assertTrue((sandbox / ".config" / "opencode" / "orchestration" / "handoffs" / "README.md").is_file())
 
             # Verify manifest tracks deployed systemd user units
             manifest_file = sandbox / ".orchestration" / "install_manifest.json"
@@ -1112,6 +1127,26 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("OpenCode server (opencode-server.service) status is failed; aborting wait.", proc.stdout)
             self.assertIn("OpenCode server failed healthcheck.", proc.stdout)
             self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
+
+    def test_sglang_venv_agent_harness_pth_linked(self):
+        """Test that SGLang venv site-packages has agent_harness.pth created pointing to REPO_ROOT."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            stack_dir = sandbox / ".local" / "share" / "opencode-sglang-stack"
+            sp_dir = stack_dir / "venv" / "lib" / "python3.12" / "site-packages"
+            sp_dir.mkdir(parents=True)
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+            proc = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", "--no-backends", env=env)
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            pth_file = sp_dir / "agent_harness.pth"
+            self.assertTrue(pth_file.is_file(), f"Missing agent_harness.pth at {pth_file}")
+            self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(REPO_ROOT))
 
 
 if __name__ == "__main__":

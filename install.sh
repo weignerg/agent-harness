@@ -712,18 +712,19 @@ install_claude_global() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would deploy agents/, skills/, rules/, settings/ to ${claude_dest}/"
+        echo "  [DRY-RUN] Would deploy agents/, skills/, rules/, settings/, orchestration/ to ${claude_dest}/"
         echo "  [DRY-RUN] Would merge ${claude_dest}/settings.json preserving custom user config"
         return 0
     fi
 
-    mkdir -p "${claude_dest}/agents" "${claude_dest}/skills" "${claude_dest}/rules" "${claude_dest}/settings" "${claude_dest}/tools"
+    mkdir -p "${claude_dest}/agents" "${claude_dest}/skills" "${claude_dest}/rules" "${claude_dest}/settings" "${claude_dest}/tools" "${claude_dest}/orchestration"
     cp -rf "${claude_tmpl}/agents/"* "${claude_dest}/agents/"
     cp -rf "${claude_tmpl}/skills/"* "${claude_dest}/skills/"
     cp -rf "${claude_tmpl}/rules/"* "${claude_dest}/rules/"
     cp -rf "${claude_tmpl}/tools/"* "${claude_dest}/tools/"
     chmod +x "${claude_dest}/tools/"*.sh "${claude_dest}/tools/"*.py 2>/dev/null || true
     cp -rf "${claude_tmpl}/settings/"* "${claude_dest}/settings/"
+    cp -rf "${claude_tmpl}/orchestration/"* "${claude_dest}/orchestration/"
     cp -f "${claude_tmpl}/CLAUDE.md" "${claude_dest}/CLAUDE.md"
 
     local existing_user_settings="${claude_dest}/settings.json"
@@ -861,6 +862,17 @@ EOF
         fi
         chmod 0600 "$env_file"
     fi
+
+    for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
+        if [ -d "$venv_candidate" ]; then
+            for sp in "${venv_candidate}"/lib/python*/site-packages; do
+                if [ -d "$sp" ]; then
+                    printf '%s\n' "${SCRIPT_DIR}" > "${sp}/agent_harness.pth"
+                    echo "  🔗 Linked agent-harness into SGLang venv: ${sp}/agent_harness.pth"
+                fi
+            done
+        fi
+    done
 }
 
 verify_or_acquire_model_weights() {
@@ -1606,6 +1618,17 @@ deploy_opencode_backend_and_units() {
         echo "  ✅ SGLang backend venv verified at ${STACK_DIR}/venv"
     fi
 
+    for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
+        if [ -d "$venv_candidate" ]; then
+            for sp in "${venv_candidate}"/lib/python*/site-packages; do
+                if [ -d "$sp" ]; then
+                    printf '%s\n' "${SCRIPT_DIR}" > "${sp}/agent_harness.pth"
+                    echo "  🔗 Linked agent-harness into SGLang venv: ${sp}/agent_harness.pth"
+                fi
+            done
+        fi
+    done
+
     # Verify sglang import in venv and auto-heal if missing or broken (e.g., stale editable install)
     local py_exec="${STACK_DIR}/venv/bin/python3"
     if [ ! -x "${py_exec}" ] && [ -x "${STACK_DIR}/venv/bin/python" ]; then
@@ -1829,7 +1852,7 @@ install_opencode_global() {
             echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
         fi
         echo "  [DRY-RUN] Would prune legacy launchers in ${USER_HOME}/.local/bin/"
-        echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, opencode.json to ${opencode_dest}/"
+        echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, orchestration/, opencode.json to ${opencode_dest}/"
         return 0
     fi
 
@@ -1839,7 +1862,7 @@ install_opencode_global() {
         rm -f "${USER_HOME}/.local/bin/${legacy_launcher}"
     done
 
-    mkdir -p "${opencode_dest}/agents" "${opencode_dest}/commands" "${opencode_dest}/skills" "${opencode_dest}/tools" "${opencode_dest}/rules" "${opencode_dest}/plugins" "${opencode_dest}/themes"
+    mkdir -p "${opencode_dest}/agents" "${opencode_dest}/commands" "${opencode_dest}/skills" "${opencode_dest}/tools" "${opencode_dest}/rules" "${opencode_dest}/plugins" "${opencode_dest}/themes" "${opencode_dest}/orchestration"
     cp -rf "${opencode_tmpl}/agents/"* "${opencode_dest}/agents/"
     cp -rf "${opencode_tmpl}/commands/"* "${opencode_dest}/commands/"
     cp -rf "${opencode_tmpl}/skills/"* "${opencode_dest}/skills/"
@@ -1848,12 +1871,14 @@ install_opencode_global() {
     cp -rf "${opencode_tmpl}/rules/"* "${opencode_dest}/rules/"
     cp -rf "${opencode_tmpl}/plugins/"* "${opencode_dest}/plugins/"
     cp -rf "${opencode_tmpl}/themes/"* "${opencode_dest}/themes/"
+    cp -rf "${opencode_tmpl}/orchestration/"* "${opencode_dest}/orchestration/"
     cp -f "${opencode_tmpl}/opencode.json" "${opencode_dest}/opencode.json"
-    python3 - "${opencode_dest}/opencode.json" "${USER_HOME}/.orchestration" <<'PYEOF'
+    python3 - "${opencode_dest}/opencode.json" "${USER_HOME}/.orchestration" "${opencode_dest}" <<'PYEOF'
 import json, sys
 from pathlib import Path
 p = Path(sys.argv[1])
 orch = sys.argv[2]
+dest = sys.argv[3]
 if p.is_file():
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -1861,6 +1886,7 @@ if p.is_file():
         for name in ("vault-memory", "worktree-manager"):
             if name in mcp:
                 mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
+        data["instructions"] = [f"{dest}/AGENTS.md", f"{dest}/rules/*.md"]
         p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except Exception:
         pass
@@ -1944,19 +1970,20 @@ install_claude_local() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would deploy agents/, skills/, rules/, settings/ to ${dest_claude}/"
+        echo "  [DRY-RUN] Would deploy agents/, skills/, rules/, settings/, orchestration/ to ${dest_claude}/"
         echo "  [DRY-RUN] Would merge ${dest_claude}/settings.json preserving custom user config"
         echo "  [DRY-RUN] Ensure ${repo_path}/.gitignore ignores .claude/"
         return 0
     fi
 
-    mkdir -p "${dest_claude}/agents" "${dest_claude}/skills" "${dest_claude}/rules" "${dest_claude}/settings" "${dest_claude}/tools"
+    mkdir -p "${dest_claude}/agents" "${dest_claude}/skills" "${dest_claude}/rules" "${dest_claude}/settings" "${dest_claude}/tools" "${dest_claude}/orchestration"
     cp -rf "${claude_tmpl}/agents/"* "${dest_claude}/agents/"
     cp -rf "${claude_tmpl}/skills/"* "${dest_claude}/skills/"
     cp -rf "${claude_tmpl}/rules/"* "${dest_claude}/rules/"
     cp -rf "${claude_tmpl}/tools/"* "${dest_claude}/tools/"
     chmod +x "${dest_claude}/tools/"*.sh "${dest_claude}/tools/"*.py 2>/dev/null || true
     cp -rf "${claude_tmpl}/settings/"* "${dest_claude}/settings/"
+    cp -rf "${claude_tmpl}/orchestration/"* "${dest_claude}/orchestration/"
     cp -f "${claude_tmpl}/CLAUDE.md" "${dest_claude}/CLAUDE.md"
 
     local existing_user_settings="${dest_claude}/settings.json"
@@ -1986,12 +2013,12 @@ install_opencode_local() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would deploy 10-component hierarchy to ${dest_opencode}/"
+        echo "  [DRY-RUN] Would deploy 10-component hierarchy (including orchestration/) to ${dest_opencode}/"
         echo "  [DRY-RUN] Ensure ${repo_path}/.gitignore ignores .opencode/"
         return 0
     fi
 
-    mkdir -p "${dest_opencode}/agents" "${dest_opencode}/commands" "${dest_opencode}/skills" "${dest_opencode}/tools" "${dest_opencode}/rules" "${dest_opencode}/plugins" "${dest_opencode}/themes"
+    mkdir -p "${dest_opencode}/agents" "${dest_opencode}/commands" "${dest_opencode}/skills" "${dest_opencode}/tools" "${dest_opencode}/rules" "${dest_opencode}/plugins" "${dest_opencode}/themes" "${dest_opencode}/orchestration"
     cp -rf "${opencode_tmpl}/agents/"* "${dest_opencode}/agents/"
     cp -rf "${opencode_tmpl}/commands/"* "${dest_opencode}/commands/"
     cp -rf "${opencode_tmpl}/skills/"* "${dest_opencode}/skills/"
@@ -2000,6 +2027,7 @@ install_opencode_local() {
     cp -rf "${opencode_tmpl}/rules/"* "${dest_opencode}/rules/"
     cp -rf "${opencode_tmpl}/plugins/"* "${dest_opencode}/plugins/"
     cp -rf "${opencode_tmpl}/themes/"* "${dest_opencode}/themes/"
+    cp -rf "${opencode_tmpl}/orchestration/"* "${dest_opencode}/orchestration/"
     cp -f "${opencode_tmpl}/opencode.json" "${dest_opencode}/opencode.json"
     python3 - "${dest_opencode}/opencode.json" "${repo_path}/.orchestration" <<'PYEOF'
 import json, sys
