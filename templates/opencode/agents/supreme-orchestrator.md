@@ -4,10 +4,13 @@ mode: primary
 model: ornith-local/ornith-1.5-35b
 permission:
   read: allow
-  edit: deny
-  write: deny
+  edit: allow
+  write: allow
   bash:
-    "*": ask
+    "gh pr merge*": ask
+    "git push --force*": ask
+    "git push * --force*": ask
+    "*": allow
   task: allow
   question: allow
 ---
