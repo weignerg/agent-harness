@@ -1,3 +1,8 @@
+---
+description: Two-stage TDD pipeline, zero regressions, and 4-tier adversarial review
+trigger: always_on
+---
+
 # Rule: Code Quality, Testing & Adversarial Review
 
 - **Two-Stage TDD Pipeline**: Stage 1 unit tests and static syntax compilation, Stage 2 integration/container checks, via tools/skills (`tdd_pipeline.py` or the `tdd-pipeline` skill).
@@ -25,5 +30,3 @@ When responding to or posting PR reviews:
 - Maintain a single consolidated PR response comment with sections per review round separated by `---`.
 - Group addressed items under severity headers (🔴 BLOCKER, 🟠 MUST FIX, 🟡 WARNING, 🟢 BEST PRACTICE).
 - Link per-thread inline comments back to the consolidated comment.
-
-# TAMPERED LINE INJECTION

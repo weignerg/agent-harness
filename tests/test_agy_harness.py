@@ -268,14 +268,30 @@ class TestAgyHarnessStructure(unittest.TestCase):
             self.assertTrue((agents_home / "GEMINI.md").is_file())
             self.assertTrue((third_party_skill / "SKILL.md").is_file())
 
+            # Global Dual-Scope verification for AGY (~/.gemini/)
+            gemini_home = sandbox_home / ".gemini"
+            self.assertTrue((gemini_home / "AGENTS.md").is_file())
+            self.assertTrue((gemini_home / "GEMINI.md").is_file())
+            gemini_md_text = (gemini_home / "GEMINI.md").read_text(encoding="utf-8")
+            self.assertLess(len(gemini_md_text.encode("utf-8")), 24000, "GEMINI.md must be strictly < 24KB")
+            self.assertIn("@[global-agents-charter](~/.gemini/AGENTS.md)", gemini_md_text)
+            self.assertTrue((gemini_cfg / "rules" / "agent-teams.md").is_file())
+            self.assertTrue((gemini_home / "antigravity-cli" / "rules" / "agent-teams.md").is_file())
+            self.assertTrue((gemini_home / "antigravity" / "skills" / "adversarial-review" / "SKILL.md").is_file())
+            self.assertTrue((gemini_home / "antigravity" / "mcp_config.json").is_file())
+            self.assertTrue((gemini_home / "settings.json").is_file())
+
             mcp_data = json.loads((gemini_cfg / "mcp_config.json").read_text(encoding="utf-8"))
             self.assertIn("rea", mcp_data["mcpServers"])
             self.assertIn("vault-memory", mcp_data["mcpServers"])
             self.assertIn("worktree-manager", mcp_data["mcpServers"])
 
-            # 3. Local install in sandbox target repo
+            # 3. Local install in sandbox target repo with legacy .agent migration check
             target_repo = Path(tmp) / "sample-repo"
             target_repo.mkdir(parents=True, exist_ok=True)
+            (target_repo / ".agent").mkdir(parents=True, exist_ok=True)
+            (target_repo / ".agent" / "legacy.txt").write_text("legacy agent data", encoding="utf-8")
+
             subprocess.run(
                 [str(install_sh), "--local", str(target_repo), "--non-interactive"],
                 cwd=REPO_ROOT,
@@ -285,7 +301,15 @@ class TestAgyHarnessStructure(unittest.TestCase):
                 check=True,
             )
 
+            self.assertFalse((target_repo / ".agent").exists())
+            self.assertTrue((target_repo / ".agent.pre-harness.bak").is_dir())
+            self.assertTrue((target_repo / "AGENTS.md").is_file())
+            self.assertTrue((target_repo / "GEMINI.md").is_file())
+            self.assertTrue((target_repo / "CLAUDE.md").is_file())
+            self.assertTrue((target_repo / ".agents" / "AGENTS.md").is_file())
             self.assertTrue((target_repo / ".agents" / "GEMINI.md").is_file())
+            self.assertTrue((target_repo / ".agents" / "mcp.json").is_file())
+            self.assertTrue((target_repo / ".agents" / "settings.json").is_file())
             self.assertTrue((target_repo / ".agents" / "rules" / "agent-teams.md").is_file())
             self.assertTrue((target_repo / ".agents" / "tools" / "worktree_manager.py").is_file())
             repo_gitignore = (target_repo / ".gitignore").read_text(encoding="utf-8")

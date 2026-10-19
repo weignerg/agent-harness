@@ -1,3 +1,8 @@
+---
+description: Systems integration standards, GitHub CLI patterns, and FastMCP conventions
+trigger: always_on
+---
+
 # Systems integration standards
 
 This file loads at the start of every session. It defines system identifier mapping, tools, naming conventions, and interaction patterns across GitHub engineering tools, GitHub CLI (`gh`), and FastMCP servers. If the current repo's charter specifies otherwise, follow the repo.

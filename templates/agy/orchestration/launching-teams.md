@@ -18,11 +18,11 @@ Read this before planning or launching any team. `supreme-orchestrator.md` owns 
    - Prefer keeping an existing PR. Retitle it to the new issue and update its description. GitHub can't change an open PR's source branch (`gh pr edit` has no parameter for it), so the branch name stays. Rewording old commits needs a force push, so ask first. Open a new PR only when keeping the old one is impossible.
    - Start teams fresh with a kickoff that carries the current state. Don't resume old sessions without their handoff.
 5. **Cross-team overlaps.** When two teams edit the same files (for example `rules/process-safety.md`), name the overlap in both kickoffs. Each team checks with the Supreme Orchestrator before editing a shared file.
-6. **Shared deliverables have one writer.** Other teams write their own files to an agreed folder (e.g. under `~/.agents/orchestration/handoffs/`) and message the owning team when a file is ready.
+6. **Shared deliverables have one writer.** Other teams write their own files to an agreed folder (e.g. under `~/.orchestration/handoffs/`) and message the owning team when a file is ready.
 
 ## 2. Write each kickoff
 
-- **Location:** `~/.agents/orchestration/kickoffs/<Branch_Name with / replaced by _>.md`. It's the active set, kept outside the repo so it doesn't depend on any checkout. Its `README.md` holds the start table (§5). Retired kickoffs move to `kickoffs/superseded/`.
+- **Location:** `~/.orchestration/kickoffs/<Branch_Name with / replaced by _>.md`. It's the active set, kept outside the repo so it doesn't depend on any checkout. Its `README.md` holds the start table (§5). Retired kickoffs move to `kickoffs/superseded/`.
 - **Header:** the "Kickoff template" in `team-orchestrator.md`. Fields for work that isn't code:
   - `Issue_Number: TBD (step a creates it; Issue-0 until then)`, or `0`.
   - `Mode: operations | research | documentation …`, each followed by "No code, worktree, branch, commit, or PR."
@@ -39,9 +39,9 @@ Read this before planning or launching any team. `supreme-orchestrator.md` owns 
 
 ## 3. Read-only block for sensitive work
 
-Use it for teams whose work must stay on this computer. If you installed it with the read-only block, its files are in `~/.agents/orchestration/read-only-block/`; its README lists the layers and their limits.
+Use it for teams whose work must stay on this computer. If you installed it with the read-only block, its files are in `~/.orchestration/read-only-block/`; its README lists the layers and their limits.
 - Write "Hard block: …" into the kickoff's constraints, so the team stops cleanly when a tool is denied.
-- Verify after launch: `~/.agents/orchestration/read-only-block/decisions.log` shows the session id on its first tool call.
+- Verify after launch: `~/.orchestration/read-only-block/decisions.log` shows the session id on its first tool call.
 
 ## 4. Launch
 
@@ -60,11 +60,11 @@ When the user starts the teams, give one block per team in exactly this format, 
 ```
 ────────────────────────────────────────
 #: <n> - Team: <short name> - Work: <one line>
-Start command: `cd <repo> && agy --name '<Branch_Name>' 'Role: Team Orchestrator. Read ~/.agents/orchestration/kickoffs/<file>.md and follow it as your kickoff.'`
+Start command: `cd <repo> && agy --name '<Branch_Name>' 'Role: Team Orchestrator. Read ~/.orchestration/kickoffs/<file>.md and follow it as your kickoff.'`
 ────────────────────────────────────────
 ```
 
-When a team restarts after writing an end-of-day handoff, append this to its first prompt: ` Then read your handoff at ~/.agents/orchestration/handoffs/<session name with / replaced by _>.md; it supersedes the kickoff state.` (No apostrophe: a `'` breaks the start command's quoting.) Only add it for a handoff the team wrote at the end of its last working day.
+When a team restarts after writing an end-of-day handoff, append this to its first prompt: ` Then read your handoff at ~/.orchestration/handoffs/<session name with / replaced by _>.md; it supersedes the kickoff state.` (No apostrophe: a `'` breaks the start command's quoting.) Only add it for a handoff the team wrote at the end of its last working day.
 
 ## 6. Verify every launch
 

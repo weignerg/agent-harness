@@ -35,23 +35,57 @@ def atomic_write_json(path: Path, data: Any, indent: int = 2) -> None:
 
 def sync_gemini_md(
     gemini_md_path: Union[str, Path],
-    charter_path: Union[str, Path],
-    rules_dir: Union[str, Path],
+    charter_path: Optional[Union[str, Path]] = None,
+    rules_dir: Optional[Union[str, Path]] = None,
+    template_path: Optional[Union[str, Path]] = None,
 ) -> None:
-    """Inject Master Charter and modular rules into GEMINI.md inside bounded markers."""
+    """Inject compact AGY-specific system configuration and global charter link into GEMINI.md.
+
+    Prevents 24KB truncation and context duplication by linking modular rules into
+    ~/.gemini/config/rules/ and ~/.gemini/antigravity-cli/rules/ rather than inlining them directly into GEMINI.md.
+    """
     gem_p = Path(gemini_md_path).expanduser().resolve()
-    charter_p = Path(charter_path).expanduser().resolve()
-    rules_p = Path(rules_dir).expanduser().resolve()
 
-    charter_text = charter_p.read_text(encoding="utf-8").strip() if charter_p.is_file() else ""
+    template_text = ""
+    if template_path:
+        t_path = Path(template_path).expanduser().resolve()
+        if t_path.is_file():
+            template_text = t_path.read_text(encoding="utf-8").strip()
 
-    rules_parts: List[str] = []
-    if rules_p.is_dir():
-        for rule_file in sorted(rules_p.glob("*.md")):
-            rule_content = rule_file.read_text(encoding="utf-8").strip()
-            rules_parts.append(f"### {rule_file.stem}\n\n{rule_content}")
+    if not template_text and charter_path:
+        charter_p = Path(charter_path).expanduser().resolve()
+        repo_root = charter_p.parent.parent
+        t_path = repo_root / "templates" / "agy" / "GEMINI.md"
+        if t_path.is_file():
+            template_text = t_path.read_text(encoding="utf-8").strip()
 
-    rules_text = "\n\n".join(rules_parts)
+    if not template_text:
+        default_tpl = Path(__file__).resolve().parent.parent.parent / "templates" / "agy" / "GEMINI.md"
+        if default_tpl.is_file():
+            template_text = default_tpl.read_text(encoding="utf-8").strip()
+
+    if not template_text:
+        template_text = (
+            "# Antigravity (AGY) AI Agent System Charter & Instructions\n\n"
+            "You are an autonomous AI software engineer operating inside the **Antigravity (`agy`) Agent Harness**, "
+            "powered by official **Google Gemini 3.8** models across High, Medium, and Low reasoning effort tiers "
+            "and the two-tier agent team hierarchy.\n\n"
+            "<!-- HARDWARE_ARCHITECTURE_START -->\n"
+            "- **Host OS**: Linux (CachyOS / Linux workstation)\n"
+            "- **Local Inference Engine**: Local SGLang Engine on `http://127.0.0.1:30000/v1`\n"
+            "- **Primary & Orchestration Tier (Gemini 3.8 High)**: `gemini-3.8-flash-high` (`model: pro`)\n"
+            "- **Implementation & Verification Tier (Gemini 3.8 Medium)**: `gemini-3.8-flash-medium` (`model: flash`)\n"
+            "- **Fast Atomic Leaf Tier (Gemini 3.8 Low)**: `gemini-3.8-flash-low` (`model: flash_lite`)\n"
+            "<!-- HARDWARE_ARCHITECTURE_END -->\n\n"
+            "@[global-agents-charter](~/.gemini/AGENTS.md)\n\n"
+            "## 🛡️ Operational Rules\n"
+            "Modular rules with `trigger: always_on` are loaded from `~/.gemini/config/rules/*.md` "
+            "and `~/.gemini/antigravity-cli/rules/*.md`."
+        )
+
+    charter_import = "@[global-agents-charter](~/.gemini/AGENTS.md)"
+    if charter_import not in template_text:
+        template_text = f"{template_text}\n\n{charter_import}"
 
     begin_marker = "<!-- BEGIN AGENT-HARNESS -->"
     end_marker = "<!-- END AGENT-HARNESS -->"
@@ -60,13 +94,7 @@ def sync_gemini_md(
         begin_marker,
         "<!-- Auto-managed by agent-harness. Do not edit content inside this block directly. -->",
         "",
-        charter_text,
-        "",
-        "---",
-        "",
-        "## Modular Rules Reference",
-        "",
-        rules_text,
+        template_text,
         "",
         end_marker,
     ]
@@ -238,53 +266,68 @@ def sync_agy_mcp_config(
     orch_dir: Union[str, Path],
     vault_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Configure ~/.gemini/config/mcp_config.json with exact mcpServers schema."""
+    """Configure ~/.gemini/config/mcp_config.json and ~/.gemini/antigravity/mcp_config.json with exact mcpServers schema."""
     mcp_path = Path(mcp_config_path).expanduser().resolve()
     repo_p = Path(repo_dir).expanduser().resolve()
     py_p = Path(os.path.abspath(os.path.expanduser(str(py_bin))))
     orch_p = Path(orch_dir).expanduser().resolve()
     v_p = Path(vault_path).expanduser().resolve() if vault_path else (Path.home() / "Vaults" / "home").resolve()
 
-    data: Dict[str, Any] = {}
-    if mcp_path.is_file():
-        try:
-            with open(mcp_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
+    def _update_file(target: Path) -> Dict[str, Any]:
+        data: Dict[str, Any] = {}
+        if target.is_file():
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+
+        if not isinstance(data, dict):
             data = {}
 
-    if not isinstance(data, dict):
-        data = {}
+        mcp_servers = data.setdefault("mcpServers", {})
+        mcp_servers["vault-memory"] = {
+            "command": str(py_p),
+            "args": [
+                "-m",
+                "harness.mcp.vault_server",
+            ],
+            "env": {
+                "PYTHONPATH": str(repo_p),
+                "ORCHESTRATION_ROOT": str(orch_p),
+                "OBSIDIAN_VAULT_PATH": str(v_p),
+                "TOKENIZERS_PARALLELISM": "false",
+                "TQDM_DISABLE": "1",
+            },
+        }
+        mcp_servers["worktree-manager"] = {
+            "command": str(py_p),
+            "args": [
+                "-m",
+                "harness.mcp.worktree_server",
+            ],
+            "env": {
+                "PYTHONPATH": str(repo_p),
+                "ORCHESTRATION_ROOT": str(orch_p),
+            },
+        }
 
-    mcp_servers = data.setdefault("mcpServers", {})
-    mcp_servers["vault-memory"] = {
-        "command": str(py_p),
-        "args": [
-            "-m",
-            "harness.mcp.vault_server",
-        ],
-        "env": {
-            "PYTHONPATH": str(repo_p),
-            "ORCHESTRATION_ROOT": str(orch_p),
-            "OBSIDIAN_VAULT_PATH": str(v_p),
-            "TOKENIZERS_PARALLELISM": "false",
-            "TQDM_DISABLE": "1",
-        },
-    }
-    mcp_servers["worktree-manager"] = {
-        "command": str(py_p),
-        "args": [
-            "-m",
-            "harness.mcp.worktree_server",
-        ],
-        "env": {
-            "PYTHONPATH": str(repo_p),
-            "ORCHESTRATION_ROOT": str(orch_p),
-        },
-    }
+        atomic_write_json(target, data)
+        return data
 
-    atomic_write_json(mcp_path, data)
-    return data
+    res = _update_file(mcp_path)
+
+    # Sync twin path between ~/.gemini/config and ~/.gemini/antigravity
+    twin_path: Optional[Path] = None
+    if mcp_path.parent.name == "config" and mcp_path.parent.parent.name == ".gemini":
+        twin_path = mcp_path.parent.parent / "antigravity" / mcp_path.name
+    elif mcp_path.parent.name == "antigravity" and mcp_path.parent.parent.name == ".gemini":
+        twin_path = mcp_path.parent.parent / "config" / mcp_path.name
+
+    if twin_path is not None:
+        _update_file(twin_path)
+
+    return res
 
 
 def sync_agy_settings(
@@ -292,31 +335,46 @@ def sync_agy_settings(
     repo_dir: Union[str, Path],
     orch_dir: Union[str, Path],
 ) -> Dict[str, Any]:
-    """Ensure trustedWorkspaces in ~/.gemini/antigravity-cli/settings.json includes repo and orch."""
+    """Ensure trustedWorkspaces in ~/.gemini/antigravity-cli/settings.json and ~/.gemini/settings.json includes repo and orch."""
     st_path = Path(settings_path).expanduser().resolve()
     repo_p = str(Path(repo_dir).expanduser().resolve())
     orch_p = str(Path(orch_dir).expanduser().resolve())
 
-    data: Dict[str, Any] = {}
-    if st_path.is_file():
-        try:
-            with open(st_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
+    def _update_settings(target: Path) -> Dict[str, Any]:
+        data: Dict[str, Any] = {}
+        if target.is_file():
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+
+        if not isinstance(data, dict):
             data = {}
 
-    if not isinstance(data, dict):
-        data = {}
+        workspaces = data.setdefault("trustedWorkspaces", [])
+        if isinstance(workspaces, list):
+            if repo_p not in workspaces:
+                workspaces.append(repo_p)
+            if orch_p not in workspaces:
+                workspaces.append(orch_p)
 
-    workspaces = data.setdefault("trustedWorkspaces", [])
-    if isinstance(workspaces, list):
-        if repo_p not in workspaces:
-            workspaces.append(repo_p)
-        if orch_p not in workspaces:
-            workspaces.append(orch_p)
+        atomic_write_json(target, data)
+        return data
 
-    atomic_write_json(st_path, data)
-    return data
+    res = _update_settings(st_path)
+
+    # Sync twin path between ~/.gemini/antigravity-cli/settings.json and ~/.gemini/settings.json
+    twin_settings: Optional[Path] = None
+    if st_path.parent.name == "antigravity-cli" and st_path.parent.parent.name == ".gemini":
+        twin_settings = st_path.parent.parent / "settings.json"
+    elif st_path.name == "settings.json" and st_path.parent.name == ".gemini":
+        twin_settings = st_path.parent / "antigravity-cli" / "settings.json"
+
+    if twin_settings is not None:
+        _update_settings(twin_settings)
+
+    return res
 
 
 def main() -> None:
@@ -326,8 +384,9 @@ def main() -> None:
     # sync-gemini
     p_gem = subparsers.add_parser("sync-gemini", help="Inject charter & rules into GEMINI.md")
     p_gem.add_argument("--gemini-md", required=True, help="Path to GEMINI.md")
-    p_gem.add_argument("--charter", required=True, help="Path to CHARTER.md")
-    p_gem.add_argument("--rules-dir", required=True, help="Path to rules/ directory")
+    p_gem.add_argument("--charter", default=None, help="Path to CHARTER.md")
+    p_gem.add_argument("--rules-dir", default=None, help="Path to rules/ directory")
+    p_gem.add_argument("--template", default=None, help="Path to template GEMINI.md")
 
     # sync-opencode
     p_oc = subparsers.add_parser("sync-opencode", help="Update opencode.json")
@@ -363,7 +422,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.subcommand == "sync-gemini":
-        sync_gemini_md(args.gemini_md, args.charter, args.rules_dir)
+        sync_gemini_md(args.gemini_md, args.charter, args.rules_dir, args.template)
         print(f"  ✅ Synced GEMINI.md managed block -> {args.gemini_md}")
     elif args.subcommand == "sync-opencode":
         sync_opencode_json(

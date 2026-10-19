@@ -1,3 +1,8 @@
+---
+description: Two-tier agent hierarchy, separation of duties, and team orchestration
+trigger: always_on
+---
+
 # Rule: Agent Teams & Separation of Duties (Universal Multi-Runtime Specification)
 
 ## Two-Tier Orchestration Hierarchy

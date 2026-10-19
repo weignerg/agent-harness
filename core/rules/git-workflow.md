@@ -1,3 +1,8 @@
+---
+description: Hierarchical epics, worktree isolation, branch and PR naming conventions
+trigger: always_on
+---
+
 # Rule: Git Workflow
 
 - **Branch Governance (`release` vs `develop`)**: `release` is the GitHub default branch reserved for stable releases (updated only by merging `develop` -> `release`). `develop` is the active integration branch and **must always remain checked out in the local repository root**. Top-level Epic/integration PRs target `develop`.

@@ -12,7 +12,7 @@ The Supreme Orchestrator fills this in and sends it as your first prompt.
 
 ````markdown
 Role: Team Orchestrator
-Read ~/.agents/orchestration/team-orchestrator.md and follow it.
+Read ~/.orchestration/team-orchestrator.md and follow it.
 
 Issue_Number: {Issue_Number}
 Issue_Name: {Issue_Name}
@@ -65,14 +65,14 @@ The architect and the worker go round: resolve the next ambiguity, define the st
 
 ## After a restart
 
-Teammates live only inside the running session. After a resume, read the task list and any handoff in `~/.agents/orchestration/handoffs/`, and pick up where things stood.
+Teammates live only inside the running session. After a resume, read the task list and any handoff in `~/.orchestration/handoffs/`, and pick up where things stood.
 
 ## End and start of day
 
 - **END OF DAY** from the Supreme Orchestrator:
   - Finish the phase you're in, and start no new one. Push or post only what the user has already authorized.
   - Keep your worktree at `.orchestration/worktrees/<branch>`. Name any drafts sitting in `tmp/` in your handoff.
-  - Write the handoff to `~/.agents/orchestration/handoffs/<session_name_with_underscores>.md`.
+  - Write the handoff to `~/.orchestration/handoffs/<session_name_with_underscores>.md`.
   - Reply "STOPPED: <handoff path> — <one-line state>".
   - Stop working until you're restarted.
 - **"Please resume work"** after an END OF DAY stop: continue from your handoff's first step, apply any guidance the message adds, and tell the Supreme Orchestrator you're under way.
@@ -82,7 +82,7 @@ Teammates live only inside the running session. After a resume, read the task li
 
 When the team is only waiting on CI or review, or the user ends its session, stop and hand the watching to the Supreme Orchestrator:
 
-1. Write the handoff to `~/.agents/orchestration/handoffs/<session name, with / replaced by _>.md`. Include the last build number and result, the consolidated comment id, and the open user decisions. Its first step for whoever takes over: fetch the PR activity and run "Workflow: respond to review comments" or `ci-triage`.
+1. Write the handoff to `~/.orchestration/handoffs/<session name, with / replaced by _>.md`. Include the last build number and result, the consolidated comment id, and the open user decisions. Its first step for whoever takes over: fetch the PR activity and run "Workflow: respond to review comments" or `ci-triage`.
 2. Keep the worktree, or remove it only after confirming origin has every commit.
 3. Send Supreme Orchestrator: `STOPPED: <handoff path> — <state>`, naming what to watch (CI, review).
 

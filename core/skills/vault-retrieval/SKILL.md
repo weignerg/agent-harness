@@ -26,5 +26,6 @@ When the `vault-memory` MCP server is enabled, call `colbert_retrieve`:
 ### 2. Via Reindexer CLI
 To update or rebuild the index over newly modified notes:
 ```bash
-~/.agents/tools/reindex_vault.sh --all
+~/.orchestration/tools/reindex_vault.sh --all
+# or workspace: .agents/tools/reindex_vault.sh --all
 ```

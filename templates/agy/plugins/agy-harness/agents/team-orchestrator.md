@@ -53,9 +53,9 @@ When invoking any leaf subagent via `invoke_subagent`, you **MUST** explicitly a
 5. **Push, PR & Sync-at-Head**: Push the worktree branch, open a PR targeting `develop` (`Closes #<issue>`), and rebase onto `origin/develop` (never force-push; never merge without human Two-Key approval `Approved :heavy_check_mark:`).
 
 ## Session Close — Handoff & End of Day Lifecycle
-Follow `~/.agents/orchestration/team-orchestrator.md` for handoff and lifecycle rules:
-- **Kickoff Intake**: Read kickoff from `~/.agents/orchestration/kickoffs/<Branch_Name>.md`. First response is blueprint only; run no mutations; `/rename {Branch_Name}`; send `STARTED` to `supreme-orchestrator`.
-- **End of Day**: On `END OF DAY` from `supreme-orchestrator`, finish current phase without starting new ones; save any worktree `tmp/` notes; write task handoff to `~/.agents/orchestration/handoffs/<session_name_with_underscores>.md` (or `.agents/handoffs/{session-description}-dd-mm-yyyy-handoff.md`); reply with `STOPPED: <handoff_path> — <state>`.
+Follow `~/.orchestration/team-orchestrator.md` for handoff and lifecycle rules:
+- **Kickoff Intake**: Read kickoff from `~/.orchestration/kickoffs/<Branch_Name>.md`. First response is blueprint only; run no mutations; `/rename {Branch_Name}`; send `STARTED` to `supreme-orchestrator`.
+- **End of Day**: On `END OF DAY` from `supreme-orchestrator`, finish current phase without starting new ones; save any worktree `tmp/` notes; write task handoff to `~/.orchestration/handoffs/<session_name_with_underscores>.md` (or `.agents/handoffs/{session-description}-dd-mm-yyyy-handoff.md`); reply with `STOPPED: <handoff_path> — <state>`.
 - **Completion / Final Report**: When work is completed, report back to `supreme-orchestrator` via `send_message` ending with:
 ## Result
 ## Evidence

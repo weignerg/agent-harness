@@ -588,12 +588,16 @@ ensure_gitignore_entries() {
 # --- GLOBAL TARGET INSTALLERS -------------------------------------------------
 
 install_agy_global() {
+    local gemini_dir="${USER_HOME}/.gemini"
     local plugin_dest="${GEMINI_CONFIG_DIR}/plugins/agent-harness"
     local legacy_agy_plugin="${GEMINI_CONFIG_DIR}/plugins/agy-harness"
     local legacy_plugin="${GEMINI_CONFIG_DIR}/plugins/local-blackwell"
     local mcp_config="${GEMINI_CONFIG_DIR}/mcp_config.json"
-    local agy_settings="${USER_HOME}/.gemini/antigravity-cli/settings.json"
-    local gemini_md="${USER_HOME}/.gemini/GEMINI.md"
+    local mcp_agy_config="${gemini_dir}/antigravity/mcp_config.json"
+    local agy_settings="${gemini_dir}/antigravity-cli/settings.json"
+    local agy_global_settings="${gemini_dir}/settings.json"
+    local gemini_md="${gemini_dir}/GEMINI.md"
+    local global_agents_md="${gemini_dir}/AGENTS.md"
     local orch_dest="${USER_HOME}/.orchestration"
     local agents_link="${USER_HOME}/.agents"
     local canonical_repo="$(resolve_canonical_repo_dir)"
@@ -614,9 +618,10 @@ install_agy_global() {
     if [ "$DRY_RUN" = true ]; then
         echo "  [DRY-RUN] Would remove legacy ${legacy_plugin} and ${legacy_agy_plugin}"
         echo "  [DRY-RUN] Would compile agents from ${core_dir}/agents to ${plugin_dest}/agents/"
-        echo "  [DRY-RUN] Would symlink canonical skills to ${plugin_dest}/skills/ and ${GEMINI_CONFIG_DIR}/skills/"
-        echo "  [DRY-RUN] Would inject master charter and rules into ${gemini_md} (bounded block)"
-        echo "  [DRY-RUN] Would register vault-memory and worktree-manager in ${mcp_config}"
+        echo "  [DRY-RUN] Would symlink canonical skills to ${plugin_dest}/skills/, ${GEMINI_CONFIG_DIR}/skills/, and ${gemini_dir}/antigravity/skills/"
+        echo "  [DRY-RUN] Would symlink modular rules to ${GEMINI_CONFIG_DIR}/rules/ and ${gemini_dir}/antigravity-cli/rules/"
+        echo "  [DRY-RUN] Would deploy canonical ${global_agents_md} and compact managed block in ${gemini_md}"
+        echo "  [DRY-RUN] Would register vault-memory and worktree-manager in ${mcp_config} and ${mcp_agy_config}"
         return 0
     fi
 
@@ -624,9 +629,23 @@ install_agy_global() {
     rm -rf "$legacy_agy_plugin"
     rm -f "${USER_HOME}/AGENTS.md"
 
+    if [ -d "${USER_HOME}/.agent" ] && [ ! -L "${USER_HOME}/.agent" ]; then
+        local bak_agent="${USER_HOME}/.agent.pre-harness.bak"
+        if [ ! -e "$bak_agent" ]; then
+            mv "${USER_HOME}/.agent" "$bak_agent"
+            echo "  ⚠️ Warning: Pre-existing legacy ~/.agent directory backed up to ${bak_agent}"
+        fi
+    elif [ -L "${USER_HOME}/.agent" ]; then
+        rm -f "${USER_HOME}/.agent"
+    fi
+
+    mkdir -p "${gemini_dir}"
+    ln -sfn "${core_dir}/CHARTER.md" "${global_agents_md}"
+
     mkdir -p "${plugin_dest}/agents"
     mkdir -p "${plugin_dest}/skills"
     mkdir -p "${GEMINI_CONFIG_DIR}/skills"
+    mkdir -p "${gemini_dir}/antigravity/skills"
     cp -f "${canonical_repo}/templates/agy/plugins/agy-harness/plugin.json" "${plugin_dest}/plugin.json" 2>/dev/null || cat <<'EOF' > "${plugin_dest}/plugin.json"
 {
   "name": "agent-harness",
@@ -647,14 +666,28 @@ EOF
 
     find "${plugin_dest}/skills" -xtype l -delete 2>/dev/null || true
     find "${GEMINI_CONFIG_DIR}/skills" -xtype l -delete 2>/dev/null || true
+    find "${gemini_dir}/antigravity/skills" -xtype l -delete 2>/dev/null || true
     for skill_path in "${core_dir}/skills"/*; do
         if [ -d "$skill_path" ]; then
             local sname="$(basename "$skill_path")"
             ln -sfn "$skill_path" "${plugin_dest}/skills/${sname}"
             ln -sfn "$skill_path" "${GEMINI_CONFIG_DIR}/skills/${sname}"
+            ln -sfn "$skill_path" "${gemini_dir}/antigravity/skills/${sname}"
         fi
     done
     echo "  ✅ Symlinked canonical skills into Antigravity skill directories"
+
+    local agy_cli_rules="${gemini_dir}/antigravity-cli/rules"
+    local agy_cfg_rules="${GEMINI_CONFIG_DIR}/rules"
+    mkdir -p "${agy_cli_rules}" "${agy_cfg_rules}"
+    find "${agy_cli_rules}" -xtype l -delete 2>/dev/null || true
+    find "${agy_cfg_rules}" -xtype l -delete 2>/dev/null || true
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${agy_cli_rules}/$(basename "$r")"
+        ln -sfn "$r" "${agy_cfg_rules}/$(basename "$r")"
+    done
+    echo "  ✅ Installed modular rules into Antigravity global rules directories"
 
     mkdir -p "${orch_dest}/rules" "${orch_dest}/skills" "${orch_dest}/tools" "${orch_dest}/handoffs" "${orch_dest}/orchestration" "${orch_dest}/memory" "${orch_dest}/worktrees" "${orch_dest}/logs" "${orch_dest}/tmp"
     find "${orch_dest}/rules" -xtype l -delete 2>/dev/null || true
@@ -699,7 +732,8 @@ EOF
     python3 -m harness.installer.config_sync sync-gemini \
         --gemini-md "${gemini_md}" \
         --charter "${core_dir}/CHARTER.md" \
-        --rules-dir "${core_dir}/rules"
+        --rules-dir "${core_dir}/rules" \
+        --template "${canonical_repo}/templates/agy/GEMINI.md"
 
     python3 -m harness.installer.config_sync sync-agy-mcp \
         --mcp-config "${mcp_config}" \
@@ -707,13 +741,24 @@ EOF
         --py-bin "${py_bin}" \
         --orch-dir "${orch_dest}"
 
-    if [ -f "${agy_settings}" ]; then
-        python3 -m harness.installer.config_sync sync-agy-settings \
-            --settings-path "${agy_settings}" \
-            --repo-dir "${canonical_repo}" \
-            --orch-dir "${orch_dest}"
+    mkdir -p "$(dirname "${mcp_agy_config}")"
+    if [ ! -f "${mcp_agy_config}" ] && [ ! -L "${mcp_agy_config}" ]; then
+        ln -sfn "${mcp_config}" "${mcp_agy_config}" 2>/dev/null || true
     fi
-    echo "  ✅ Registered vault-memory and worktree-manager in ${mcp_config}"
+
+    mkdir -p "$(dirname "${agy_settings}")" "$(dirname "${agy_global_settings}")"
+    if [ ! -f "${agy_settings}" ]; then
+        echo '{}' > "${agy_settings}"
+    fi
+    python3 -m harness.installer.config_sync sync-agy-settings \
+        --settings-path "${agy_settings}" \
+        --repo-dir "${canonical_repo}" \
+        --orch-dir "${orch_dest}"
+
+    if [ ! -f "${agy_global_settings}" ] && [ ! -L "${agy_global_settings}" ]; then
+        ln -sfn "${agy_settings}" "${agy_global_settings}" 2>/dev/null || true
+    fi
+    echo "  ✅ Registered vault-memory and worktree-manager in ${mcp_config} and ${mcp_agy_config}"
 }
 
 install_claude_global() {
@@ -755,7 +800,11 @@ install_claude_global() {
         --runtime claude \
         --output-dir "${claude_dest}/agents"
 
-    ln -sfn "${core_dir}/CHARTER.md" "${claude_dest}/CLAUDE.md"
+    if [ -f "${USER_HOME}/.gemini/AGENTS.md" ]; then
+        ln -sfn "${USER_HOME}/.gemini/AGENTS.md" "${claude_dest}/CLAUDE.md"
+    else
+        ln -sfn "${core_dir}/CHARTER.md" "${claude_dest}/CLAUDE.md"
+    fi
 
     for r in "${core_dir}/rules"/*.md; do
         [ -f "$r" ] || continue
@@ -1946,7 +1995,11 @@ install_opencode_global() {
 
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
-    ln -sfn "${core_dir}/CHARTER.md" "${opencode_dest}/AGENTS.md"
+    if [ -f "${USER_HOME}/.gemini/AGENTS.md" ]; then
+        ln -sfn "${USER_HOME}/.gemini/AGENTS.md" "${opencode_dest}/AGENTS.md"
+    else
+        ln -sfn "${core_dir}/CHARTER.md" "${opencode_dest}/AGENTS.md"
+    fi
 
     for r in "${core_dir}/rules"/*.md; do
         [ -f "$r" ] || continue
@@ -2008,10 +2061,26 @@ install_agy_local() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY-RUN] Would migrate legacy .agent/ to .agents/ if present"
         echo "  [DRY-RUN] Would deploy operational assets to ${dest_orch}/"
         echo "  [DRY-RUN] Would create symlink ${dest_agents} -> .orchestration"
+        echo "  [DRY-RUN] Would link workspace instruction files (AGENTS.md, GEMINI.md, CLAUDE.md)"
         echo "  [DRY-RUN] Ensure ${repo_path}/.gitignore ignores .agents/ and .orchestration/worktrees/"
         return 0
+    fi
+
+    # 1. Migrate legacy .agent (singular) to .agents (plural)
+    if [ -d "${repo_path}/.agent" ] && [ ! -L "${repo_path}/.agent" ]; then
+        echo "  ⚠️ Found legacy .agent (singular) in ${repo_path}, migrating to .agents/..."
+        local bak_agent="${repo_path}/.agent.pre-harness.bak"
+        if [ ! -e "$bak_agent" ]; then
+            mv "${repo_path}/.agent" "$bak_agent"
+            echo "  ⚠️ Backed up legacy ${repo_path}/.agent to ${bak_agent}"
+        else
+            rm -rf "${repo_path}/.agent"
+        fi
+    elif [ -L "${repo_path}/.agent" ]; then
+        rm -f "${repo_path}/.agent"
     fi
 
     if [ "$REINSTALL" = true ] && [ -d "$dest_orch" ]; then
@@ -2041,7 +2110,39 @@ install_agy_local() {
     cp -rf "${canonical_repo}/templates/agy/orchestration/"* "${dest_orch}/orchestration/" 2>/dev/null || true
     cp -f "${canonical_repo}/templates/agy/handoffs/.gitkeep" "${dest_orch}/handoffs/.gitkeep" 2>/dev/null || touch "${dest_orch}/handoffs/.gitkeep"
     ln -sfn "${core_dir}/CHARTER.md" "${dest_orch}/AGENTS.md"
-    ln -sfn "${core_dir}/CHARTER.md" "${dest_orch}/GEMINI.md"
+    ln -sfn "${canonical_repo}/templates/agy/GEMINI.md" "${dest_orch}/GEMINI.md"
+
+    # Workspace MCP & Settings inside .orchestration (accessible via .agents/)
+    cat << 'EOF' > "${dest_orch}/mcp.json"
+{
+  "mcpServers": {
+    "vault-memory": {
+      "command": "python3",
+      "args": ["-m", "harness.mcp.vault_server"],
+      "env": {
+        "PYTHONPATH": ".",
+        "ORCHESTRATION_ROOT": ".orchestration"
+      }
+    },
+    "worktree-manager": {
+      "command": "python3",
+      "args": ["-m", "harness.mcp.worktree_server"],
+      "env": {
+        "PYTHONPATH": ".",
+        "ORCHESTRATION_ROOT": ".orchestration"
+      }
+    }
+  }
+}
+EOF
+    cat << EOF > "${dest_orch}/settings.json"
+{
+  "trustedWorkspaces": [
+    "${repo_path}",
+    "${dest_orch}"
+  ]
+}
+EOF
 
     if [ -L "${dest_agents}" ]; then
         rm -f "${dest_agents}"
@@ -2060,7 +2161,12 @@ install_agy_local() {
     fi
     ln -sfn .orchestration "${dest_agents}"
 
-    ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
+    # Workspace root instruction entrypoints
+    ln -sfn .agents/AGENTS.md "${repo_path}/AGENTS.md"
+    ln -sfn .agents/GEMINI.md "${repo_path}/GEMINI.md"
+    ln -sfn AGENTS.md "${repo_path}/CLAUDE.md"
+
+    ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".claude/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
     echo "  ✅ Installed Antigravity operational assets to ${dest_orch}/ and linked ${dest_agents}"
 }
 

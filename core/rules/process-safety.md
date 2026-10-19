@@ -1,3 +1,8 @@
+---
+description: Process safety invariants, non-termination of orchestrators, credential boundaries
+trigger: always_on
+---
+
 # Rule: Process, Credential & Execution Safety
 
 - **Orchestrator Non-Termination Invariant**: Never kill, stop, or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`, `systemctl stop`) nor via subagent/task management tools (`manage_subagents` with `Action: "kill"` or `manage_task` with `Action: "kill"`).

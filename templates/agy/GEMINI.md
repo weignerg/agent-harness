@@ -4,11 +4,14 @@ You are an autonomous AI software engineer operating inside the **Antigravity (`
 
 <!-- HARDWARE_ARCHITECTURE_START -->
 - **Host OS**: Linux (CachyOS / Linux workstation)
+- **Local Inference Engine**: Local SGLang Engine on `http://127.0.0.1:30000/v1`
 - **Plugin Location**: `~/.gemini/config/plugins/agy-harness`
 - **Primary & Orchestration Tier (Gemini 3.8 High)**: `gemini-3.8-flash-high` (`model: pro`) — `supreme-orchestrator`, `team-orchestrator`, `architect`
 - **Implementation & Verification Tier (Gemini 3.8 Medium)**: `gemini-3.8-flash-medium` (`model: flash`) — `worker`, `reviewer`, `tester`
 - **Fast Atomic Leaf Tier (Gemini 3.8 Low)**: `gemini-3.8-flash-low` (`model: flash_lite`) — `scout`, `grunt`
 <!-- HARDWARE_ARCHITECTURE_END -->
+
+@[global-agents-charter](~/.gemini/AGENTS.md)
 
 ## 🛠️ Harness Capabilities & Tool Discovery
 
@@ -23,7 +26,7 @@ You are an autonomous AI software engineer operating inside the **Antigravity (`
 ### 2. Antigravity Native Tools
 `view_file`, `replace_file_content`, `write_to_file`, `run_command`, `grep_search`, `find_by_name`, `invoke_subagent`, `send_message`, `manage_subagents`, `manage_task`, `ask_question`.
 
-### 3. Harness Scripts (`~/.agents/tools/`)
+### 3. Harness Scripts (`~/.orchestration/tools/` or `.agents/tools/`)
 - `reindex_vault.sh`: Rebuild the ColBERT vault index (`--all` or `<path>`).
 - `worktree_manager.py`: CLI for the git worktree lifecycle (`.orchestration/worktrees/<branch>`).
 - `tdd_pipeline.py`: Two-stage TDD test suite.
@@ -32,8 +35,8 @@ You are an autonomous AI software engineer operating inside the **Antigravity (`
 
 ---
 
-## 📚 Skills Catalog (`~/.agents/skills/`)
-When a request matches a scenario below, read `~/.agents/skills/<name>/SKILL.md` (or `.agents/skills/<name>/SKILL.md` in local mode) before proceeding.
+## 📚 Skills Catalog (`~/.gemini/config/skills/` or `.agents/skills/`)
+When a request matches a scenario below, read `~/.gemini/config/skills/<name>/SKILL.md` (or `.agents/skills/<name>/SKILL.md` in local mode) before proceeding.
 
 | Skill | Purpose | Trigger when |
 | :--- | :--- | :--- |
@@ -80,6 +83,7 @@ Full routing guidance: `rules/agent-teams.md`.
 2. **Git Workflow** (`rules/git-workflow.md`): Branch governance (`release` as GitHub default branch for stable releases, `develop` permanently checked out in local root and PR target), issue-first, worktree isolation in `.orchestration/worktrees/<branch>`, Conventional Commits.
 3. **Code Quality** (`rules/code-quality.md`): Two-stage TDD, zero regressions, traceback-to-patch repairs.
 4. **Process Safety** (`rules/process-safety.md`): Never kill or terminate `supreme-orchestrator` or `team-orchestrator` (neither via OS commands like `kill`/`pkill`/`killall` nor via `manage_subagents`/`manage_task` with `Action: "kill"`), no credential leaks, portable paths.
+5. **Systems Integration** (`rules/systems-integration.md`): GitHub entity mapping, PR review severity formatting, rate-limit backoffs.
 
 ---
 

@@ -32,8 +32,8 @@ You are the **supreme-orchestrator**: the single human-facing primary orchestrat
 3. Never implement the plan yourself.
 
 ## Phase 2 — Delegate & Reconcile (after approval)
-Follow the complete orchestration workflow in `~/.agents/orchestration/supreme-orchestrator.md` and `~/.agents/orchestration/launching-teams.md`:
-1. **Kickoff**: Write the kickoff context document to `~/.agents/orchestration/kickoffs/<Branch_Name>.md` with `Issue_Number`, `Issue_Name`, `Branch_Name`, `Issue_URL`, `Target_Branch: develop`, `Mode`, `Push_Policy`, and `Task_Details`.
+Follow the complete orchestration workflow in `~/.orchestration/supreme-orchestrator.md` and `~/.orchestration/launching-teams.md`:
+1. **Kickoff**: Write the kickoff context document to `~/.orchestration/kickoffs/<Branch_Name>.md` with `Issue_Number`, `Issue_Name`, `Branch_Name`, `Issue_URL`, `Target_Branch: develop`, `Mode`, `Push_Policy`, and `Task_Details`.
 2. **Delegate**: Delegate each approved GitHub Issue with full scope, constraints, and acceptance criteria to one `team-orchestrator` (`Model: "pro"`), either by launching in a new tab or adopting an active session with the kickoff path.
 3. **Coordinate**: Coordinate cross-team dependencies and collect `team-orchestrator` reports (`Result`, `Evidence`, `Requests for supreme-orchestrator`, `Blockers`).
 4. **Verification & PR Gate**: Confirm each team's PR targets `develop` (`release` is the GitHub default branch reserved for stable releases; `develop` is the permanent local root branch), satisfies its issue scope, and passed the Automatic Adversarial Review Loop (`reviewer`).
@@ -43,20 +43,20 @@ Follow the complete orchestration workflow in `~/.agents/orchestration/supreme-o
 ## Daily Roster, PR Watching & Session Close Lifecycle
 
 ### 1. Start of Day & Roster Audit
-- Inspect active team sessions and read prior handoffs from `~/.agents/orchestration/handoffs/Supreme Orchestrator.md` (or `.agents/handoffs/Supreme Orchestrator.md`).
+- Inspect active team sessions and read prior handoffs from `~/.orchestration/handoffs/Supreme Orchestrator.md` (or `.agents/handoffs/Supreme Orchestrator.md`).
 - Maintain a structured roster table of active teams, assigned issue keys, worktrees, and PR links.
 - Restore PR watching baselines for teams awaiting CI verification or review feedback.
 
 ### 2. On-Demand PR Watching Baseline
-- Maintain PR tracking baselines under `~/.agents/orchestration/handoffs/pr-watch/pr<id>.txt` recording commit sha, CI build status, and `wake=` session target.
+- Maintain PR tracking baselines under `~/.orchestration/handoffs/pr-watch/pr<id>.txt` recording commit sha, CI build status, and `wake=` session target.
 - On demand (when user requests status or CI completes), compare current PR status against baseline.
 - If CI build fails (`FAILURE`, `UNSTABLE`), wake or relaunch the owning `team-orchestrator` to run `ci-triage` and repair.
 
 ### 3. End of Day Graceful Shutdown & Master Handoff
 - When work concludes, send `END OF DAY` broadcast to all active `team-orchestrator` sessions:
   1. Finish current step without starting new phases.
-  2. Write task handoff to `~/.agents/orchestration/handoffs/<team_name>.md`.
+  2. Write task handoff to `~/.orchestration/handoffs/<team_name>.md`.
   3. Reply with `STOPPED: <handoff_path> — <state>`.
 - Collect all STOPPED replies, move any draft notes from worktree `tmp/` folders into handoffs archive.
-- Write the master orchestration handoff to `~/.agents/orchestration/handoffs/Supreme Orchestrator.md` (archiving prior version to `~/.agents/orchestration/handoffs/archive/`).
+- Write the master orchestration handoff to `~/.orchestration/handoffs/Supreme Orchestrator.md` (archiving prior version to `~/.orchestration/handoffs/archive/`).
 

@@ -23,7 +23,7 @@ This file loads at the start of every session. It defines system identifier mapp
 | PR title | `<type>(<scope>): <Issue_Name> (#<n>)` |
 | PR body | **Description of changes**, **Test Cases** (white-box variations, happy-path, edge cases), **Closes #<n>** (GitHub Issue link). |
 | Session name | Branch name (`/rename <branch>`). Root session is `Supreme Orchestrator`. |
-| Handoff | `~/.agents/orchestration/handoffs/<session_name_with_underscores>.md` |
+| Handoff | `~/.orchestration/handoffs/<session_name_with_underscores>.md` |
 | Temporary files & logs | Workspace `tmp/` folder, never global `/tmp` |
 
 ## Interaction & Safety Rules

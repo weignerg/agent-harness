@@ -19,7 +19,8 @@ systemctl --user status opencode-sglang-ornith-35b.service
 ```
 
 ## OOM Watchdog & Context Recovery
-If an OOM occurs, `~/.agents/tools/sglang_oom_handler.sh` degrades context length (e.g., 256k -> 128k -> 64k -> 32k) to recover service health:
+If an OOM occurs, `~/.orchestration/tools/sglang_oom_handler.sh` (or `.agents/tools/sglang_oom_handler.sh`) degrades context length (e.g., 256k -> 128k -> 64k -> 32k) to recover service health:
 ```bash
-~/.agents/tools/sglang_oom_handler.sh --reset
+~/.orchestration/tools/sglang_oom_handler.sh --reset
+# or workspace: .agents/tools/sglang_oom_handler.sh --reset
 ```
