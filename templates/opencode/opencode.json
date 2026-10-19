@@ -80,7 +80,11 @@
   ],
   "model": "ornith-local/ornith-1.5-35b",
   "default_agent": "supreme-orchestrator",
+  "subagent_depth": 3,
   "small_model": "ornith-local/ornith-1.5-9b",
+  "temperature": 0.6,
+  "top_p": 0.95,
+  "presence_penalty": 0.0,
   "permission": {
     "bash": "allow",
     "read": "allow",
@@ -91,11 +95,17 @@
   "agent": {
     "supreme-orchestrator": {
       "model": "ornith-local/ornith-1.5-35b",
-      "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges"
+      "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
+      "tools": {
+        "question": true
+      }
     },
     "team-orchestrator": {
       "model": "ornith-local/ornith-1.5-35b",
-      "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges"
+      "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges",
+      "tools": {
+        "question": true
+      }
     },
     "architect": {
       "model": "ornith-local/ornith-1.5-35b",
