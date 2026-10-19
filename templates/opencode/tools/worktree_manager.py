@@ -92,10 +92,25 @@ class WorktreeManager:
             orch_root = Path.home() / ".orchestration"
             return (orch_root / "worktrees" / repo_name / branch_name).resolve()
 
-    def provision_worktree(self, branch_name: str, target_dir: Optional[Path | str] = None, runtime: Optional[str] = None) -> Path:
+    def provision_worktree(
+        self,
+        branch_name: str,
+        target_dir: Optional[Path | str] = None,
+        runtime: Optional[str] = None,
+        base: Optional[str] = None,
+    ) -> Path:
         resolved_target = Path(target_dir) if target_dir is not None else self.default_worktree_path(branch_name, runtime=runtime)
         resolved_target.parent.mkdir(parents=True, exist_ok=True)
-        cmd = ["git", "worktree", "add", "-b", branch_name, str(resolved_target), "develop"]
+        base_ref = base or "develop"
+        check_branch = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+            cwd=self.repo_dir,
+            check=False,
+        )
+        if check_branch.returncode == 0:
+            cmd = ["git", "worktree", "add", str(resolved_target), branch_name]
+        else:
+            cmd = ["git", "worktree", "add", "-b", branch_name, str(resolved_target), base_ref]
         subprocess.run(cmd, cwd=self.repo_dir, check=True, capture_output=True)
         return resolved_target
 
@@ -122,6 +137,7 @@ def main():
     create_p.add_argument("--branch", "-b", dest="opt_branch", default=None, help="Branch name")
     create_p.add_argument("--path", "-p", dest="opt_path", default=None, help="Target worktree path (defaults to .orchestration/worktrees/<branch>)")
     create_p.add_argument("--runtime", "-r", dest="opt_runtime", default=None, help="Target runtime adapter")
+    create_p.add_argument("--base", "-B", dest="base", default=None, help="Base commit/branch to start from (defaults to develop, or parent issue branch for nested issues)")
 
     subparsers.add_parser("list", help="List active git worktrees")
 
@@ -142,9 +158,10 @@ def main():
         branch = args.opt_branch or args.pos_branch
         path = args.opt_path or args.pos_path
         runtime = args.opt_runtime or getattr(args, "runtime", None)
+        base = getattr(args, "base", None)
         if not branch:
             parser.error("Branch name is required to create a worktree")
-        created = mgr.provision_worktree(branch_name=branch, target_dir=path, runtime=runtime)
+        created = mgr.provision_worktree(branch_name=branch, target_dir=path, runtime=runtime, base=base)
         print(f"Created worktree at: {created}")
 
     elif args.command == "list":

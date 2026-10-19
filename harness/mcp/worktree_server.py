@@ -38,10 +38,11 @@ def worktree_create(branch: str, path: Optional[str] = None, base: Optional[str]
     manager = WorktreeManager(repo_dir=repo_root)
     target_path = Path(path).resolve() if path else resolve_worktree_path(branch, repo_root)
     try:
-        manager.provision_worktree(branch_name=branch, target_dir=target_path)
+        manager.provision_worktree(branch_name=branch, target_dir=target_path, base=base)
         return {
             "status": "created",
             "branch": branch,
+            "base": base or "develop",
             "path": str(target_path)
         }
     except Exception as exc:
