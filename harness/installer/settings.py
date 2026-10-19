@@ -23,26 +23,31 @@ def merge_json_settings(base_settings: Dict[str, Any], *override_settings: Dict[
 
 def merge_claude_settings_file(
     user_settings_path: Union[str, Path],
-    template_settings_path: Union[str, Path],
+    template_settings_paths: Union[str, Path, List[Union[str, Path]]],
     output_path: Union[str, Path],
     backup_pre_existing: bool = True,
 ) -> Dict[str, Any]:
     """Merge Claude Code user settings with harness template settings.
 
-    Harness template settings provide defaults (e.g. teammateMode, experimental env flags),
+    Harness template settings provide defaults (e.g. teammateMode, permissions, hooks),
     while the user's existing settings override defaults to preserve custom configuration.
     """
-    tmpl_p = Path(template_settings_path).resolve()
     user_p = Path(user_settings_path).resolve()
     out_p = Path(output_path).resolve()
 
+    if isinstance(template_settings_paths, (str, Path)):
+        template_settings_paths = [template_settings_paths]
+
     tmpl_data: Dict[str, Any] = {}
-    if tmpl_p.is_file():
-        try:
-            with open(tmpl_p, "r", encoding="utf-8") as f:
-                tmpl_data = json.load(f)
-        except Exception:
-            tmpl_data = {}
+    for tmpl_path in template_settings_paths:
+        tmpl_p = Path(tmpl_path).resolve()
+        if tmpl_p.is_file():
+            try:
+                with open(tmpl_p, "r", encoding="utf-8") as f:
+                    part_data = json.load(f)
+                    tmpl_data = merge_json_settings(tmpl_data, part_data)
+            except Exception:
+                pass
 
     user_data: Dict[str, Any] = {}
     if user_p.is_file():
@@ -87,14 +92,14 @@ def _run_cli() -> None:
 
     claude_p = subparsers.add_parser("merge-claude", help="Merge Claude Code settings")
     claude_p.add_argument("--user-settings", required=True, help="Path to existing user settings.json")
-    claude_p.add_argument("--template-settings", required=True, help="Path to template core.json")
+    claude_p.add_argument("--template-settings", nargs="+", required=True, help="Path to template setting json files")
     claude_p.add_argument("--output", required=True, help="Destination settings.json path")
 
     args = parser.parse_args()
     if args.subcommand == "merge-claude":
         res = merge_claude_settings_file(
             user_settings_path=args.user_settings,
-            template_settings_path=args.template_settings,
+            template_settings_paths=args.template_settings,
             output_path=args.output,
         )
         print(f"  ✅ Merged Claude settings written to {args.output}")

@@ -27,7 +27,7 @@ class ManifestEntry:
     """Represents a single file entry in the installation manifest."""
 
     def __init__(self, path: str, sha256: str, timestamp: str):
-        self.path = str(Path(path).resolve())
+        self.path = os.path.abspath(os.path.expanduser(str(path)))
         self.sha256 = sha256
         self.timestamp = timestamp
 
@@ -140,64 +140,66 @@ class ManifestEngine:
 
     def record_file(self, file_path: Union[str, Path]) -> ManifestEntry:
         """Compute sha256 and record an installed file."""
-        p = Path(file_path).resolve()
+        abs_p = os.path.abspath(os.path.expanduser(str(file_path)))
+        p = Path(abs_p)
         if not p.is_file():
             raise FileNotFoundError(f"Cannot record non-existent file: {p}")
         sha = compute_sha256(p)
         ts = datetime.datetime.fromtimestamp(p.stat().st_mtime, datetime.timezone.utc).isoformat()
-        entry = ManifestEntry(path=str(p), sha256=sha, timestamp=ts)
-        resolved_str = str(p)
-        if resolved_str in self._file_paths:
-            self.manifest.files = [f for f in self.manifest.files if f["path"] != resolved_str]
+        entry = ManifestEntry(path=abs_p, sha256=sha, timestamp=ts)
+        if abs_p in self._file_paths:
+            self.manifest.files = [f for f in self.manifest.files if f["path"] != abs_p]
         self.manifest.files.append(entry.to_dict())
-        self._file_paths.add(resolved_str)
+        self._file_paths.add(abs_p)
         return entry
 
     def record_symlink(self, link_path: Union[str, Path], target_path: Union[str, Path]) -> None:
         """Record a created symlink."""
-        lp = Path(link_path).resolve()
-        resolved_str = str(lp)
+        abs_lp = os.path.abspath(os.path.expanduser(str(link_path)))
         tp_str = str(target_path)
-        if resolved_str in self._symlink_paths:
-            self.manifest.symlinks = [s for s in self.manifest.symlinks if s["path"] != resolved_str]
-        self.manifest.symlinks.append({"path": resolved_str, "target": tp_str})
-        self._symlink_paths.add(resolved_str)
+        if abs_lp in self._symlink_paths:
+            self.manifest.symlinks = [s for s in self.manifest.symlinks if s["path"] != abs_lp]
+        self.manifest.symlinks.append({"path": abs_lp, "target": tp_str})
+        self._symlink_paths.add(abs_lp)
 
     def record_directory(self, dir_path: Union[str, Path]) -> None:
         """Record an created directory."""
-        dp = Path(dir_path).resolve()
-        resolved_str = str(dp)
-        if resolved_str not in self._dir_paths:
-            self.manifest.directories.append(resolved_str)
-            self._dir_paths.add(resolved_str)
+        abs_dp = os.path.abspath(os.path.expanduser(str(dir_path)))
+        if abs_dp not in self._dir_paths:
+            self.manifest.directories.append(abs_dp)
+            self._dir_paths.add(abs_dp)
 
     def record_tree(self, root_dir: Union[str, Path], exclude_manifest: bool = True) -> None:
         """Recursively scan and record all directories, symlinks, and files under root_dir."""
-        root = Path(root_dir).resolve()
-        if not root.exists():
+        abs_root = os.path.abspath(os.path.expanduser(str(root_dir)))
+        root = Path(abs_root)
+        if not (root.exists() or root.is_symlink()):
             return
-        if root.is_dir() and not root.is_symlink():
-            self.record_directory(root)
+        if root.is_symlink():
+            target = os.readlink(abs_root)
+            self.record_symlink(abs_root, target)
+            return
+        if root.is_dir():
+            self.record_directory(abs_root)
 
-        for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        for dirpath, dirnames, filenames in os.walk(abs_root, topdown=True, followlinks=False):
             dirnames[:] = [d for d in dirnames if not d.endswith(".pre-harness.bak")]
-            dp = Path(dirpath).resolve()
-            self.record_directory(dp)
+            self.record_directory(dirpath)
             for fn in filenames:
                 if fn.endswith(".pre-harness.bak") or fn.endswith(".log"):
                     continue
-                fp = dp / fn
-                if exclude_manifest and fp.resolve() == self.manifest_path.resolve():
+                fp = os.path.join(dirpath, fn)
+                if exclude_manifest and fp == str(self.manifest_path):
                     continue
-                if fp.is_symlink():
+                if os.path.islink(fp):
                     target = os.readlink(fp)
-                    if not (target.endswith(".log") or fp.name.endswith(".log")):
+                    if not (target.endswith(".log") or fn.endswith(".log")):
                         self.record_symlink(fp, target)
-                elif fp.is_file():
+                if os.path.isfile(fp):
                     self.record_file(fp)
             for dn in dirnames:
-                sub_p = dp / dn
-                if sub_p.is_symlink():
+                sub_p = os.path.join(dirpath, dn)
+                if os.path.islink(sub_p):
                     self.record_symlink(sub_p, os.readlink(sub_p))
 
     def save(self, target: str = "all", mode: str = "global") -> Path:
@@ -353,13 +355,15 @@ class ManifestEngine:
         # 2. Process symlinks in reverse
         for s_entry in reversed(self.manifest.symlinks):
             p = Path(s_entry["path"])
-            if p.is_symlink() or p.exists():
+            if p.is_symlink():
                 if not dry_run:
                     try:
                         p.unlink()
                     except OSError:
                         pass
                 removed_symlinks.append(s_entry["path"])
+            elif not p.exists():
+                already_missing.append(s_entry["path"])
 
         # 3. Process directories in reverse (only if empty)
         for d_path in reversed(self.manifest.directories):
@@ -521,9 +525,11 @@ def _run_cli() -> None:
                 link_p, target_p = s.split(":", 1)
                 engine.record_symlink(link_p, target_p)
         for f in args.files:
-            p = Path(f).resolve()
-            if p.is_file():
-                engine.record_file(p)
+            abs_f = os.path.abspath(os.path.expanduser(str(f)))
+            if os.path.islink(abs_f):
+                engine.record_symlink(abs_f, os.readlink(abs_f))
+            elif os.path.isfile(abs_f):
+                engine.record_file(abs_f)
         engine.save(target=args.target, mode=args.mode)
         print(f"  ✅ Manifest saved to {m_path} ({len(engine.manifest.files)} files recorded)")
         sys.exit(0)

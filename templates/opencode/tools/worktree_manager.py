@@ -102,6 +102,21 @@ class WorktreeManager:
         resolved_target = Path(target_dir) if target_dir is not None else self.default_worktree_path(branch_name, runtime=runtime)
         resolved_target.parent.mkdir(parents=True, exist_ok=True)
         base_ref = base or "develop"
+        check_local = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{base_ref}"],
+            cwd=self.repo_dir,
+            check=False,
+        )
+        if check_local.returncode != 0 and base_ref != "HEAD":
+            check_remote = subprocess.run(
+                ["git", "rev-parse", "--verify", f"origin/{base_ref}"],
+                cwd=self.repo_dir,
+                capture_output=True,
+                check=False,
+            )
+            if check_remote.returncode == 0:
+                base_ref = f"origin/{base_ref}"
+
         check_branch = subprocess.run(
             ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
             cwd=self.repo_dir,

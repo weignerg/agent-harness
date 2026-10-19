@@ -1,0 +1,215 @@
+{
+  "version": "1.0.0",
+  "model_tiers": {
+    "heavy": {
+      "opencode": "ornith-local/ornith-1.5-35b",
+      "claude": "opus",
+      "agy": "pro",
+      "agy_model_id": "gemini-3.8-flash-high"
+    },
+    "workhorse": {
+      "opencode": "ornith-local/ornith-1.5-35b",
+      "claude": "sonnet",
+      "agy": "flash",
+      "agy_model_id": "gemini-3.8-flash-medium"
+    },
+    "fast": {
+      "opencode": "ornith-local/ornith-1.5-9b",
+      "claude": "haiku",
+      "agy": "flash_lite",
+      "agy_model_id": "gemini-3.8-flash-low"
+    }
+  },
+  "roles": {
+    "supreme-orchestrator": {
+      "tier": "heavy",
+      "mode": "primary",
+      "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": true,
+        "question": true
+      },
+      "claude_tools": "Read, Grep, Glob, Bash, Task",
+      "agy_tools": [
+        "view_file",
+        "run_command",
+        "invoke_subagent",
+        "send_message",
+        "manage_subagents",
+        "manage_task",
+        "ask_question"
+      ]
+    },
+    "team-orchestrator": {
+      "tier": "heavy",
+      "mode": "subagent",
+      "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": true,
+        "question": true
+      },
+      "claude_tools": "Read, Grep, Glob, Bash, Task",
+      "agy_tools": [
+        "view_file",
+        "run_command",
+        "invoke_subagent",
+        "send_message",
+        "manage_subagents",
+        "manage_task",
+        "ask_question"
+      ]
+    },
+    "architect": {
+      "tier": "heavy",
+      "mode": "subagent",
+      "description": "Subsystem design, codebase surveys, high-context refactor blueprints, and dependency topology; calls scout for searches",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": true
+      },
+      "claude_tools": "Read, Grep, Glob, Bash",
+      "agy_tools": [
+        "view_file",
+        "run_command",
+        "invoke_subagent",
+        "send_message"
+      ]
+    },
+    "worker": {
+      "tier": "workhorse",
+      "mode": "subagent",
+      "description": "Implementation, refactoring, test authoring, and commits; calls grunt and scout",
+      "readonly": false,
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      },
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "agy_tools": [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "run_command",
+        "invoke_subagent",
+        "send_message"
+      ]
+    },
+    "tester": {
+      "tier": "workhorse",
+      "mode": "subagent",
+      "description": "Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout",
+      "readonly": false,
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      },
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "agy_tools": [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "run_command",
+        "invoke_subagent",
+        "send_message"
+      ]
+    },
+    "reviewer": {
+      "tier": "workhorse",
+      "mode": "subagent",
+      "description": "Adversarial code reviewer and security gatekeeper; calls scout only for searches",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": true
+      },
+      "claude_tools": "Read, Grep, Glob, Bash",
+      "agy_tools": [
+        "view_file",
+        "run_command",
+        "invoke_subagent",
+        "send_message"
+      ]
+    },
+    "scout": {
+      "tier": "fast",
+      "mode": "subagent",
+      "description": "Read-only 9B search subagent: grep, file discovery, large-scale context consolidation",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": true
+      },
+      "claude_tools": "Read, Grep, Glob, Bash",
+      "agy_tools": [
+        "view_file",
+        "run_command",
+        "send_message"
+      ]
+    },
+    "grunt": {
+      "tier": "fast",
+      "mode": "subagent",
+      "description": "9B leaf subagent: atomic simple edits, localized checks, small searches",
+      "readonly": false,
+      "tools": {
+        "write": true,
+        "edit": true,
+        "bash": true
+      },
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "agy_tools": [
+        "view_file",
+        "replace_file_content",
+        "write_to_file",
+        "run_command",
+        "send_message"
+      ]
+    },
+    "compaction": {
+      "tier": "fast",
+      "mode": "subagent",
+      "opencode_skip": true,
+      "description": "Conversation context compaction and pruning",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "claude_tools": "Read",
+      "agy_tools": [
+        "view_file",
+        "send_message"
+      ]
+    },
+    "summary": {
+      "tier": "fast",
+      "mode": "subagent",
+      "opencode_skip": true,
+      "description": "Commit summary and change log synthesis",
+      "readonly": true,
+      "tools": {
+        "write": false,
+        "edit": false,
+        "bash": false
+      },
+      "claude_tools": "Read",
+      "agy_tools": [
+        "view_file",
+        "send_message"
+      ]
+    }
+  }
+}

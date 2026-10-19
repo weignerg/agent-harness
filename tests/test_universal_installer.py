@@ -222,8 +222,13 @@ class TestUniversalInstaller(unittest.TestCase):
 
             # 2. Tamper with a file
             target_file = sandbox / ".orchestration" / "rules" / "code-quality.md"
-            with open(target_file, "a", encoding="utf-8") as f:
-                f.write("\n# TAMPERED LINE INJECTION\n")
+            if target_file.is_symlink():
+                content = target_file.read_text(encoding="utf-8")
+                target_file.unlink()
+                target_file.write_text(content + "\n# TAMPERED LINE INJECTION\n", encoding="utf-8")
+            else:
+                with open(target_file, "a", encoding="utf-8") as f:
+                    f.write("\n# TAMPERED LINE INJECTION\n")
 
             proc_tampered = self.run_installer("--verify", "--mode", "local", str(sandbox))
             self.assertNotEqual(proc_tampered.returncode, 0, "Verify should fail on tampered file")
@@ -512,7 +517,6 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(
                 cfg_data.get("instructions"),
                 [
-                    str(sandbox / ".config" / "opencode" / "AGENTS.md"),
                     str(sandbox / ".config" / "opencode" / "rules" / "*.md"),
                 ],
             )
