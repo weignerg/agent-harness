@@ -39,10 +39,11 @@ def sync_gemini_md(
     rules_dir: Optional[Union[str, Path]] = None,
     template_path: Optional[Union[str, Path]] = None,
 ) -> None:
-    """Inject compact AGY-specific system configuration and global charter link into GEMINI.md.
+    """Inject the compact AGY-specific addendum into GEMINI.md inside bounded markers.
 
-    Prevents 24KB truncation and context duplication by linking modular rules into
-    ~/.gemini/config/rules/ and ~/.gemini/antigravity-cli/rules/ rather than inlining them directly into GEMINI.md.
+    The shared charter is NOT inlined and NOT ``@``-included: AGY natively loads both
+    ``~/.gemini/GEMINI.md`` and ``~/.gemini/AGENTS.md`` (an include would inject the charter twice), and
+    modular rules load from ``~/.gemini/config/rules/``. This keeps GEMINI.md far below the 24,000-byte cap.
     """
     gem_p = Path(gemini_md_path).expanduser().resolve()
 
@@ -66,26 +67,17 @@ def sync_gemini_md(
 
     if not template_text:
         template_text = (
-            "# Antigravity (AGY) AI Agent System Charter & Instructions\n\n"
-            "You are an autonomous AI software engineer operating inside the **Antigravity (`agy`) Agent Harness**, "
-            "powered by official **Google Gemini 3.8** models across High, Medium, and Low reasoning effort tiers "
-            "and the two-tier agent team hierarchy.\n\n"
+            "# Antigravity (AGY) Runtime Addendum\n\n"
+            "AGY-specific settings only. The shared charter is loaded natively from "
+            "`~/.gemini/AGENTS.md` and modular rules from `~/.gemini/config/rules/`.\n\n"
             "<!-- HARDWARE_ARCHITECTURE_START -->\n"
             "- **Host OS**: Linux (CachyOS / Linux workstation)\n"
             "- **Local Inference Engine**: Local SGLang Engine on `http://127.0.0.1:30000/v1`\n"
             "- **Primary & Orchestration Tier (Gemini 3.8 High)**: `gemini-3.8-flash-high` (`model: pro`)\n"
             "- **Implementation & Verification Tier (Gemini 3.8 Medium)**: `gemini-3.8-flash-medium` (`model: flash`)\n"
             "- **Fast Atomic Leaf Tier (Gemini 3.8 Low)**: `gemini-3.8-flash-low` (`model: flash_lite`)\n"
-            "<!-- HARDWARE_ARCHITECTURE_END -->\n\n"
-            "@[global-agents-charter](~/.gemini/AGENTS.md)\n\n"
-            "## 🛡️ Operational Rules\n"
-            "Modular rules with `trigger: always_on` are loaded from `~/.gemini/config/rules/*.md` "
-            "and `~/.gemini/antigravity-cli/rules/*.md`."
+            "<!-- HARDWARE_ARCHITECTURE_END -->"
         )
-
-    charter_import = "@[global-agents-charter](~/.gemini/AGENTS.md)"
-    if charter_import not in template_text:
-        template_text = f"{template_text}\n\n{charter_import}"
 
     begin_marker = "<!-- BEGIN AGENT-HARNESS -->"
     end_marker = "<!-- END AGENT-HARNESS -->"
@@ -130,6 +122,63 @@ def sync_gemini_md(
                 pass
 
 
+def remove_gemini_md_block(gemini_md_path: Union[str, Path]) -> bool:
+    """Remove the agent-harness managed block from GEMINI.md, preserving all user content.
+
+    Deletes the file if nothing but whitespace remains. Returns True when a block was removed.
+    """
+    gem_p = Path(gemini_md_path).expanduser()
+    if not gem_p.is_file() or gem_p.is_symlink():
+        return False
+    text = gem_p.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r"\n*<!-- BEGIN AGENT-HARNESS -->.*?<!-- END AGENT-HARNESS -->\n*",
+        re.DOTALL,
+    )
+    if not pattern.search(text):
+        return False
+    remaining = pattern.sub("\n\n", text).strip()
+    if remaining:
+        gem_p.write_text(remaining + "\n", encoding="utf-8")
+    else:
+        gem_p.unlink()
+    return True
+
+
+def prune_legacy_trusted_workspaces(
+    settings_path: Union[str, Path],
+    repo_dir: Union[str, Path],
+    orch_dir: Union[str, Path],
+) -> bool:
+    """Remove harness-added ``trustedWorkspaces`` entries from the Gemini CLI ~/.gemini/settings.json.
+
+    Earlier installer versions mirrored the AGY trust list into this unrelated file. Only the exact
+    repo/orchestration paths the harness added are removed; the key is dropped if it becomes empty.
+    """
+    st_path = Path(settings_path).expanduser()
+    if not st_path.is_file() or st_path.is_symlink():
+        return False
+    try:
+        data = json.loads(st_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(data, dict) or not isinstance(data.get("trustedWorkspaces"), list):
+        return False
+    harness_paths = {
+        str(Path(repo_dir).expanduser().resolve()),
+        str(Path(orch_dir).expanduser().resolve()),
+    }
+    kept = [w for w in data["trustedWorkspaces"] if w not in harness_paths]
+    if len(kept) == len(data["trustedWorkspaces"]):
+        return False
+    if kept:
+        data["trustedWorkspaces"] = kept
+    else:
+        data.pop("trustedWorkspaces")
+    atomic_write_json(st_path, data)
+    return True
+
+
 def sync_opencode_json(
     opencode_json_path: Union[str, Path],
     repo_dir: Union[str, Path],
@@ -161,11 +210,21 @@ def sync_opencode_json(
     data["instructions"] = [f"{oc_p}/rules/*.md"]
     data["default_agent"] = "supreme-orchestrator"
 
+    # 1b. opencode.json is schema-strict (additionalProperties: false): top-level temperature/top_p/
+    # presence_penalty are NOT valid and are silently dropped by OpenCode. Remove them and apply the
+    # sampling profile through the valid per-agent `temperature`/`top_p` keys instead.
+    for stale_key in ("temperature", "top_p", "presence_penalty"):
+        data.pop(stale_key, None)
+
     # 2. System agent routing (compaction, summary, title) to avoid subagent collisions
     agent_routing = data.setdefault("agent", {})
     agent_routing["compaction"] = {"model": "ornith-local/ornith-1.5-9b"}
     agent_routing["summary"] = {"model": "ornith-local/ornith-1.5-9b"}
     agent_routing["title"] = {"model": "ornith-local/ornith-1.5-9b"}
+    for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
+        role_cfg = agent_routing.setdefault(role, {})
+        role_cfg.setdefault("temperature", 0.6)
+        role_cfg.setdefault("top_p", 0.95)
 
     # 3. Exact OpenCode MCP schema: "mcp", "type": "local", "command": [list], "environment": {dict}
     mcp = data.setdefault("mcp", {})
@@ -266,7 +325,7 @@ def sync_agy_mcp_config(
     orch_dir: Union[str, Path],
     vault_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Configure ~/.gemini/config/mcp_config.json and ~/.gemini/antigravity/mcp_config.json with exact mcpServers schema."""
+    """Configure the documented global ~/.gemini/config/mcp_config.json with the exact mcpServers schema."""
     mcp_path = Path(mcp_config_path).expanduser().resolve()
     repo_p = Path(repo_dir).expanduser().resolve()
     py_p = Path(os.path.abspath(os.path.expanduser(str(py_bin))))
@@ -315,19 +374,7 @@ def sync_agy_mcp_config(
         atomic_write_json(target, data)
         return data
 
-    res = _update_file(mcp_path)
-
-    # Sync twin path between ~/.gemini/config and ~/.gemini/antigravity
-    twin_path: Optional[Path] = None
-    if mcp_path.parent.name == "config" and mcp_path.parent.parent.name == ".gemini":
-        twin_path = mcp_path.parent.parent / "antigravity" / mcp_path.name
-    elif mcp_path.parent.name == "antigravity" and mcp_path.parent.parent.name == ".gemini":
-        twin_path = mcp_path.parent.parent / "config" / mcp_path.name
-
-    if twin_path is not None:
-        _update_file(twin_path)
-
-    return res
+    return _update_file(mcp_path)
 
 
 def sync_agy_settings(
@@ -335,7 +382,7 @@ def sync_agy_settings(
     repo_dir: Union[str, Path],
     orch_dir: Union[str, Path],
 ) -> Dict[str, Any]:
-    """Ensure trustedWorkspaces in ~/.gemini/antigravity-cli/settings.json and ~/.gemini/settings.json includes repo and orch."""
+    """Ensure trustedWorkspaces in ~/.gemini/antigravity-cli/settings.json includes repo and orch."""
     st_path = Path(settings_path).expanduser().resolve()
     repo_p = str(Path(repo_dir).expanduser().resolve())
     orch_p = str(Path(orch_dir).expanduser().resolve())
@@ -362,19 +409,7 @@ def sync_agy_settings(
         atomic_write_json(target, data)
         return data
 
-    res = _update_settings(st_path)
-
-    # Sync twin path between ~/.gemini/antigravity-cli/settings.json and ~/.gemini/settings.json
-    twin_settings: Optional[Path] = None
-    if st_path.parent.name == "antigravity-cli" and st_path.parent.parent.name == ".gemini":
-        twin_settings = st_path.parent.parent / "settings.json"
-    elif st_path.name == "settings.json" and st_path.parent.name == ".gemini":
-        twin_settings = st_path.parent / "antigravity-cli" / "settings.json"
-
-    if twin_settings is not None:
-        _update_settings(twin_settings)
-
-    return res
+    return _update_settings(st_path)
 
 
 def main() -> None:
@@ -387,6 +422,16 @@ def main() -> None:
     p_gem.add_argument("--charter", default=None, help="Path to CHARTER.md")
     p_gem.add_argument("--rules-dir", default=None, help="Path to rules/ directory")
     p_gem.add_argument("--template", default=None, help="Path to template GEMINI.md")
+
+    # unsync-gemini
+    p_ugem = subparsers.add_parser("unsync-gemini", help="Remove harness managed block from GEMINI.md")
+    p_ugem.add_argument("--gemini-md", required=True, help="Path to GEMINI.md")
+
+    # prune-legacy-settings
+    p_prune = subparsers.add_parser("prune-legacy-settings", help="Remove harness trustedWorkspaces from ~/.gemini/settings.json")
+    p_prune.add_argument("--settings-path", required=True, help="Path to ~/.gemini/settings.json")
+    p_prune.add_argument("--repo-dir", required=True, help="Harness repo directory")
+    p_prune.add_argument("--orch-dir", required=True, help="Orchestration directory")
 
     # sync-opencode
     p_oc = subparsers.add_parser("sync-opencode", help="Update opencode.json")
@@ -424,6 +469,12 @@ def main() -> None:
     if args.subcommand == "sync-gemini":
         sync_gemini_md(args.gemini_md, args.charter, args.rules_dir, args.template)
         print(f"  ✅ Synced GEMINI.md managed block -> {args.gemini_md}")
+    elif args.subcommand == "unsync-gemini":
+        removed = remove_gemini_md_block(args.gemini_md)
+        print(f"  ✅ Removed GEMINI.md managed block -> {args.gemini_md}" if removed else "  ℹ️  No GEMINI.md managed block to remove")
+    elif args.subcommand == "prune-legacy-settings":
+        pruned = prune_legacy_trusted_workspaces(args.settings_path, args.repo_dir, args.orch_dir)
+        print(f"  ✅ Pruned legacy trustedWorkspaces from {args.settings_path}" if pruned else "  ℹ️  No legacy trustedWorkspaces to prune")
     elif args.subcommand == "sync-opencode":
         sync_opencode_json(
             args.opencode_json,

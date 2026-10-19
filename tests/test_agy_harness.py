@@ -268,18 +268,24 @@ class TestAgyHarnessStructure(unittest.TestCase):
             self.assertTrue((agents_home / "GEMINI.md").is_file())
             self.assertTrue((third_party_skill / "SKILL.md").is_file())
 
-            # Global Dual-Scope verification for AGY (~/.gemini/)
+            # Global verification for AGY (~/.gemini/): documented locations only, nothing duplicated
             gemini_home = sandbox_home / ".gemini"
             self.assertTrue((gemini_home / "AGENTS.md").is_file())
             self.assertTrue((gemini_home / "GEMINI.md").is_file())
             gemini_md_text = (gemini_home / "GEMINI.md").read_text(encoding="utf-8")
             self.assertLess(len(gemini_md_text.encode("utf-8")), 24000, "GEMINI.md must be strictly < 24KB")
-            self.assertIn("@[global-agents-charter](~/.gemini/AGENTS.md)", gemini_md_text)
+            # AGY loads ~/.gemini/AGENTS.md natively: GEMINI.md must neither include nor inline the charter.
+            self.assertNotIn("@[", gemini_md_text)
+            self.assertNotIn("Universal AI Agent System Charter", gemini_md_text)
+            self.assertIn("Antigravity", gemini_md_text)
             self.assertTrue((gemini_cfg / "rules" / "agent-teams.md").is_file())
-            self.assertTrue((gemini_home / "antigravity-cli" / "rules" / "agent-teams.md").is_file())
-            self.assertTrue((gemini_home / "antigravity" / "skills" / "adversarial-review" / "SKILL.md").is_file())
-            self.assertTrue((gemini_home / "antigravity" / "mcp_config.json").is_file())
-            self.assertTrue((gemini_home / "settings.json").is_file())
+            self.assertTrue((gemini_cfg / "plugins" / "agent-harness" / "skills" / "adversarial-review" / "SKILL.md").is_file())
+            # Skills are exposed once (via the plugin); undocumented duplicate locations must not exist.
+            self.assertFalse((gemini_cfg / "skills" / "adversarial-review").exists())
+            self.assertFalse((gemini_home / "antigravity" / "skills").exists())
+            self.assertFalse((gemini_home / "antigravity" / "mcp_config.json").exists())
+            self.assertFalse((gemini_home / "antigravity-cli" / "rules").exists())
+            self.assertFalse((gemini_home / "settings.json").exists())
 
             mcp_data = json.loads((gemini_cfg / "mcp_config.json").read_text(encoding="utf-8"))
             self.assertIn("rea", mcp_data["mcpServers"])
@@ -308,8 +314,9 @@ class TestAgyHarnessStructure(unittest.TestCase):
             self.assertTrue((target_repo / "CLAUDE.md").is_file())
             self.assertTrue((target_repo / ".agents" / "AGENTS.md").is_file())
             self.assertTrue((target_repo / ".agents" / "GEMINI.md").is_file())
-            self.assertTrue((target_repo / ".agents" / "mcp.json").is_file())
-            self.assertTrue((target_repo / ".agents" / "settings.json").is_file())
+            # Undocumented workspace MCP/settings files must not be generated (they would not resolve the harness).
+            self.assertFalse((target_repo / ".agents" / "mcp.json").exists())
+            self.assertFalse((target_repo / ".agents" / "settings.json").exists())
             self.assertTrue((target_repo / ".agents" / "rules" / "agent-teams.md").is_file())
             self.assertTrue((target_repo / ".agents" / "tools" / "worktree_manager.py").is_file())
             repo_gitignore = (target_repo / ".gitignore").read_text(encoding="utf-8")

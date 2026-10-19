@@ -75,16 +75,12 @@
     }
   },
   "instructions": [
-    "AGENTS.md",
     ".opencode/rules/*.md"
   ],
   "model": "ornith-local/ornith-1.5-35b",
   "default_agent": "supreme-orchestrator",
   "subagent_depth": 3,
   "small_model": "ornith-local/ornith-1.5-9b",
-  "temperature": 0.6,
-  "top_p": 0.95,
-  "presence_penalty": 0.0,
   "permission": {
     "bash": "allow",
     "read": "allow",
