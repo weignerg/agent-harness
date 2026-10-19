@@ -32,6 +32,27 @@ else
     PY_BIN="python3"
 fi
 
+# Global mock systemctl to protect host desktop/session during sandboxed tests
+GLOBAL_MOCK_BIN="$(mktemp -d /tmp/test-global-mock-bin-XXXXXX)"
+cat << 'EOF' > "${GLOBAL_MOCK_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    echo "active"
+    exit 0
+fi
+if [ "$1" = "--user" ] && [ "$2" = "is-enabled" ]; then
+    echo "enabled"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
+export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
+cleanup_test_sandboxes() {
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" 2>/dev/null || true
+}
+trap cleanup_test_sandboxes EXIT
+
 # --- Test 1: Helper functions and CLI options ---------------------------------
 echo "[Test 1] Testing install.sh CLI help and flag parsing..."
 HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
@@ -58,7 +79,6 @@ fi
 # --- Test 3: Sandbox Non-Interactive Install Manifest Generation --------------
 echo "[Test 3] Testing non-interactive install in isolated sandbox generates clean manifest..."
 SANDBOX="$(mktemp -d /tmp/installer-test-sandbox-XXXXXX)"
-trap 'rm -rf "${SANDBOX}"' EXIT
 
 # Prepare mock environment inside sandbox
 mkdir -p "${SANDBOX}/.config/opencode-backends"
@@ -285,7 +305,7 @@ assert ag['reviewer']['permission']['edit'] == 'deny'
 assert ag['supreme-orchestrator'].get('prompt') and ag['supreme-orchestrator'].get('mode') == 'primary'
 assert 'task' in ag['supreme-orchestrator']['prompt'] or 'subagent' in ag['supreme-orchestrator']['prompt']
 assert 'team' in ag['supreme-orchestrator']['prompt'].lower() and 'delegates' in ag['supreme-orchestrator']['prompt']
-assert ag['supreme-orchestrator']['permission']['edit'] == 'deny' and ag['supreme-orchestrator']['permission']['write'] == 'deny'
+assert ag['supreme-orchestrator']['permission']['edit'] == 'allow' and ag['supreme-orchestrator']['permission']['write'] == 'allow'
 assert ag['team-orchestrator'].get('prompt') and ag['team-orchestrator'].get('mode') == 'subagent'
 assert 'team' in ag['team-orchestrator']['prompt'].lower() and 'reviewer' in ag['team-orchestrator']['prompt']
 for n in ('scout', 'grunt'):
@@ -352,7 +372,6 @@ fi
 # --- Test 22: Verify Post-Install Summary, Password Generation & Terminal Box -----
 echo "[Test 22] Verifying post-install summary UX and automatic password generation..."
 SANDBOX_GP="$(mktemp -d /tmp/installer-test-summary-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}"' EXIT
 
 GP_OUT="$(HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
 
@@ -386,7 +405,6 @@ fi
 # --- Test 23: Verify SGLang venv auto-healing with local repository -----------
 echo "[Test 23] Verifying SGLang venv auto-healing with local repository..."
 SANDBOX_HEAL="$(mktemp -d /tmp/installer-test-heal-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}"' EXIT
 
 # Prepare mock local sglang repository in candidate path
 MOCK_SGLANG_REPO="${SANDBOX_HEAL}/git/sglang/python"
@@ -425,7 +443,6 @@ fi
 # --- Test 24: Verify Minimal NVIDIA Driver Mismatch Reboot Box ----------------
 echo "[Test 24] Verifying Minimal NVIDIA Driver Mismatch Reboot Box..."
 SANDBOX_NV="$(mktemp -d /tmp/installer-test-nv-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}"' EXIT
 
 MOCK_NV_BIN="${SANDBOX_NV}/bin"
 mkdir -p "${MOCK_NV_BIN}"
@@ -458,7 +475,6 @@ else
 fi
 
 SANDBOX_WARMUP="$(mktemp -d /tmp/installer-test-warmup-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}"' EXIT
 
 # Prepare mock stack with mock sglang binary that simulates a mock server on port 30000
 MOCK_WARMUP_STACK="${SANDBOX_WARMUP}/.local/share/opencode-sglang-stack"
@@ -509,7 +525,6 @@ fi
 # --- Test 26: Verify SGLang healthcheck live model loading progress & readiness ---
 echo "[Test 26] Verifying SGLang healthcheck live model loading progress & readiness..."
 SANDBOX_HC_PROG="$(mktemp -d /tmp/installer-test-hc-prog-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}"' EXIT
 
 MOCK_HC_BIN="${SANDBOX_HC_PROG}/bin"
 mkdir -p "${MOCK_HC_BIN}"
@@ -574,7 +589,6 @@ fi
 # --- Test 27: Verify SGLang healthcheck early failure detection --------------
 echo "[Test 27] Verifying SGLang healthcheck early failure detection..."
 SANDBOX_HC_FAIL="$(mktemp -d /tmp/installer-test-hc-fail-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}" "${SANDBOX_HC_FAIL}"' EXIT
 
 MOCK_FAIL_BIN="${SANDBOX_HC_FAIL}/bin"
 mkdir -p "${MOCK_FAIL_BIN}"

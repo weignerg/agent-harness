@@ -51,7 +51,7 @@ worktrees/
 .claude/handoffs/*.md
 !.claude/handoffs/.gitkeep
 
-# Whitelist tracked files and templates
+# Whitelist tracked files
 !.orchestration/handoffs/
 !.orchestration/**/.gitkeep
-!templates/**
+

@@ -34,6 +34,18 @@ ORIGINAL_INVOCATION="${ORIGINAL_CMD}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
+resolve_canonical_repo_dir() {
+    local canonical_repo="$SCRIPT_DIR"
+    if git -C "$SCRIPT_DIR" rev-parse --git-common-dir >/dev/null 2>&1; then
+        local common_git
+        common_git="$(cd "$SCRIPT_DIR" && cd "$(git rev-parse --git-common-dir)" && pwd)"
+        if [[ "$(basename "$common_git")" == ".git" ]]; then
+            canonical_repo="$(dirname "$common_git")"
+        fi
+    fi
+    printf '%s' "$canonical_repo"
+}
+
 USER_HOME="${USER_HOME:-${HOME}}"
 GEMINI_CONFIG_DIR="${GEMINI_CONFIG_DIR:-${USER_HOME}/.gemini/config}"
 AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
@@ -575,14 +587,39 @@ ensure_gitignore_entries() {
 
 # --- GLOBAL TARGET INSTALLERS -------------------------------------------------
 
+# Remove symlinks in <dir> that point into <harness_src_dir> (harness-owned); leaves everything else intact.
+prune_harness_links() {
+    local dir="$1"
+    local harness_src="$2"
+    [ -d "$dir" ] || return 0
+    local entry target
+    for entry in "$dir"/*; do
+        [ -L "$entry" ] || continue
+        target="$(readlink "$entry")"
+        case "$target" in
+            "${harness_src}"/*|"${harness_src}") rm -f "$entry" ;;
+        esac
+    done
+    rmdir "$dir" 2>/dev/null || true
+}
+
 install_agy_global() {
+    local gemini_dir="${USER_HOME}/.gemini"
     local plugin_dest="${GEMINI_CONFIG_DIR}/plugins/agent-harness"
     local legacy_agy_plugin="${GEMINI_CONFIG_DIR}/plugins/agy-harness"
     local legacy_plugin="${GEMINI_CONFIG_DIR}/plugins/local-blackwell"
     local mcp_config="${GEMINI_CONFIG_DIR}/mcp_config.json"
-    local agy_tmpl="${SCRIPT_DIR}/templates/agy"
+    local agy_settings="${gemini_dir}/antigravity-cli/settings.json"
+    local gemini_md="${gemini_dir}/GEMINI.md"
+    local global_agents_md="${gemini_dir}/AGENTS.md"
     local orch_dest="${USER_HOME}/.orchestration"
     local agents_link="${USER_HOME}/.agents"
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${canonical_repo}/core"
+    local py_bin="python3"
+    if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
+        py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
+    fi
 
     echo "================================================================================"
     echo "🚀 INSTALLING AGY HARNESS (GLOBAL MODE)"
@@ -593,11 +630,11 @@ install_agy_global() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would remove legacy ${legacy_plugin} and stale ${USER_HOME}/AGENTS.md"
-        echo "  [DRY-RUN] Would prune stale *.md in ${plugin_dest}/agents/"
-        echo "  [DRY-RUN] Would copy ${agy_tmpl}/plugins/agy-harness/* to ${plugin_dest}/"
-        echo "  [DRY-RUN] Would deploy rules/, skills/, tools/, orchestration/, handoffs/ to ${orch_dest}/"
-        echo "  [DRY-RUN] Would create symlink ${agents_link} -> ${orch_dest}"
+        echo "  [DRY-RUN] Would remove legacy ${legacy_plugin} and ${legacy_agy_plugin}"
+        echo "  [DRY-RUN] Would compile agents from ${core_dir}/agents to ${plugin_dest}/agents/"
+        echo "  [DRY-RUN] Would expose canonical skills once via the plugin at ${plugin_dest}/skills/ (no duplicate global copies)"
+        echo "  [DRY-RUN] Would symlink modular rules to ${GEMINI_CONFIG_DIR}/rules/"
+        echo "  [DRY-RUN] Would deploy canonical ${global_agents_md} and compact AGY addendum block in ${gemini_md}"
         echo "  [DRY-RUN] Would register vault-memory and worktree-manager in ${mcp_config}"
         return 0
     fi
@@ -605,105 +642,146 @@ install_agy_global() {
     rm -rf "$legacy_plugin"
     rm -rf "$legacy_agy_plugin"
     rm -f "${USER_HOME}/AGENTS.md"
+
+    if [ -d "${USER_HOME}/.agent" ] && [ ! -L "${USER_HOME}/.agent" ]; then
+        local bak_agent="${USER_HOME}/.agent.pre-harness.bak"
+        if [ ! -e "$bak_agent" ]; then
+            mv "${USER_HOME}/.agent" "$bak_agent"
+            echo "  ⚠️ Warning: Pre-existing legacy ~/.agent directory backed up to ${bak_agent}"
+        fi
+    elif [ -L "${USER_HOME}/.agent" ]; then
+        rm -f "${USER_HOME}/.agent"
+    fi
+
+    mkdir -p "${gemini_dir}"
+    ln -sfn "${core_dir}/CHARTER.md" "${global_agents_md}"
+
     mkdir -p "${plugin_dest}/agents"
-    rm -f "${plugin_dest}/agents/"*.md
-    cp -f "${agy_tmpl}/plugins/agy-harness/plugin.json" "${plugin_dest}/plugin.json"
-    cp -f "${agy_tmpl}/plugins/agy-harness/agents/"*.md "${plugin_dest}/agents/"
-    
+    mkdir -p "${plugin_dest}/skills"
+    cp -f "${canonical_repo}/config/agy/plugins/agent-harness/plugin.json" "${plugin_dest}/plugin.json" 2>/dev/null || cat <<'EOF' > "${plugin_dest}/plugin.json"
+{
+  "name": "agent-harness",
+  "version": "1.0.0",
+  "description": "Unified Multi-Runtime Agent Harness for Google Antigravity",
+  "agents": "agents"
+}
+EOF
+
+    python3 -m harness.installer.compiler \
+        --core-dir "${core_dir}" \
+        --runtime agy \
+        --output-dir "${plugin_dest}/agents"
+
     mkdir -p "$(dirname "$legacy_agy_plugin")"
     ln -sfn agent-harness "${legacy_agy_plugin}"
     echo "  ✅ Installed canonical Gemini 3.8 agent profiles in ${plugin_dest}/agents/"
 
+    # Skills are exposed exactly once, through the plugin. Linking the same skills into ~/.gemini/config/skills/
+    # (or any other directory) makes AGY list every skill twice and wastes customization budget. Prune any
+    # harness-owned links left behind by earlier installer versions (third-party skills are never touched).
+    find "${plugin_dest}/skills" -xtype l -delete 2>/dev/null || true
+    for stale_dir in "${GEMINI_CONFIG_DIR}/skills" "${gemini_dir}/antigravity/skills"; do
+        prune_harness_links "$stale_dir" "${core_dir}/skills"
+    done
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${plugin_dest}/skills/$(basename "$skill_path")"
+        fi
+    done
+    echo "  ✅ Symlinked canonical skills into the agent-harness plugin"
+
+    # Modular always_on rules: the documented global location is ~/.gemini/config/rules/. The undocumented
+    # ~/.gemini/antigravity-cli/rules/ copy from earlier versions is pruned.
+    local agy_cfg_rules="${GEMINI_CONFIG_DIR}/rules"
+    mkdir -p "${agy_cfg_rules}"
+    find "${agy_cfg_rules}" -xtype l -delete 2>/dev/null || true
+    prune_harness_links "${gemini_dir}/antigravity-cli/rules" "${core_dir}/rules"
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${agy_cfg_rules}/$(basename "$r")"
+    done
+    echo "  ✅ Installed modular rules into ${agy_cfg_rules}"
+
     mkdir -p "${orch_dest}/rules" "${orch_dest}/skills" "${orch_dest}/tools" "${orch_dest}/handoffs" "${orch_dest}/orchestration" "${orch_dest}/memory" "${orch_dest}/worktrees" "${orch_dest}/logs" "${orch_dest}/tmp"
-    cp -rf "${agy_tmpl}/rules/"* "${orch_dest}/rules/"
-    cp -rf "${agy_tmpl}/skills/"* "${orch_dest}/skills/"
-    cp -rf "${agy_tmpl}/tools/"* "${orch_dest}/tools/"
-    chmod +x "${orch_dest}/tools/"*.sh 2>/dev/null || true
-    cp -rf "${agy_tmpl}/orchestration/"* "${orch_dest}/orchestration/"
-    cp -f "${agy_tmpl}/handoffs/.gitkeep" "${orch_dest}/handoffs/.gitkeep"
-    touch "${orch_dest}/memory/.gitkeep" "${orch_dest}/logs/.gitkeep" "${orch_dest}/tmp/.gitkeep"
-    cp -f "${agy_tmpl}/AGENTS.md" "${orch_dest}/AGENTS.md"
-    cp -f "${agy_tmpl}/GEMINI.md" "${orch_dest}/GEMINI.md"
+    find "${orch_dest}/rules" -xtype l -delete 2>/dev/null || true
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${orch_dest}/rules/$(basename "$r")"
+    done
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${orch_dest}/skills/$(basename "$skill_path")"
+        fi
+    done
+    for tool_path in "${canonical_repo}/scripts"/*.py "${canonical_repo}/scripts"/*.sh; do
+        [ -f "$tool_path" ] || continue
+        ln -sfn "$tool_path" "${orch_dest}/tools/$(basename "$tool_path")"
+        chmod +x "$tool_path" 2>/dev/null || true
+    done
+    cp -rf "${canonical_repo}/config/orchestration/"* "${orch_dest}/orchestration/" 2>/dev/null || true
+    touch "${orch_dest}/handoffs/.gitkeep"
+    ln -sfn "${core_dir}/CHARTER.md" "${orch_dest}/AGENTS.md"
+    ln -sfn "${canonical_repo}/config/agy/GEMINI.md" "${orch_dest}/GEMINI.md"
 
     if [ -L "${agents_link}" ]; then
         rm -f "${agents_link}"
     elif [ -d "${agents_link}" ]; then
-        # Migrate any user-defined skills, rules, or tools into orch_dest before symlinking
-        cp -rn "${agents_link}/skills/"* "${orch_dest}/skills/" 2>/dev/null || true
-        cp -rn "${agents_link}/rules/"* "${orch_dest}/rules/" 2>/dev/null || true
-        cp -rn "${agents_link}/tools/"* "${orch_dest}/tools/" 2>/dev/null || true
+        if [ -d "${agents_link}/skills" ]; then
+            cp -rn "${agents_link}/skills/"* "${orch_dest}/skills/" 2>/dev/null || true
+        fi
         local bak_agents="${agents_link}.pre-harness.bak"
         if [ ! -e "$bak_agents" ]; then
             cp -r "$agents_link" "$bak_agents"
             echo "  ⚠️ Warning: Pre-existing directory ${agents_link} backed up to ${bak_agents}"
-        else
-            echo "  ⚠️ Warning: Pre-existing directory ${agents_link} already backed up at ${bak_agents}"
         fi
         rm -rf "$agents_link"
     elif [ -e "${agents_link}" ]; then
         local bak_agents="${agents_link}.pre-harness.bak"
         mv "$agents_link" "$bak_agents"
-        echo "  ⚠️ Warning: Pre-existing file ${agents_link} backed up to ${bak_agents}"
     fi
     ln -sfn "${orch_dest}" "${agents_link}"
-    rm -f "${orch_dest}/rules.md" 2>/dev/null || true
-    echo "  ✅ Synced rules, skills, tools, and charters to ${orch_dest}/"
+    echo "  ✅ Synced rules, skills, tools, and charters to ${orch_dest}/ and linked ${agents_link}"
 
-    mkdir -p "$(dirname "$mcp_config")"
-    local py_bin="python3"
-    if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
-        py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
+    python3 -m harness.installer.config_sync sync-gemini \
+        --gemini-md "${gemini_md}" \
+        --charter "${core_dir}/CHARTER.md" \
+        --rules-dir "${core_dir}/rules" \
+        --template "${canonical_repo}/config/agy/GEMINI.md"
+
+    python3 -m harness.installer.config_sync sync-agy-mcp \
+        --mcp-config "${mcp_config}" \
+        --repo-dir "${canonical_repo}" \
+        --py-bin "${py_bin}" \
+        --orch-dir "${orch_dest}"
+
+    # Undocumented duplicate MCP/settings files written by earlier installer versions would register the
+    # same servers twice (or pollute the Gemini CLI settings); remove only what the harness created.
+    if [ -f "${gemini_dir}/antigravity/mcp_config.json" ] && grep -q '"harness.mcp.vault_server"' "${gemini_dir}/antigravity/mcp_config.json" 2>/dev/null \
+        && ! grep -q '"rea"' "${gemini_dir}/antigravity/mcp_config.json" 2>/dev/null; then
+        rm -f "${gemini_dir}/antigravity/mcp_config.json"
     fi
+    python3 -m harness.installer.config_sync prune-legacy-settings --settings-path "${gemini_dir}/settings.json" --repo-dir "${canonical_repo}" --orch-dir "${orch_dest}" || true
 
-    local canonical_repo="$SCRIPT_DIR"
-    if git -C "$SCRIPT_DIR" rev-parse --git-common-dir >/dev/null 2>&1; then
-        local common_git
-        common_git="$(cd "$SCRIPT_DIR" && cd "$(git rev-parse --git-common-dir)" && pwd)"
-        if [[ "$(basename "$common_git")" == ".git" ]]; then
-            canonical_repo="$(dirname "$common_git")"
-        fi
+    if [ -f "${agy_settings}" ]; then
+        python3 -m harness.installer.config_sync sync-agy-settings \
+            --settings-path "${agy_settings}" \
+            --repo-dir "${canonical_repo}" \
+            --orch-dir "${orch_dest}"
     fi
-
-    python3 - "$mcp_config" "$canonical_repo" "$py_bin" "$orch_dest" <<'PYEOF'
-import json
-import sys
-from pathlib import Path
-
-mcp_path = Path(sys.argv[1])
-repo_dir = sys.argv[2]
-py_bin = sys.argv[3]
-orch_dest = sys.argv[4]
-
-data = {}
-if mcp_path.is_file():
-    try:
-        data = json.loads(mcp_path.read_text(encoding="utf-8"))
-    except Exception:
-        data = {}
-
-if not isinstance(data, dict):
-    data = {}
-servers = data.setdefault("mcpServers", {})
-
-servers["vault-memory"] = {
-    "command": py_bin,
-    "args": ["-m", "harness.mcp.vault_server"],
-    "env": {"PYTHONPATH": repo_dir, "ORCHESTRATION_ROOT": orch_dest},
-}
-servers["worktree-manager"] = {
-    "command": py_bin,
-    "args": ["-m", "harness.mcp.worktree_server"],
-    "env": {"PYTHONPATH": repo_dir, "ORCHESTRATION_ROOT": orch_dest},
-}
-
-mcp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-PYEOF
     echo "  ✅ Registered vault-memory and worktree-manager in ${mcp_config}"
 }
 
 install_claude_global() {
     local claude_dest="${CLAUDE_HOME_DIR}"
-    local claude_tmpl="${SCRIPT_DIR}/templates/claude"
+    local claude_json="${USER_HOME}/.claude.json"
+    local claude_cfg="${SCRIPT_DIR}/config/claude"
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${canonical_repo}/core"
+    local orch_dest="${USER_HOME}/.orchestration"
+    local py_bin="python3"
+    if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
+        py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
+    fi
 
     echo "================================================================================"
     echo "🚀 INSTALLING CLAUDE CODE HARNESS (GLOBAL MODE)"
@@ -712,30 +790,69 @@ install_claude_global() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
-        echo "  [DRY-RUN] Would deploy agents/, skills/, rules/, settings/, orchestration/ to ${claude_dest}/"
+        echo "  [DRY-RUN] Would compile agents from ${core_dir}/agents to ${claude_dest}/agents/"
+        echo "  [DRY-RUN] Would symlink rules, skills, commands from ${core_dir}/ to ${claude_dest}/"
+        echo "  [DRY-RUN] Would symlink master charter to ${claude_dest}/CLAUDE.md"
         echo "  [DRY-RUN] Would merge ${claude_dest}/settings.json preserving custom user config"
+        echo "  [DRY-RUN] Would register vault-memory and worktree-manager in ${claude_json}"
         return 0
     fi
 
-    mkdir -p "${claude_dest}/agents" "${claude_dest}/skills" "${claude_dest}/rules" "${claude_dest}/settings" "${claude_dest}/tools" "${claude_dest}/orchestration"
-    cp -rf "${claude_tmpl}/agents/"* "${claude_dest}/agents/"
-    cp -rf "${claude_tmpl}/skills/"* "${claude_dest}/skills/"
-    cp -rf "${claude_tmpl}/rules/"* "${claude_dest}/rules/"
-    cp -rf "${claude_tmpl}/tools/"* "${claude_dest}/tools/"
-    chmod +x "${claude_dest}/tools/"*.sh "${claude_dest}/tools/"*.py 2>/dev/null || true
-    cp -rf "${claude_tmpl}/settings/"* "${claude_dest}/settings/"
-    cp -rf "${claude_tmpl}/orchestration/"* "${claude_dest}/orchestration/"
-    cp -f "${claude_tmpl}/CLAUDE.md" "${claude_dest}/CLAUDE.md"
+    mkdir -p "${claude_dest}/agents" "${claude_dest}/skills" "${claude_dest}/rules" "${claude_dest}/commands" "${claude_dest}/settings" "${claude_dest}/tools" "${claude_dest}/orchestration"
 
-    local existing_user_settings="${claude_dest}/settings.json"
-    if [ -f "$existing_user_settings" ] && [ ! -f "${existing_user_settings}.pre-harness.bak" ]; then
-        cp -p "$existing_user_settings" "${existing_user_settings}.pre-harness.bak"
+    find "${claude_dest}/rules" -xtype l -delete 2>/dev/null || true
+    find "${claude_dest}/skills" -xtype l -delete 2>/dev/null || true
+    find "${claude_dest}/commands" -xtype l -delete 2>/dev/null || true
+    find "${claude_dest}/tools" -xtype l -delete 2>/dev/null || true
+
+    python3 -m harness.installer.compiler \
+        --core-dir "${core_dir}" \
+        --runtime claude \
+        --output-dir "${claude_dest}/agents"
+
+    if [ -f "${USER_HOME}/.gemini/AGENTS.md" ]; then
+        ln -sfn "${USER_HOME}/.gemini/AGENTS.md" "${claude_dest}/CLAUDE.md"
+    else
+        ln -sfn "${core_dir}/CHARTER.md" "${claude_dest}/CLAUDE.md"
     fi
 
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${claude_dest}/rules/$(basename "$r")"
+    done
+
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${claude_dest}/skills/$(basename "$skill_path")"
+        fi
+    done
+
+    for c in "${core_dir}/commands"/*.md; do
+        [ -f "$c" ] || continue
+        ln -sfn "$c" "${claude_dest}/commands/$(basename "$c")"
+    done
+
+    for tool_path in "${canonical_repo}/scripts"/*.py "${canonical_repo}/scripts"/*.sh; do
+        [ -f "$tool_path" ] || continue
+        ln -sfn "$tool_path" "${claude_dest}/tools/$(basename "$tool_path")"
+        chmod +x "$tool_path" 2>/dev/null || true
+    done
+    cp -rf "${canonical_repo}/config/orchestration/"* "${claude_dest}/orchestration/" 2>/dev/null || true
+
+    local template_settings=("${claude_cfg}/settings/core.json")
+    if [ -f "${claude_cfg}/settings/readonly.json" ]; then
+        template_settings+=("${claude_cfg}/settings/readonly.json")
+    fi
     python3 -m harness.installer.settings merge-claude \
         --user-settings "${claude_dest}/settings.json" \
-        --template-settings "${claude_tmpl}/settings/core.json" \
+        --template-settings "${template_settings[@]}" \
         --output "${claude_dest}/settings.json"
+
+    python3 -m harness.installer.config_sync sync-claude \
+        --claude-json "${claude_json}" \
+        --repo-dir "${canonical_repo}" \
+        --py-bin "${py_bin}" \
+        --orch-dir "${orch_dest}"
 
     echo "  ✅ Installed Claude Code agents, skills, and configuration to ${claude_dest}/"
 }
@@ -863,11 +980,12 @@ EOF
         chmod 0600 "$env_file"
     fi
 
+    local canonical_repo="$(resolve_canonical_repo_dir)"
     for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
         if [ -d "$venv_candidate" ]; then
             for sp in "${venv_candidate}"/lib/python*/site-packages; do
                 if [ -d "$sp" ]; then
-                    printf '%s\n' "${SCRIPT_DIR}" > "${sp}/agent_harness.pth"
+                    printf '%s\n' "${canonical_repo}" > "${sp}/agent_harness.pth"
                     echo "  🔗 Linked agent-harness into SGLang venv: ${sp}/agent_harness.pth"
                 fi
             done
@@ -1399,7 +1517,7 @@ verify_backend_healthchecks() {
     local failure_reasons=()
 
     # 1. Start / enable units if systemctl is available
-    if command -v systemctl >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
@@ -1618,11 +1736,12 @@ deploy_opencode_backend_and_units() {
         echo "  ✅ SGLang backend venv verified at ${STACK_DIR}/venv"
     fi
 
+    local canonical_repo="$(resolve_canonical_repo_dir)"
     for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
         if [ -d "$venv_candidate" ]; then
             for sp in "${venv_candidate}"/lib/python*/site-packages; do
                 if [ -d "$sp" ]; then
-                    printf '%s\n' "${SCRIPT_DIR}" > "${sp}/agent_harness.pth"
+                    printf '%s\n' "${canonical_repo}" > "${sp}/agent_harness.pth"
                     echo "  🔗 Linked agent-harness into SGLang venv: ${sp}/agent_harness.pth"
                 fi
             done
@@ -1820,7 +1939,7 @@ with open(path, 'w') as f:
     fi
 
     # 5. Reload systemd daemon if available
-    if command -v systemctl >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
         systemctl --user daemon-reload 2>/dev/null || true
     fi
     echo "  ✅ Deployed systemd user units to ${systemd_dest}/"
@@ -1828,10 +1947,16 @@ with open(path, 'w') as f:
 
 install_opencode_global() {
     local opencode_dest="${OPENCODE_HOME_DIR}"
-    local opencode_tmpl="${SCRIPT_DIR}/templates/opencode"
     local legacy_launchers=("opencode-local" "opencode-architect-local" "opencode-worker-local" "opencode-reviewer-local" "opencode-sub-agent-local")
     local backend_env_dir="${BACKEND_DIR}"
     local systemd_dest="${SYSTEMD_USER_DIR}"
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${canonical_repo}/core"
+    local orch_dest="${USER_HOME}/.orchestration"
+    local py_bin="python3"
+    if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
+        py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
+    fi
 
     echo "================================================================================"
     echo "🚀 INSTALLING OPENCODE HARNESS (GLOBAL MODE)"
@@ -1852,7 +1977,9 @@ install_opencode_global() {
             echo "  [DRY-RUN] Would probe GPU hardware and deploy systemd user units to ${systemd_dest}/"
         fi
         echo "  [DRY-RUN] Would prune legacy launchers in ${USER_HOME}/.local/bin/"
-        echo "  [DRY-RUN] Would deploy agents/, commands/, skills/, tools/, rules/, plugins/, themes/, orchestration/, opencode.json to ${opencode_dest}/"
+        echo "  [DRY-RUN] Would compile agents from ${core_dir}/agents to ${opencode_dest}/agents/"
+        echo "  [DRY-RUN] Would symlink rules, skills, commands from ${core_dir}/ to ${opencode_dest}/"
+        echo "  [DRY-RUN] Would configure opencode.json without AGENTS.md in instructions and without compaction/summary subagents"
         return 0
     fi
 
@@ -1863,39 +1990,67 @@ install_opencode_global() {
     done
 
     mkdir -p "${opencode_dest}/agents" "${opencode_dest}/commands" "${opencode_dest}/skills" "${opencode_dest}/tools" "${opencode_dest}/rules" "${opencode_dest}/plugins" "${opencode_dest}/themes" "${opencode_dest}/orchestration"
-    cp -rf "${opencode_tmpl}/agents/"* "${opencode_dest}/agents/"
-    cp -rf "${opencode_tmpl}/commands/"* "${opencode_dest}/commands/"
-    cp -rf "${opencode_tmpl}/skills/"* "${opencode_dest}/skills/"
-    cp -rf "${opencode_tmpl}/tools/"* "${opencode_dest}/tools/"
-    chmod +x "${opencode_dest}/tools/"*.sh "${opencode_dest}/tools/"*.py 2>/dev/null || true
-    cp -rf "${opencode_tmpl}/rules/"* "${opencode_dest}/rules/"
-    cp -rf "${opencode_tmpl}/plugins/"* "${opencode_dest}/plugins/"
-    cp -rf "${opencode_tmpl}/themes/"* "${opencode_dest}/themes/"
-    cp -rf "${opencode_tmpl}/orchestration/"* "${opencode_dest}/orchestration/"
-    cp -f "${opencode_tmpl}/opencode.json" "${opencode_dest}/opencode.json"
-    python3 - "${opencode_dest}/opencode.json" "${USER_HOME}/.orchestration" "${opencode_dest}" <<'PYEOF'
-import json, sys
-from pathlib import Path
-p = Path(sys.argv[1])
-orch = sys.argv[2]
-dest = sys.argv[3]
-if p.is_file():
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        mcp = data.setdefault("mcp", {})
-        for name in ("vault-memory", "worktree-manager"):
-            if name in mcp:
-                mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
-        data["instructions"] = [f"{dest}/AGENTS.md", f"{dest}/rules/*.md"]
-        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    except Exception:
-        pass
-PYEOF
-    cp -f "${opencode_tmpl}/tui.json" "${opencode_dest}/tui.json"
-    cp -f "${opencode_tmpl}/AGENTS.md" "${opencode_dest}/AGENTS.md"
+
+    find "${opencode_dest}/rules" -xtype l -delete 2>/dev/null || true
+    find "${opencode_dest}/skills" -xtype l -delete 2>/dev/null || true
+    find "${opencode_dest}/commands" -xtype l -delete 2>/dev/null || true
+    find "${opencode_dest}/tools" -xtype l -delete 2>/dev/null || true
+
+    rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
+
+    python3 -m harness.installer.compiler \
+        --core-dir "${core_dir}" \
+        --runtime opencode \
+        --output-dir "${opencode_dest}/agents"
+
+    rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
+
+    if [ -f "${USER_HOME}/.gemini/AGENTS.md" ]; then
+        ln -sfn "${USER_HOME}/.gemini/AGENTS.md" "${opencode_dest}/AGENTS.md"
+    else
+        ln -sfn "${core_dir}/CHARTER.md" "${opencode_dest}/AGENTS.md"
+    fi
+
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${opencode_dest}/rules/$(basename "$r")"
+    done
+
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${opencode_dest}/skills/$(basename "$skill_path")"
+        fi
+    done
+
+    for c in "${core_dir}/commands"/*.md; do
+        [ -f "$c" ] || continue
+        ln -sfn "$c" "${opencode_dest}/commands/$(basename "$c")"
+    done
+
+    for tool_path in "${canonical_repo}/scripts"/*.py "${canonical_repo}/scripts"/*.sh; do
+        [ -f "$tool_path" ] || continue
+        ln -sfn "$tool_path" "${opencode_dest}/tools/$(basename "$tool_path")"
+        chmod +x "$tool_path" 2>/dev/null || true
+    done
+
+    cp -rf "${canonical_repo}/config/opencode/plugins/"* "${opencode_dest}/plugins/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/opencode/themes/"* "${opencode_dest}/themes/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/orchestration/"* "${opencode_dest}/orchestration/" 2>/dev/null || true
+    cp -f "${canonical_repo}/config/opencode/tui.json" "${opencode_dest}/tui.json" 2>/dev/null || true
+
+    if [ ! -f "${opencode_dest}/opencode.json" ]; then
+        cp -f "${canonical_repo}/config/opencode/opencode.json" "${opencode_dest}/opencode.json"
+    fi
+
+    python3 -m harness.installer.config_sync sync-opencode \
+        --opencode-json "${opencode_dest}/opencode.json" \
+        --repo-dir "${canonical_repo}" \
+        --py-bin "${py_bin}" \
+        --orch-dir "${orch_dest}" \
+        --opencode-dir "${opencode_dest}"
 
     deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
-    echo "  ✅ Installed OpenCode 10-component hierarchy & systemd backend services to ${opencode_dest}/"
+    echo "  ✅ Installed OpenCode hierarchy & systemd backend services to ${opencode_dest}/"
 }
 
 # --- LOCAL TARGET INSTALLERS --------------------------------------------------
@@ -1904,7 +2059,8 @@ install_agy_local() {
     local repo_path="$TARGET_REPO"
     local dest_orch="${repo_path}/.orchestration"
     local dest_agents="${repo_path}/.agents"
-    local agy_tmpl="${SCRIPT_DIR}/templates/agy"
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${canonical_repo}/core"
 
     echo "================================================================================"
     echo "🚀 INSTALLING AGY HARNESS (LOCAL REPOSITORY MODE)"
@@ -1915,10 +2071,26 @@ install_agy_local() {
     echo "================================================================================"
 
     if [ "$DRY_RUN" = true ]; then
+        echo "  [DRY-RUN] Would migrate legacy .agent/ to .agents/ if present"
         echo "  [DRY-RUN] Would deploy operational assets to ${dest_orch}/"
         echo "  [DRY-RUN] Would create symlink ${dest_agents} -> .orchestration"
+        echo "  [DRY-RUN] Would link workspace instruction files (AGENTS.md, GEMINI.md, CLAUDE.md) when absent"
         echo "  [DRY-RUN] Ensure ${repo_path}/.gitignore ignores .agents/ and .orchestration/worktrees/"
         return 0
+    fi
+
+    # 1. Migrate legacy .agent (singular) to .agents (plural)
+    if [ -d "${repo_path}/.agent" ] && [ ! -L "${repo_path}/.agent" ]; then
+        echo "  ⚠️ Found legacy .agent (singular) in ${repo_path}, migrating to .agents/..."
+        local bak_agent="${repo_path}/.agent.pre-harness.bak"
+        if [ ! -e "$bak_agent" ]; then
+            mv "${repo_path}/.agent" "$bak_agent"
+            echo "  ⚠️ Backed up legacy ${repo_path}/.agent to ${bak_agent}"
+        else
+            rm -rf "${repo_path}/.agent"
+        fi
+    elif [ -L "${repo_path}/.agent" ]; then
+        rm -f "${repo_path}/.agent"
     fi
 
     if [ "$REINSTALL" = true ] && [ -d "$dest_orch" ]; then
@@ -1926,15 +2098,29 @@ install_agy_local() {
     fi
 
     mkdir -p "${dest_orch}/rules" "${dest_orch}/skills" "${dest_orch}/tools" "${dest_orch}/handoffs" "${dest_orch}/orchestration" "${dest_orch}/memory" "${dest_orch}/worktrees" "${dest_orch}/logs" "${dest_orch}/tmp"
-    cp -rf "${agy_tmpl}/rules/"* "${dest_orch}/rules/"
-    cp -rf "${agy_tmpl}/skills/"* "${dest_orch}/skills/"
-    cp -rf "${agy_tmpl}/tools/"* "${dest_orch}/tools/"
-    chmod +x "${dest_orch}/tools/"*.sh 2>/dev/null || true
-    cp -rf "${agy_tmpl}/orchestration/"* "${dest_orch}/orchestration/"
-    cp -f "${agy_tmpl}/handoffs/.gitkeep" "${dest_orch}/handoffs/.gitkeep"
-    touch "${dest_orch}/memory/.gitkeep" "${dest_orch}/logs/.gitkeep" "${dest_orch}/tmp/.gitkeep"
-    cp -f "${agy_tmpl}/GEMINI.md" "${dest_orch}/GEMINI.md"
-    cp -f "${agy_tmpl}/AGENTS.md" "${dest_orch}/AGENTS.md"
+
+    find "${dest_orch}/rules" -xtype l -delete 2>/dev/null || true
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${dest_orch}/rules/$(basename "$r")"
+    done
+
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${dest_orch}/skills/$(basename "$skill_path")"
+        fi
+    done
+
+    for tool_path in "${canonical_repo}/scripts"/*.py "${canonical_repo}/scripts"/*.sh; do
+        [ -f "$tool_path" ] || continue
+        ln -sfn "$tool_path" "${dest_orch}/tools/$(basename "$tool_path")"
+        chmod +x "$tool_path" 2>/dev/null || true
+    done
+
+    cp -rf "${canonical_repo}/config/orchestration/"* "${dest_orch}/orchestration/" 2>/dev/null || true
+    touch "${dest_orch}/handoffs/.gitkeep"
+    ln -sfn "${core_dir}/CHARTER.md" "${dest_orch}/AGENTS.md"
+    ln -sfn "${canonical_repo}/config/agy/GEMINI.md" "${dest_orch}/GEMINI.md"
 
     if [ -L "${dest_agents}" ]; then
         rm -f "${dest_agents}"
@@ -1953,14 +2139,30 @@ install_agy_local() {
     fi
     ln -sfn .orchestration "${dest_agents}"
 
-    ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
+    # Workspace root instruction entrypoints. Real (user-authored) files are never overwritten; only
+    # missing paths or previously harness-created symlinks are (re)linked.
+    link_workspace_entrypoint() {
+        local link_path="$1" link_target="$2"
+        if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+            echo "  ⚠️ Keeping existing ${link_path} (not a symlink); harness entrypoint not linked"
+            return 0
+        fi
+        ln -sfn "$link_target" "$link_path"
+    }
+    link_workspace_entrypoint "${repo_path}/AGENTS.md" ".agents/AGENTS.md"
+    link_workspace_entrypoint "${repo_path}/GEMINI.md" ".agents/GEMINI.md"
+    link_workspace_entrypoint "${repo_path}/CLAUDE.md" "AGENTS.md"
+
+    ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".claude/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
     echo "  ✅ Installed Antigravity operational assets to ${dest_orch}/ and linked ${dest_agents}"
 }
 
 install_claude_local() {
     local repo_path="$TARGET_REPO"
     local dest_claude="${repo_path}/.claude"
-    local claude_tmpl="${SCRIPT_DIR}/templates/claude"
+    local claude_cfg="${SCRIPT_DIR}/config/claude"
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${canonical_repo}/core"
 
     echo "================================================================================"
     echo "🚀 INSTALLING CLAUDE CODE HARNESS (LOCAL REPOSITORY MODE)"
@@ -1976,24 +2178,50 @@ install_claude_local() {
         return 0
     fi
 
-    mkdir -p "${dest_claude}/agents" "${dest_claude}/skills" "${dest_claude}/rules" "${dest_claude}/settings" "${dest_claude}/tools" "${dest_claude}/orchestration"
-    cp -rf "${claude_tmpl}/agents/"* "${dest_claude}/agents/"
-    cp -rf "${claude_tmpl}/skills/"* "${dest_claude}/skills/"
-    cp -rf "${claude_tmpl}/rules/"* "${dest_claude}/rules/"
-    cp -rf "${claude_tmpl}/tools/"* "${dest_claude}/tools/"
-    chmod +x "${dest_claude}/tools/"*.sh "${dest_claude}/tools/"*.py 2>/dev/null || true
-    cp -rf "${claude_tmpl}/settings/"* "${dest_claude}/settings/"
-    cp -rf "${claude_tmpl}/orchestration/"* "${dest_claude}/orchestration/"
-    cp -f "${claude_tmpl}/CLAUDE.md" "${dest_claude}/CLAUDE.md"
+    mkdir -p "${dest_claude}/agents" "${dest_claude}/skills" "${dest_claude}/rules" "${dest_claude}/commands" "${dest_claude}/settings" "${dest_claude}/tools" "${dest_claude}/orchestration"
 
-    local existing_user_settings="${dest_claude}/settings.json"
-    if [ -f "$existing_user_settings" ] && [ ! -f "${existing_user_settings}.pre-harness.bak" ]; then
-        cp -p "$existing_user_settings" "${existing_user_settings}.pre-harness.bak"
+    find "${dest_claude}/rules" -xtype l -delete 2>/dev/null || true
+    find "${dest_claude}/skills" -xtype l -delete 2>/dev/null || true
+    find "${dest_claude}/commands" -xtype l -delete 2>/dev/null || true
+    find "${dest_claude}/tools" -xtype l -delete 2>/dev/null || true
+
+    python3 -m harness.installer.compiler \
+        --core-dir "${core_dir}" \
+        --runtime claude \
+        --output-dir "${dest_claude}/agents"
+
+    ln -sfn "${core_dir}/CHARTER.md" "${dest_claude}/CLAUDE.md"
+
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${dest_claude}/rules/$(basename "$r")"
+    done
+
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${dest_claude}/skills/$(basename "$skill_path")"
+        fi
+    done
+
+    for c in "${core_dir}/commands"/*.md; do
+        [ -f "$c" ] || continue
+        ln -sfn "$c" "${dest_claude}/commands/$(basename "$c")"
+    done
+
+    for tool_path in "${canonical_repo}/scripts"/*.py "${canonical_repo}/scripts"/*.sh; do
+        [ -f "$tool_path" ] || continue
+        ln -sfn "$tool_path" "${dest_claude}/tools/$(basename "$tool_path")"
+        chmod +x "$tool_path" 2>/dev/null || true
+    done
+    cp -rf "${canonical_repo}/config/orchestration/"* "${dest_claude}/orchestration/" 2>/dev/null || true
+
+    local template_settings=("${claude_cfg}/settings/core.json")
+    if [ -f "${claude_cfg}/settings/readonly.json" ]; then
+        template_settings+=("${claude_cfg}/settings/readonly.json")
     fi
-
     python3 -m harness.installer.settings merge-claude \
         --user-settings "${dest_claude}/settings.json" \
-        --template-settings "${claude_tmpl}/settings/core.json" \
+        --template-settings "${template_settings[@]}" \
         --output "${dest_claude}/settings.json"
 
     ensure_gitignore_entries "${repo_path}/.gitignore" ".claude/" ".orchestration_root"
@@ -2003,7 +2231,12 @@ install_claude_local() {
 install_opencode_local() {
     local repo_path="$TARGET_REPO"
     local dest_opencode="${repo_path}/.opencode"
-    local opencode_tmpl="${SCRIPT_DIR}/templates/opencode"
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${canonical_repo}/core"
+    local py_bin="python3"
+    if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
+        py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
+    fi
 
     echo "================================================================================"
     echo "🚀 INSTALLING OPENCODE HARNESS (LOCAL REPOSITORY MODE)"
@@ -2019,34 +2252,60 @@ install_opencode_local() {
     fi
 
     mkdir -p "${dest_opencode}/agents" "${dest_opencode}/commands" "${dest_opencode}/skills" "${dest_opencode}/tools" "${dest_opencode}/rules" "${dest_opencode}/plugins" "${dest_opencode}/themes" "${dest_opencode}/orchestration"
-    cp -rf "${opencode_tmpl}/agents/"* "${dest_opencode}/agents/"
-    cp -rf "${opencode_tmpl}/commands/"* "${dest_opencode}/commands/"
-    cp -rf "${opencode_tmpl}/skills/"* "${dest_opencode}/skills/"
-    cp -rf "${opencode_tmpl}/tools/"* "${dest_opencode}/tools/"
-    chmod +x "${dest_opencode}/tools/"*.sh "${dest_opencode}/tools/"*.py 2>/dev/null || true
-    cp -rf "${opencode_tmpl}/rules/"* "${dest_opencode}/rules/"
-    cp -rf "${opencode_tmpl}/plugins/"* "${dest_opencode}/plugins/"
-    cp -rf "${opencode_tmpl}/themes/"* "${dest_opencode}/themes/"
-    cp -rf "${opencode_tmpl}/orchestration/"* "${dest_opencode}/orchestration/"
-    cp -f "${opencode_tmpl}/opencode.json" "${dest_opencode}/opencode.json"
-    python3 - "${dest_opencode}/opencode.json" "${repo_path}/.orchestration" <<'PYEOF'
-import json, sys
-from pathlib import Path
-p = Path(sys.argv[1])
-orch = sys.argv[2]
-if p.is_file():
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        mcp = data.setdefault("mcp", {})
-        for name in ("vault-memory", "worktree-manager"):
-            if name in mcp:
-                mcp[name].setdefault("environment", {})["ORCHESTRATION_ROOT"] = orch
-        p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    except Exception:
-        pass
-PYEOF
-    cp -f "${opencode_tmpl}/tui.json" "${dest_opencode}/tui.json"
-    cp -f "${opencode_tmpl}/AGENTS.md" "${dest_opencode}/AGENTS.md"
+
+    find "${dest_opencode}/rules" -xtype l -delete 2>/dev/null || true
+    find "${dest_opencode}/skills" -xtype l -delete 2>/dev/null || true
+    find "${dest_opencode}/commands" -xtype l -delete 2>/dev/null || true
+    find "${dest_opencode}/tools" -xtype l -delete 2>/dev/null || true
+
+    rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
+
+    python3 -m harness.installer.compiler \
+        --core-dir "${core_dir}" \
+        --runtime opencode \
+        --output-dir "${dest_opencode}/agents"
+
+    rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
+
+    ln -sfn "${core_dir}/CHARTER.md" "${dest_opencode}/AGENTS.md"
+
+    for r in "${core_dir}/rules"/*.md; do
+        [ -f "$r" ] || continue
+        ln -sfn "$r" "${dest_opencode}/rules/$(basename "$r")"
+    done
+
+    for skill_path in "${core_dir}/skills"/*; do
+        if [ -d "$skill_path" ]; then
+            ln -sfn "$skill_path" "${dest_opencode}/skills/$(basename "$skill_path")"
+        fi
+    done
+
+    for c in "${core_dir}/commands"/*.md; do
+        [ -f "$c" ] || continue
+        ln -sfn "$c" "${dest_opencode}/commands/$(basename "$c")"
+    done
+
+    for tool_path in "${canonical_repo}/scripts"/*.py "${canonical_repo}/scripts"/*.sh; do
+        [ -f "$tool_path" ] || continue
+        ln -sfn "$tool_path" "${dest_opencode}/tools/$(basename "$tool_path")"
+        chmod +x "$tool_path" 2>/dev/null || true
+    done
+
+    cp -rf "${canonical_repo}/config/opencode/plugins/"* "${dest_opencode}/plugins/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/opencode/themes/"* "${dest_opencode}/themes/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/orchestration/"* "${dest_opencode}/orchestration/" 2>/dev/null || true
+    cp -f "${canonical_repo}/config/opencode/tui.json" "${dest_opencode}/tui.json" 2>/dev/null || true
+
+    if [ ! -f "${dest_opencode}/opencode.json" ]; then
+        cp -f "${canonical_repo}/config/opencode/opencode.json" "${dest_opencode}/opencode.json"
+    fi
+
+    python3 -m harness.installer.config_sync sync-opencode \
+        --opencode-json "${dest_opencode}/opencode.json" \
+        --repo-dir "${canonical_repo}" \
+        --py-bin "${py_bin}" \
+        --orch-dir "${repo_path}/.orchestration" \
+        --opencode-dir "${dest_opencode}"
 
     if [ "$ENABLE_SYSTEMD" = true ]; then
         setup_backend_environment "${BACKEND_DIR}"
@@ -2295,14 +2554,14 @@ run_uninstall() {
                 for u in "${systemd_user_dir}"/opencode-*.service "${systemd_user_dir}"/opencode-*.timer "${systemd_user_dir}"/opencode-*.slice; do
                     if [ -f "$u" ]; then
                         local unit_name="$(basename "$u")"
-                        if command -v systemctl >/dev/null 2>&1; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
                             systemctl --user stop "$unit_name" 2>/dev/null || true
                             systemctl --user disable "$unit_name" 2>/dev/null || true
                         fi
                         rm -f "$u"
                     fi
                 done
-                if command -v systemctl >/dev/null 2>&1; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
                     systemctl --user daemon-reload 2>/dev/null || true
                 fi
             fi

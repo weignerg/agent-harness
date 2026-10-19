@@ -28,28 +28,32 @@ Rather than maintaining fragmented scripts, skills, and configuration rules acro
 
 ```
 agent-harness/
+├── core/                         # Single Source of Truth (SSOT)
+│   ├── CHARTER.md                # Authoritative master system prompt
+│   ├── manifest.json             # Logical tiers, roles, tool access, permissions
+│   ├── rules/                    # 5 canonical modular rules
+│   ├── skills/                   # 7 canonical agent skills
+│   ├── commands/                 # 7 canonical slash commands
+│   └── agents/                   # 8 canonical agent role definitions
 ├── harness/                      # Canonical Python package
-│   ├── installer/                # Atomic manifest engine, settings mergers, and hash verifiers
+│   ├── installer/                # Atomic manifest engine, compilers, settings mergers
 │   ├── memory/                   # Polymorphic memory, ColBERTv2 MaxSim engine, context anchors
 │   ├── runtime/                  # Dynamic engine adapters (agy, claude, opencode)
 │   ├── mcp/                      # FastMCP tool servers (vault-memory, worktree-manager, tool-runner)
 │   ├── orchestrator/             # State machine, routing, escalation & recovery
 │   └── security/                 # Red team perimeter guards, secret broker
-├── templates/
-│   ├── shared/                   # Canonical rules & skills across all engines
-│   │   ├── rules/                # agent-teams.md, code-quality.md, git-workflow.md, process-safety.md
-│   │   └── skills/               # 7 canonical skills (adversarial-review, context-anchoring, etc.)
-│   ├── agy/                      # Google Antigravity manifest & Gemini 3.8 charters
-│   ├── claude/                   # Claude Code agent profiles & JSON settings
-│   └── opencode/                 # OpenCode agents, slash commands, opencode.json & blackwell theme
-├── scripts/                      # Autonomous operational tools (gpu_probe, worktree_manager, tdd_pipeline)
-├── config/
-│   ├── systemd/                  # 21 SGLang model services, opencode-server, slice, and timers
+├── config/                       # Runtime configs & infrastructure definitions
+│   ├── opencode/                 # opencode.json, tui.json, themes, plugins
+│   ├── claude/                   # settings (core.json, readonly.json, statusline.json)
+│   ├── agy/                      # GEMINI.md runtime addendum, agent-harness plugin.json
+│   ├── orchestration/            # supreme/team orchestrators, read-only block
+│   ├── systemd/                  # SGLang model services, opencode-server, slice, and timers
 │   ├── models/                   # Universal model catalog mapping backends to hardware targets
-│   └── sysctl/                   # Linux kernel ML tuning profiles
+│   └── sysctl.d/                 # Linux kernel ML tuning profiles
+├── scripts/                      # Autonomous operational tools (gpu_probe, worktree_manager, tdd_pipeline)
 ├── vault/                        # Obsidian-compatible entity knowledge vault
 ├── docs/                         # Architectural specifications, governance, and memory designs
-└── tests/                        # 147 unit tests and 11 shell regression test suites
+└── tests/                        # Full unit and shell regression test suite
 ```
 
 ---

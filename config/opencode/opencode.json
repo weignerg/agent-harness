@@ -1,0 +1,139 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ornith-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ornith Local SGLang (Port 30000, direct)",
+      "options": {
+        "baseURL": "http://127.0.0.1:30000/v1",
+        "apiKey": "EMPTY"
+      },
+      "models": {
+        "ornith-1.5-35b": {
+          "name": "Ornith 1.5 35B-A3B MoE (Workhorse Model)"
+        },
+        "ornith-1.5-9b": {
+          "name": "Ornith 1.5 9B (Fast Model)"
+        }
+      }
+    },
+    "anthropic": {
+      "npm": "@ai-sdk/anthropic",
+      "name": "Anthropic Claude (Cloud Fallback)",
+      "options": {
+        "apiKey": "{env:ANTHROPIC_API_KEY}"
+      },
+      "models": {
+        "claude-3-7-sonnet": {
+          "name": "Claude 3.7 Sonnet (Cloud Fallback)"
+        },
+        "claude-3-5-haiku": {
+          "name": "Claude 3.5 Haiku (Cloud Fallback Fast)"
+        }
+      }
+    },
+    "google": {
+      "npm": "@ai-sdk/google",
+      "name": "Google Gemini (Cloud Fallback)",
+      "options": {
+        "apiKey": "{env:GEMINI_API_KEY}"
+      },
+      "models": {
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro (Cloud Fallback)"
+        },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash (Cloud Fallback Fast)"
+        }
+      }
+    }
+  },
+  "mcp": {
+    "vault-memory": {
+      "type": "local",
+      "command": [
+        "sh",
+        "-c",
+        "PY=\"${HOME}/.local/share/opencode-sglang-stack/venv/bin/python\"; if [ ! -x \"$PY\" ]; then PY=\"python3\"; fi; exec \"$PY\" -m harness.mcp.vault_server"
+      ],
+      "environment": {
+        "ORCHESTRATION_ROOT": "{env:ORCHESTRATION_ROOT}"
+      },
+      "enabled": true
+    },
+    "worktree-manager": {
+      "type": "local",
+      "command": [
+        "sh",
+        "-c",
+        "PY=\"${HOME}/.local/share/opencode-sglang-stack/venv/bin/python\"; if [ ! -x \"$PY\" ]; then PY=\"python3\"; fi; exec \"$PY\" -m harness.mcp.worktree_server"
+      ],
+      "environment": {
+        "ORCHESTRATION_ROOT": "{env:ORCHESTRATION_ROOT}"
+      },
+      "enabled": true
+    }
+  },
+  "instructions": [
+    ".opencode/rules/*.md"
+  ],
+  "model": "ornith-local/ornith-1.5-35b",
+  "default_agent": "supreme-orchestrator",
+  "subagent_depth": 3,
+  "small_model": "ornith-local/ornith-1.5-9b",
+  "permission": {
+    "bash": "allow",
+    "read": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "external_directory": "allow"
+  },
+  "agent": {
+    "supreme-orchestrator": {
+      "model": "ornith-local/ornith-1.5-35b",
+      "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
+      "tools": {
+        "question": true
+      }
+    },
+    "team-orchestrator": {
+      "model": "ornith-local/ornith-1.5-35b",
+      "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges",
+      "tools": {
+        "question": true
+      }
+    },
+    "architect": {
+      "model": "ornith-local/ornith-1.5-35b",
+      "description": "Subsystem design, codebase surveys, high-context refactor blueprints, and dependency topology; calls scout for searches"
+    },
+    "worker": {
+      "model": "ornith-local/ornith-1.5-35b",
+      "description": "Implementation, refactoring, test authoring, and commits; calls grunt and scout"
+    },
+    "tester": {
+      "model": "ornith-local/ornith-1.5-35b",
+      "description": "Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout"
+    },
+    "reviewer": {
+      "model": "ornith-local/ornith-1.5-35b",
+      "description": "Adversarial code reviewer and security gatekeeper; calls scout only for searches"
+    },
+    "scout": {
+      "model": "ornith-local/ornith-1.5-9b",
+      "description": "Read-only 9B search subagent: grep, file discovery, large-scale context consolidation"
+    },
+    "grunt": {
+      "model": "ornith-local/ornith-1.5-9b",
+      "description": "9B leaf subagent: atomic simple edits, localized checks, small searches"
+    },
+    "summary": {
+      "model": "ornith-local/ornith-1.5-9b",
+      "description": "Commit summary and change log synthesis"
+    },
+    "compaction": {
+      "model": "ornith-local/ornith-1.5-9b",
+      "description": "Conversation context compaction and pruning"
+    }
+  }
+}

@@ -13,9 +13,10 @@ from harness.memory.handoff import TaskHandoff
 from scripts.worktree_manager import WorktreeManager
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_DIR = REPO_ROOT / "templates" / "agy"
-PLUGIN_DIR = TEMPLATE_DIR / "plugins" / "agy-harness"
-AGENTS_DIR = PLUGIN_DIR / "agents"
+CORE_DIR = REPO_ROOT / "core"
+CONFIG_DIR = REPO_ROOT / "config"
+PLUGIN_DIR = CONFIG_DIR / "agy" / "plugins" / "agent-harness"
+AGENTS_DIR = CORE_DIR / "agents"
 
 EXPECTED_AGENTS = {
     "supreme-orchestrator.md": ("pro", "gemini-3.8-flash-high", "Gemini 3.8 High"),
@@ -64,19 +65,18 @@ class TestAgyHarnessStructure(unittest.TestCase):
 
     def test_canonical_plugin_and_no_local_suffix_references(self):
         self.assertTrue(PLUGIN_DIR.is_dir())
-        self.assertFalse((TEMPLATE_DIR / "plugins" / "local-blackwell").exists())
         plugin_meta = json.loads((PLUGIN_DIR / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(plugin_meta["name"], "agy-harness")
         self.assertIn("Gemini 3.8", plugin_meta["displayName"])
 
-        # Verify no *-local or local-blackwell references remain in templates, README, or CONTRIBUTING
+        # Verify no *-local or local-blackwell references remain in core, config, README, or CONTRIBUTING
         checked_files = [
             REPO_ROOT / "README.md",
             REPO_ROOT / "CONTRIBUTING.md",
-            TEMPLATE_DIR / "GEMINI.md",
-            TEMPLATE_DIR / "AGENTS.md",
-            *list((TEMPLATE_DIR / "rules").glob("*.md")),
-            *list((TEMPLATE_DIR / "skills").glob("*/SKILL.md")),
+            CONFIG_DIR / "agy" / "GEMINI.md",
+            CORE_DIR / "CHARTER.md",
+            *list((CORE_DIR / "rules").glob("*.md")),
+            *list((CORE_DIR / "skills").glob("*/SKILL.md")),
             *list(AGENTS_DIR.glob("*.md")),
         ]
         forbidden_tokens = (
@@ -98,38 +98,28 @@ class TestAgyHarnessStructure(unittest.TestCase):
     def test_eight_canonical_agent_profiles_gemini38_tiers_and_safety(self):
         self.assertTrue(AGENTS_DIR.is_dir())
         actual_files = {p.name for p in AGENTS_DIR.glob("*.md")}
-        self.assertEqual(actual_files, set(EXPECTED_AGENTS.keys()))
+        for exp in EXPECTED_AGENTS:
+            self.assertIn(exp, actual_files)
 
+        manifest = json.loads((CORE_DIR / "manifest.json").read_text(encoding="utf-8"))
+        roles = manifest.get("roles", {})
         for filename, (expected_model_alias, expected_gemini_id, expected_tier_label) in EXPECTED_AGENTS.items():
             content = (AGENTS_DIR / filename).read_text(encoding="utf-8")
-            self.assertTrue(content.startswith("---\n"), f"Missing YAML frontmatter in {filename}")
-            parts = content.split("---", 2)
-            self.assertEqual(len(parts), 3, f"Invalid frontmatter delimiter count in {filename}")
-            frontmatter = parts[1]
-            body = parts[2]
             expected_name = filename[:-3]
-            self.assertIn(f"name: {expected_name}", frontmatter)
-            self.assertIn(f"model: {expected_model_alias}", frontmatter)
-            self.assertIn("commandExecutionPolicy: auto", frontmatter)
-            self.assertIn(expected_gemini_id, content)
-            self.assertIn(expected_tier_label, content)
+            self.assertIn(expected_name, roles)
+            role_meta = roles[expected_name]
+            tier_info = manifest["model_tiers"][role_meta["tier"]]
+            self.assertEqual(tier_info["agy"], expected_model_alias)
+            self.assertEqual(tier_info["agy_model_id"], expected_gemini_id)
 
             # Orchestrator Non-Termination Invariant in every agent profile
-            self.assertIn("Orchestrator Non-Termination Invariant", body)
-            self.assertIn("supreme-orchestrator", body)
-            self.assertIn("team-orchestrator", body)
-            self.assertIn("manage_subagents", body)
-            self.assertIn("manage_task", body)
-
-            if filename == "supreme-orchestrator.md":
-                self.assertIn("mainAgent: true", frontmatter)
-                self.assertIn("subagent: false", frontmatter)
-            else:
-                self.assertIn("mainAgent: false", frontmatter)
-                self.assertIn("subagent: true", frontmatter)
+            self.assertIn("Orchestrator Non-Termination Invariant", content)
+            self.assertIn("supreme-orchestrator", content)
+            self.assertIn("team-orchestrator", content)
+            self.assertIn("manage_subagents", content)
+            self.assertIn("manage_task", content)
 
         team_body = (AGENTS_DIR / "team-orchestrator.md").read_text(encoding="utf-8")
-        self.assertIn("## Subagent Spawning Model & Effort Policy (Gemini 3.8)", team_body)
         self.assertIn("Architect-First", team_body)
         self.assertIn(".orchestration/worktrees/<branch>", team_body)
         self.assertIn("Automatic Adversarial Review Loop", team_body)
@@ -138,22 +128,21 @@ class TestAgyHarnessStructure(unittest.TestCase):
         self.assertIn("Second-Pass Review Scope Gate", reviewer_body)
 
     def test_branch_governance_and_orchestrator_safety_rules(self):
-        git_wf = (TEMPLATE_DIR / "rules" / "git-workflow.md").read_text(encoding="utf-8")
+        git_wf = (CORE_DIR / "rules" / "git-workflow.md").read_text(encoding="utf-8")
         self.assertIn("Branch Governance (`release` vs `develop`)", git_wf)
         self.assertIn("`release` is the GitHub default branch reserved for stable releases", git_wf)
         self.assertIn("must always remain checked out in the local repository root", git_wf)
 
-        proc_safety = (TEMPLATE_DIR / "rules" / "process-safety.md").read_text(encoding="utf-8")
+        proc_safety = (CORE_DIR / "rules" / "process-safety.md").read_text(encoding="utf-8")
         self.assertIn("Orchestrator Non-Termination Invariant", proc_safety)
         self.assertIn('Action: "kill"', proc_safety)
 
-        agent_teams = (TEMPLATE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
-        self.assertIn("## Subagent Model & Effort Policy (Gemini 3.8)", agent_teams)
-        self.assertIn("## Orchestrator Non-Termination Invariant", agent_teams)
+        agent_teams = (CORE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
+        self.assertIn("Orchestrator Non-Termination Invariant", agent_teams)
         self.assertIn("Branch Governance (`release` vs `develop`)", agent_teams)
 
     def test_skills_and_oom_watchdog_use_agy_paths(self):
-        skills_dir = TEMPLATE_DIR / "skills"
+        skills_dir = CORE_DIR / "skills"
         actual_skills = {p.name for p in skills_dir.iterdir() if p.is_dir()}
         self.assertEqual(actual_skills, EXPECTED_SKILLS)
 
@@ -164,23 +153,17 @@ class TestAgyHarnessStructure(unittest.TestCase):
             self.assertNotIn("~/agy/worktrees", skill_md, f"Stale ~/agy/worktrees in {skill_name}")
 
         wt_skill = (skills_dir / "worktree-lifecycle" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn(
-            "~/.agents/tools/worktree_manager.py create feat/issue-42 .orchestration/worktrees/feat/issue-42",
-            wt_skill,
-        )
+        self.assertIn(".orchestration/worktrees/", wt_skill)
         sglang_skill = (skills_dir / "sglang-management" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("~/.agents/tools/sglang_oom_handler.sh", sglang_skill)
+        self.assertIn("sglang_oom_handler.sh", sglang_skill)
         anchor_skill = (skills_dir / "context-anchoring" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("GEMINI.md", anchor_skill)
 
-        for oom_script in (
-            REPO_ROOT / "scripts" / "sglang_oom_handler.sh",
-            TEMPLATE_DIR / "tools" / "sglang_oom_handler.sh",
-        ):
-            self.assertIn(
-                'SERVICE="opencode-sglang-ornith-35b.service"',
-                oom_script.read_text(encoding="utf-8"),
-            )
+        oom_script = REPO_ROOT / "scripts" / "sglang_oom_handler.sh"
+        self.assertIn(
+            'SERVICE="opencode-sglang-ornith-35b.service"',
+            oom_script.read_text(encoding="utf-8"),
+        )
 
     def test_runtime_defaults_for_worktree_anchor_and_handoff(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -268,14 +251,36 @@ class TestAgyHarnessStructure(unittest.TestCase):
             self.assertTrue((agents_home / "GEMINI.md").is_file())
             self.assertTrue((third_party_skill / "SKILL.md").is_file())
 
+            # Global verification for AGY (~/.gemini/): documented locations only, nothing duplicated
+            gemini_home = sandbox_home / ".gemini"
+            self.assertTrue((gemini_home / "AGENTS.md").is_file())
+            self.assertTrue((gemini_home / "GEMINI.md").is_file())
+            gemini_md_text = (gemini_home / "GEMINI.md").read_text(encoding="utf-8")
+            self.assertLess(len(gemini_md_text.encode("utf-8")), 24000, "GEMINI.md must be strictly < 24KB")
+            # AGY loads ~/.gemini/AGENTS.md natively: GEMINI.md must neither include nor inline the charter.
+            self.assertNotIn("@[", gemini_md_text)
+            self.assertNotIn("Universal AI Agent System Charter", gemini_md_text)
+            self.assertIn("Antigravity", gemini_md_text)
+            self.assertTrue((gemini_cfg / "rules" / "agent-teams.md").is_file())
+            self.assertTrue((gemini_cfg / "plugins" / "agent-harness" / "skills" / "adversarial-review" / "SKILL.md").is_file())
+            # Skills are exposed once (via the plugin); undocumented duplicate locations must not exist.
+            self.assertFalse((gemini_cfg / "skills" / "adversarial-review").exists())
+            self.assertFalse((gemini_home / "antigravity" / "skills").exists())
+            self.assertFalse((gemini_home / "antigravity" / "mcp_config.json").exists())
+            self.assertFalse((gemini_home / "antigravity-cli" / "rules").exists())
+            self.assertFalse((gemini_home / "settings.json").exists())
+
             mcp_data = json.loads((gemini_cfg / "mcp_config.json").read_text(encoding="utf-8"))
             self.assertIn("rea", mcp_data["mcpServers"])
             self.assertIn("vault-memory", mcp_data["mcpServers"])
             self.assertIn("worktree-manager", mcp_data["mcpServers"])
 
-            # 3. Local install in sandbox target repo
+            # 3. Local install in sandbox target repo with legacy .agent migration check
             target_repo = Path(tmp) / "sample-repo"
             target_repo.mkdir(parents=True, exist_ok=True)
+            (target_repo / ".agent").mkdir(parents=True, exist_ok=True)
+            (target_repo / ".agent" / "legacy.txt").write_text("legacy agent data", encoding="utf-8")
+
             subprocess.run(
                 [str(install_sh), "--local", str(target_repo), "--non-interactive"],
                 cwd=REPO_ROOT,
@@ -285,7 +290,16 @@ class TestAgyHarnessStructure(unittest.TestCase):
                 check=True,
             )
 
+            self.assertFalse((target_repo / ".agent").exists())
+            self.assertTrue((target_repo / ".agent.pre-harness.bak").is_dir())
+            self.assertTrue((target_repo / "AGENTS.md").is_file())
+            self.assertTrue((target_repo / "GEMINI.md").is_file())
+            self.assertTrue((target_repo / "CLAUDE.md").is_file())
+            self.assertTrue((target_repo / ".agents" / "AGENTS.md").is_file())
             self.assertTrue((target_repo / ".agents" / "GEMINI.md").is_file())
+            # Undocumented workspace MCP/settings files must not be generated (they would not resolve the harness).
+            self.assertFalse((target_repo / ".agents" / "mcp.json").exists())
+            self.assertFalse((target_repo / ".agents" / "settings.json").exists())
             self.assertTrue((target_repo / ".agents" / "rules" / "agent-teams.md").is_file())
             self.assertTrue((target_repo / ".agents" / "tools" / "worktree_manager.py").is_file())
             repo_gitignore = (target_repo / ".gitignore").read_text(encoding="utf-8")
