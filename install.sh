@@ -658,7 +658,7 @@ install_agy_global() {
 
     mkdir -p "${plugin_dest}/agents"
     mkdir -p "${plugin_dest}/skills"
-    cp -f "${canonical_repo}/templates/agy/plugins/agy-harness/plugin.json" "${plugin_dest}/plugin.json" 2>/dev/null || cat <<'EOF' > "${plugin_dest}/plugin.json"
+    cp -f "${canonical_repo}/config/agy/plugins/agent-harness/plugin.json" "${plugin_dest}/plugin.json" 2>/dev/null || cat <<'EOF' > "${plugin_dest}/plugin.json"
 {
   "name": "agent-harness",
   "version": "1.0.0",
@@ -718,10 +718,10 @@ EOF
         ln -sfn "$tool_path" "${orch_dest}/tools/$(basename "$tool_path")"
         chmod +x "$tool_path" 2>/dev/null || true
     done
-    cp -rf "${canonical_repo}/templates/agy/orchestration/"* "${orch_dest}/orchestration/" 2>/dev/null || true
-    cp -f "${canonical_repo}/templates/agy/handoffs/.gitkeep" "${orch_dest}/handoffs/.gitkeep" 2>/dev/null || touch "${orch_dest}/handoffs/.gitkeep"
+    cp -rf "${canonical_repo}/config/orchestration/"* "${orch_dest}/orchestration/" 2>/dev/null || true
+    touch "${orch_dest}/handoffs/.gitkeep"
     ln -sfn "${core_dir}/CHARTER.md" "${orch_dest}/AGENTS.md"
-    ln -sfn "${canonical_repo}/templates/agy/GEMINI.md" "${orch_dest}/GEMINI.md"
+    ln -sfn "${canonical_repo}/config/agy/GEMINI.md" "${orch_dest}/GEMINI.md"
 
     if [ -L "${agents_link}" ]; then
         rm -f "${agents_link}"
@@ -746,7 +746,7 @@ EOF
         --gemini-md "${gemini_md}" \
         --charter "${core_dir}/CHARTER.md" \
         --rules-dir "${core_dir}/rules" \
-        --template "${canonical_repo}/templates/agy/GEMINI.md"
+        --template "${canonical_repo}/config/agy/GEMINI.md"
 
     python3 -m harness.installer.config_sync sync-agy-mcp \
         --mcp-config "${mcp_config}" \
@@ -774,7 +774,7 @@ EOF
 install_claude_global() {
     local claude_dest="${CLAUDE_HOME_DIR}"
     local claude_json="${USER_HOME}/.claude.json"
-    local claude_tmpl="${SCRIPT_DIR}/templates/claude"
+    local claude_cfg="${SCRIPT_DIR}/config/claude"
     local canonical_repo="$(resolve_canonical_repo_dir)"
     local core_dir="${canonical_repo}/core"
     local orch_dest="${USER_HOME}/.orchestration"
@@ -837,11 +837,11 @@ install_claude_global() {
         ln -sfn "$tool_path" "${claude_dest}/tools/$(basename "$tool_path")"
         chmod +x "$tool_path" 2>/dev/null || true
     done
-    cp -rf "${claude_tmpl}/orchestration/"* "${claude_dest}/orchestration/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/orchestration/"* "${claude_dest}/orchestration/" 2>/dev/null || true
 
-    local template_settings=("${claude_tmpl}/settings/core.json")
-    if [ -f "${claude_tmpl}/settings/readonly.json" ]; then
-        template_settings+=("${claude_tmpl}/settings/readonly.json")
+    local template_settings=("${claude_cfg}/settings/core.json")
+    if [ -f "${claude_cfg}/settings/readonly.json" ]; then
+        template_settings+=("${claude_cfg}/settings/readonly.json")
     fi
     python3 -m harness.installer.settings merge-claude \
         --user-settings "${claude_dest}/settings.json" \
@@ -2033,13 +2033,13 @@ install_opencode_global() {
         chmod +x "$tool_path" 2>/dev/null || true
     done
 
-    cp -rf "${canonical_repo}/templates/opencode/plugins/"* "${opencode_dest}/plugins/" 2>/dev/null || true
-    cp -rf "${canonical_repo}/templates/opencode/themes/"* "${opencode_dest}/themes/" 2>/dev/null || true
-    cp -rf "${canonical_repo}/templates/opencode/orchestration/"* "${opencode_dest}/orchestration/" 2>/dev/null || true
-    cp -f "${canonical_repo}/templates/opencode/tui.json" "${opencode_dest}/tui.json" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/opencode/plugins/"* "${opencode_dest}/plugins/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/opencode/themes/"* "${opencode_dest}/themes/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/orchestration/"* "${opencode_dest}/orchestration/" 2>/dev/null || true
+    cp -f "${canonical_repo}/config/opencode/tui.json" "${opencode_dest}/tui.json" 2>/dev/null || true
 
     if [ ! -f "${opencode_dest}/opencode.json" ]; then
-        cp -f "${canonical_repo}/templates/opencode/opencode.json" "${opencode_dest}/opencode.json"
+        cp -f "${canonical_repo}/config/opencode/opencode.json" "${opencode_dest}/opencode.json"
     fi
 
     python3 -m harness.installer.config_sync sync-opencode \
@@ -2117,10 +2117,10 @@ install_agy_local() {
         chmod +x "$tool_path" 2>/dev/null || true
     done
 
-    cp -rf "${canonical_repo}/templates/agy/orchestration/"* "${dest_orch}/orchestration/" 2>/dev/null || true
-    cp -f "${canonical_repo}/templates/agy/handoffs/.gitkeep" "${dest_orch}/handoffs/.gitkeep" 2>/dev/null || touch "${dest_orch}/handoffs/.gitkeep"
+    cp -rf "${canonical_repo}/config/orchestration/"* "${dest_orch}/orchestration/" 2>/dev/null || true
+    touch "${dest_orch}/handoffs/.gitkeep"
     ln -sfn "${core_dir}/CHARTER.md" "${dest_orch}/AGENTS.md"
-    ln -sfn "${canonical_repo}/templates/agy/GEMINI.md" "${dest_orch}/GEMINI.md"
+    ln -sfn "${canonical_repo}/config/agy/GEMINI.md" "${dest_orch}/GEMINI.md"
 
     if [ -L "${dest_agents}" ]; then
         rm -f "${dest_agents}"
@@ -2160,7 +2160,7 @@ install_agy_local() {
 install_claude_local() {
     local repo_path="$TARGET_REPO"
     local dest_claude="${repo_path}/.claude"
-    local claude_tmpl="${SCRIPT_DIR}/templates/claude"
+    local claude_cfg="${SCRIPT_DIR}/config/claude"
     local canonical_repo="$(resolve_canonical_repo_dir)"
     local core_dir="${canonical_repo}/core"
 
@@ -2213,11 +2213,11 @@ install_claude_local() {
         ln -sfn "$tool_path" "${dest_claude}/tools/$(basename "$tool_path")"
         chmod +x "$tool_path" 2>/dev/null || true
     done
-    cp -rf "${claude_tmpl}/orchestration/"* "${dest_claude}/orchestration/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/orchestration/"* "${dest_claude}/orchestration/" 2>/dev/null || true
 
-    local template_settings=("${claude_tmpl}/settings/core.json")
-    if [ -f "${claude_tmpl}/settings/readonly.json" ]; then
-        template_settings+=("${claude_tmpl}/settings/readonly.json")
+    local template_settings=("${claude_cfg}/settings/core.json")
+    if [ -f "${claude_cfg}/settings/readonly.json" ]; then
+        template_settings+=("${claude_cfg}/settings/readonly.json")
     fi
     python3 -m harness.installer.settings merge-claude \
         --user-settings "${dest_claude}/settings.json" \
@@ -2291,13 +2291,13 @@ install_opencode_local() {
         chmod +x "$tool_path" 2>/dev/null || true
     done
 
-    cp -rf "${canonical_repo}/templates/opencode/plugins/"* "${dest_opencode}/plugins/" 2>/dev/null || true
-    cp -rf "${canonical_repo}/templates/opencode/themes/"* "${dest_opencode}/themes/" 2>/dev/null || true
-    cp -rf "${canonical_repo}/templates/opencode/orchestration/"* "${dest_opencode}/orchestration/" 2>/dev/null || true
-    cp -f "${canonical_repo}/templates/opencode/tui.json" "${dest_opencode}/tui.json" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/opencode/plugins/"* "${dest_opencode}/plugins/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/opencode/themes/"* "${dest_opencode}/themes/" 2>/dev/null || true
+    cp -rf "${canonical_repo}/config/orchestration/"* "${dest_opencode}/orchestration/" 2>/dev/null || true
+    cp -f "${canonical_repo}/config/opencode/tui.json" "${dest_opencode}/tui.json" 2>/dev/null || true
 
     if [ ! -f "${dest_opencode}/opencode.json" ]; then
-        cp -f "${canonical_repo}/templates/opencode/opencode.json" "${dest_opencode}/opencode.json"
+        cp -f "${canonical_repo}/config/opencode/opencode.json" "${dest_opencode}/opencode.json"
     fi
 
     python3 -m harness.installer.config_sync sync-opencode \

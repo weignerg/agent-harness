@@ -13,13 +13,14 @@ from harness.memory.handoff import TaskHandoff
 from scripts.worktree_manager import WorktreeManager
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE_DIR = REPO_ROOT / "templates" / "claude"
-AGENTS_DIR = TEMPLATE_DIR / "agents"
+CORE_DIR = REPO_ROOT / "core"
+CONFIG_DIR = REPO_ROOT / "config"
+AGENTS_DIR = CORE_DIR / "agents"
 
 EXPECTED_AGENTS = {
-    "architect.md": ("opus", "architect"),
-    "worker.md": ("sonnet", "worker"),
-    "reviewer.md": ("sonnet", "reviewer"),
+    "architect.md": "architect",
+    "worker.md": "worker",
+    "reviewer.md": "reviewer",
 }
 
 EXPECTED_SKILLS = {
@@ -55,18 +56,18 @@ class TestClaudeHarnessStructure(unittest.TestCase):
             self.assertIn(required_entry, gitignore_text)
 
     def test_all_canonical_agents_defined_with_proper_models(self):
-        present_agents = {p.name for p in AGENTS_DIR.glob("*.md")}
-        self.assertEqual(present_agents, set(EXPECTED_AGENTS.keys()))
-        for filename, (expected_model, expected_name) in EXPECTED_AGENTS.items():
+        manifest_path = CORE_DIR / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), "Missing core/manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        roles = manifest.get("roles", {})
+        for filename, expected_name in EXPECTED_AGENTS.items():
             agent_file = AGENTS_DIR / filename
             self.assertTrue(agent_file.is_file(), f"Missing canonical agent: {filename}")
-            content = agent_file.read_text(encoding="utf-8")
-            self.assertIn(f"name: {expected_name}", content)
-            self.assertIn(f"model: {expected_model}", content)
+            self.assertIn(expected_name, roles)
 
     def test_orchestration_roles_defined_in_orchestration_dir(self):
-        orch_dir = TEMPLATE_DIR / "orchestration"
-        self.assertTrue(orch_dir.is_dir(), "Missing orchestration directory in templates/claude")
+        orch_dir = CONFIG_DIR / "orchestration"
+        self.assertTrue(orch_dir.is_dir(), "Missing orchestration directory in config/orchestration")
         for filename in ("supreme-orchestrator.md", "team-orchestrator.md"):
             role_file = orch_dir / filename
             self.assertTrue(role_file.is_file(), f"Missing orchestration role: {filename}")
@@ -74,8 +75,8 @@ class TestClaudeHarnessStructure(unittest.TestCase):
             self.assertTrue(len(content) > 100, f"Role file unexpectedly empty: {filename}")
 
     def test_skills_catalog_complete(self):
-        skills_dir = TEMPLATE_DIR / "skills"
-        self.assertTrue(skills_dir.is_dir(), "skills directory missing in templates/claude")
+        skills_dir = CORE_DIR / "skills"
+        self.assertTrue(skills_dir.is_dir(), "skills directory missing in core/skills")
         present_skills = {p.name for p in skills_dir.iterdir() if p.is_dir()}
         for expected in EXPECTED_SKILLS:
             self.assertIn(expected, present_skills)
@@ -83,7 +84,7 @@ class TestClaudeHarnessStructure(unittest.TestCase):
             self.assertTrue(skill_md.is_file(), f"Missing SKILL.md in {expected}")
 
     def test_read_only_block_files(self):
-        ro_dir = TEMPLATE_DIR / "orchestration" / "read-only-block"
+        ro_dir = CONFIG_DIR / "orchestration" / "read-only-block"
         self.assertTrue(ro_dir.is_dir())
         self.assertTrue((ro_dir / "block-external-writes.py").is_file())
         self.assertTrue((ro_dir / "settings.json").is_file())

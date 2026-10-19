@@ -26,6 +26,7 @@ Rules:
 - Never commit, push, or merge; never run destructive (`rm`/`sudo`/`kill`) or mutating git commands. If a change is bigger than a single atomic edit, report it back to the team-orchestrator.
 - Never force-push; if history diverged, rebase or add a fresh commit and report.
 - Respect process safety: never kill or terminate `supreme-orchestrator` or `team-orchestrator` (processes or subagent sessions) or inference backends, never leak secrets/credentials.
+- **Orchestrator Non-Termination Invariant**: Never kill, stop, or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`, `systemctl stop`) nor via subagent/task management tools (`manage_subagents` with `Action: "kill"` or `manage_task` with `Action: "kill"`).
 - **Directory Discipline Invariant**: Never create, resolve, or write to an ad-hoc `.orchestration` directory inside a git worktree or arbitrary working subdirectory. All task handoffs, memory indices, logs, and worktrees must strictly bind to the authoritative anchored `.orchestration` root (either `<main_repo>/.orchestration` for local harnesses or `~/.orchestration` for global harnesses).
 
 Reporting: you cannot call other agents. End every reply with:

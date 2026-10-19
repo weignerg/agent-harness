@@ -9,7 +9,7 @@ from harness.memory.context_anchor import ContextAnchorInjector
 
 class TestContextAnchor(unittest.TestCase):
     def setUp(self):
-        self.injector = ContextAnchorInjector(rules_path=ROOT / "templates/agy/GEMINI.md")
+        self.injector = ContextAnchorInjector(rules_path=ROOT / "config/agy/GEMINI.md")
 
     def test_byte_stable_prefix(self):
         p1 = self.injector.format_prefix("Milestone 6", "Task 6.2")
