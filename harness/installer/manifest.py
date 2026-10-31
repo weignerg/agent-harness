@@ -339,11 +339,12 @@ class ManifestEngine:
             if current_hash == f_entry["sha256"] or force:
                 if not dry_run:
                     if p.suffix in (".service", ".timer", ".slice") or p.name.startswith("opencode-"):
-                        try:
-                            subprocess.run(["systemctl", "--user", "stop", p.name], capture_output=True, check=False)
-                            subprocess.run(["systemctl", "--user", "disable", p.name], capture_output=True, check=False)
-                        except Exception:
-                            pass
+                        if p.resolve().parent == (Path.home() / ".config" / "systemd" / "user").resolve():
+                            try:
+                                subprocess.run(["systemctl", "--user", "stop", p.name], capture_output=True, check=False)
+                                subprocess.run(["systemctl", "--user", "disable", p.name], capture_output=True, check=False)
+                            except Exception:
+                                pass
                     try:
                         p.unlink()
                     except OSError:

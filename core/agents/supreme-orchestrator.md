@@ -4,8 +4,8 @@ mode: primary
 model: ornith-local/ornith-1.5-35b
 permission:
   read: allow
-  edit: allow
-  write: allow
+  edit: deny
+  write: deny
   bash:
     "*": allow
     "gh pr merge*": ask

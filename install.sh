@@ -2568,6 +2568,21 @@ run_uninstall() {
 
             # Clean symlinks
             [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
+
+            # Clean AGY global entrypoints/rules that live outside the recorded roots (harness-owned artifacts only)
+            python3 -m harness.installer.config_sync unsync-gemini --gemini-md "${USER_HOME}/.gemini/GEMINI.md" || true
+            if [ -L "${USER_HOME}/.gemini/AGENTS.md" ]; then
+                case "$(readlink "${USER_HOME}/.gemini/AGENTS.md")" in
+                    */core/CHARTER.md) rm -f "${USER_HOME}/.gemini/AGENTS.md" ;;
+                esac
+            fi
+            for rule_link in "${GEMINI_CONFIG_DIR}/rules"/*.md; do
+                [ -L "$rule_link" ] || continue
+                case "$(readlink "$rule_link")" in
+                    */core/rules/*.md) rm -f "$rule_link" ;;
+                esac
+            done
+            rmdir "${GEMINI_CONFIG_DIR}/rules" 2>/dev/null || true
             [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
 
             # Handle pre-existing settings and backup restoration/wiping
@@ -2612,6 +2627,15 @@ run_uninstall() {
             if [ -L "${TARGET_REPO}/.agents" ]; then
                 rm -f "${TARGET_REPO}/.agents"
             fi
+
+            # Remove workspace entrypoint symlinks created by the installer (never user-authored files)
+            for entry_link in AGENTS.md GEMINI.md CLAUDE.md; do
+                if [ -L "${TARGET_REPO}/${entry_link}" ]; then
+                    case "$(readlink "${TARGET_REPO}/${entry_link}")" in
+                        .agents/AGENTS.md|.agents/GEMINI.md|AGENTS.md) rm -f "${TARGET_REPO}/${entry_link}" ;;
+                    esac
+                fi
+            done
 
             # Handle pre-existing settings and backup restoration/wiping
             if [ "$WIPE_BACKUPS" = true ]; then
