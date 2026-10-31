@@ -2050,7 +2050,7 @@ install_opencode_global() {
         --opencode-dir "${opencode_dest}"
 
     deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
-    echo "  ✅ Installed OpenCode hierarchy & systemd backend services to ${opencode_dest}/"
+    echo "  ✅ Installed OpenCode 10-component hierarchy & systemd backend services to ${opencode_dest}/"
 }
 
 # --- LOCAL TARGET INSTALLERS --------------------------------------------------

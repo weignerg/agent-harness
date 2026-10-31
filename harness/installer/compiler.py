@@ -28,6 +28,7 @@ def compile_opencode_frontmatter(role_name: str, meta: Dict[str, Any], tier_mode
     desc = meta.get("description", "").replace('"', '\\"')
     tools = meta.get("tools", {})
     readonly = meta.get("readonly", False)
+    task_perm = "deny" if role_name in ("scout", "grunt") else "allow"
 
     tools_yaml = []
     for k, v in tools.items():
@@ -49,7 +50,7 @@ def compile_opencode_frontmatter(role_name: str, meta: Dict[str, Any], tier_mode
         '    "gh pr merge*": ask',
         '    "git push --force*": ask',
         '    "git push * --force*": ask',
-        "  task: allow",
+        f"  task: {task_perm}",
     ]
     if tools.get("question"):
         lines.append("  question: allow")

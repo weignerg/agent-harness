@@ -12,6 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
 
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -191,7 +192,7 @@ fi
 echo "[Test 10] Verifying OpenCode guidance deployed to ~/.config/opencode/AGENTS.md with no duplicate ~/AGENTS.md..."
 if [ ! -f "${SANDBOX}/AGENTS.md" ] && \
    [ -f "${SANDBOX}/.config/opencode/AGENTS.md" ] && \
-   grep -q "RTX 5090" "${SANDBOX}/.config/opencode/AGENTS.md"; then
+   grep -q "Universal AI Agent System Charter" "${SANDBOX}/.config/opencode/AGENTS.md"; then
     pass "OpenCode guidance properly populated in ~/.config/opencode/AGENTS.md with zero ~/AGENTS.md duplication"
 else
     fail "OpenCode guidance missing expected ~/.config/opencode/AGENTS.md or left duplicate ~/AGENTS.md"
@@ -200,7 +201,7 @@ fi
 # --- Test 11: Verify Host-Customized AGENTS.md Charter Generation ------------
 echo "[Test 11] Verifying customized AGENTS.md generated and deployed..."
 if [ -f "${SANDBOX}/.config/opencode/AGENTS.md" ] && \
-   grep -q "RTX 5090" "${SANDBOX}/.config/opencode/AGENTS.md" && \
+   grep -q "HARDWARE_ARCHITECTURE_START" "${SANDBOX}/.config/opencode/AGENTS.md" && \
    [ ! -f "${SANDBOX}/AGENTS.md" ]; then
     pass "Customized AGENTS.md charter successfully generated and deployed to ~/.config/opencode/AGENTS.md without ~/AGENTS.md duplication"
 else
@@ -212,12 +213,13 @@ echo "[Test 12] Verifying opencode.json FastMCP and instructions configuration..
 if [ -f "${SANDBOX}/.config/opencode/opencode.json" ] && \
    grep -q "harness.mcp.vault_server" "${SANDBOX}/.config/opencode/opencode.json" && \
    grep -q "harness.mcp.worktree_server" "${SANDBOX}/.config/opencode/opencode.json" && \
-   grep -q "AGENTS.md" "${SANDBOX}/.config/opencode/opencode.json" && \
+   grep -q "rules/\*.md" "${SANDBOX}/.config/opencode/opencode.json" && \
+   ! grep -q "AGENTS.md" "${SANDBOX}/.config/opencode/opencode.json" && \
    ! grep -q "harness-tools" "${SANDBOX}/.config/opencode/opencode.json" && \
    ! grep -q "opencode-harness" "${SANDBOX}/.config/opencode/opencode.json"; then
-    pass "opencode.json wires modular FastMCP modules and points instructions to OpenCode AGENTS.md"
+    pass "opencode.json wires modular FastMCP modules and points instructions to rules/*.md without AGENTS.md duplication"
 else
-    fail "opencode.json missing modular FastMCP modules or OpenCode AGENTS.md wiring"
+    fail "opencode.json missing modular FastMCP modules or OpenCode instructions wiring"
 fi
 
 # --- Test 13: Verify Repository Sanitization (Zero host paths / developer info)
@@ -305,7 +307,7 @@ assert ag['reviewer']['permission']['edit'] == 'deny'
 assert ag['supreme-orchestrator'].get('prompt') and ag['supreme-orchestrator'].get('mode') == 'primary'
 assert 'task' in ag['supreme-orchestrator']['prompt'] or 'subagent' in ag['supreme-orchestrator']['prompt']
 assert 'team' in ag['supreme-orchestrator']['prompt'].lower() and 'delegates' in ag['supreme-orchestrator']['prompt']
-assert ag['supreme-orchestrator']['permission']['edit'] == 'allow' and ag['supreme-orchestrator']['permission']['write'] == 'allow'
+assert ag['supreme-orchestrator']['permission']['edit'] == 'deny' and ag['supreme-orchestrator']['permission']['write'] == 'deny'
 assert ag['team-orchestrator'].get('prompt') and ag['team-orchestrator'].get('mode') == 'subagent'
 assert 'team' in ag['team-orchestrator']['prompt'].lower() and 'reviewer' in ag['team-orchestrator']['prompt']
 for n in ('scout', 'grunt'):

@@ -56,12 +56,12 @@ def sync_gemini_md(
     if not template_text and charter_path:
         charter_p = Path(charter_path).expanduser().resolve()
         repo_root = charter_p.parent.parent
-        t_path = repo_root / "templates" / "agy" / "GEMINI.md"
+        t_path = repo_root / "config" / "agy" / "GEMINI.md"
         if t_path.is_file():
             template_text = t_path.read_text(encoding="utf-8").strip()
 
     if not template_text:
-        default_tpl = Path(__file__).resolve().parent.parent.parent / "templates" / "agy" / "GEMINI.md"
+        default_tpl = Path(__file__).resolve().parent.parent.parent / "config" / "agy" / "GEMINI.md"
         if default_tpl.is_file():
             template_text = default_tpl.read_text(encoding="utf-8").strip()
 
