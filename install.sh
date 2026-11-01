@@ -2457,7 +2457,14 @@ install_opencode_global() {
         --repo-dir "${canonical_repo}" \
         --py-bin "${py_bin}" \
         --orch-dir "${orch_dest}" \
-        --opencode-dir "${opencode_dest}"
+        --opencode-dir "${opencode_dest}" \
+        --sglang-model "${SGLANG_MODEL:-}"
+
+    if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+        if command -v opencode >/dev/null 2>&1; then
+            opencode reload >/dev/null 2>&1 || true
+        fi
+    fi
 
     echo "  ✅ Installed OpenCode 10-component hierarchy & systemd backend services to ${opencode_dest}/"
 }
@@ -2729,7 +2736,8 @@ install_opencode_local() {
         --repo-dir "${canonical_repo}" \
         --py-bin "${py_bin}" \
         --orch-dir "${repo_path}/.orchestration" \
-        --opencode-dir "${dest_opencode}"
+        --opencode-dir "${dest_opencode}" \
+        --sglang-model "${SGLANG_MODEL:-}"
 
     if [ "$ENABLE_SYSTEMD" = true ]; then
         setup_backend_environment "${BACKEND_DIR}"
