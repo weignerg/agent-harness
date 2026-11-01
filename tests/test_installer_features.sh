@@ -50,7 +50,7 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" 2>/dev/null || true
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -647,6 +647,7 @@ else
 fi
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 # --- Test 28: Verify Claude Code Background Session & Agent Teams Integration (Issue #12) ---
 echo "[Test 28] Verifying Claude Code background session dispatch and agent-teams configuration..."
 CLAUDE_CORE_JSON="${REPO_DIR}/config/claude/settings/core.json"
@@ -834,6 +835,55 @@ if grep -q "read_file" "$GEMINI_DOC" && \
     pass "config/agy/GEMINI.md accurately documents native tools, subagents, and remote-control daemon"
 else
     fail "config/agy/GEMINI.md missing required tool or mechanism documentation"
+fi
+
+# --- Test 31: Verifying T3 Code (t3 serve) systemd unit and installer flags ---
+echo "[Test 31] Verifying T3 Code (t3 serve) systemd unit and installer integration (Issue #15)..."
+T3_UNIT_SRC="${REPO_DIR}/config/systemd/opencode-t3-serve.service"
+if [ -f "$T3_UNIT_SRC" ] && \
+   grep -q '^EnvironmentFile=-%h/\.config/opencode-backends/env' "$T3_UNIT_SRC" && \
+   grep -q 'Environment="T3_SERVE_PORT=3773"' "$T3_UNIT_SRC" && \
+   grep -q 't3' "$T3_UNIT_SRC" && \
+   grep -q 'serve' "$T3_UNIT_SRC" && \
+   grep -q '3773' "$T3_UNIT_SRC"; then
+    pass "opencode-t3-serve.service exists with valid t3 serve port 3773 and EnvironmentFile configuration"
+else
+    fail "opencode-t3-serve.service missing expected t3 serve configuration"
+fi
+
+HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
+if echo "$HELP_OUT" | grep -q -- "--with-t3" && echo "$HELP_OUT" | grep -q -- "--no-t3"; then
+    pass "install.sh --help documents --with-t3 and --no-t3"
+else
+    fail "install.sh --help missing --with-t3 or --no-t3"
+fi
+
+SANDBOX_T3="$(mktemp -d /tmp/test-installer-t3-XXXXXX)"
+mkdir -p "${SANDBOX_T3}/.config/opencode-backends"
+cat << 'EOF' > "${SANDBOX_T3}/.config/opencode-backends/env"
+HF_TOKEN=hf_mock_secret_token_123456
+OPENCODE_SERVER_USERNAME=testuser
+OPENCODE_SERVER_PASSWORD=secret_server_password_987
+OPENCODE_SERVER_PORT=4096
+OPENCODE_SERVER_HOST=0.0.0.0
+EOF
+chmod 600 "${SANDBOX_T3}/.config/opencode-backends/env"
+
+USER_HOME="${SANDBOX_T3}" HOME="${SANDBOX_T3}" "${INSTALL_SCRIPT}" --target=opencode --with-t3 --non-interactive >/dev/null 2>&1 || true
+
+DEPLOYED_T3="${SANDBOX_T3}/.config/systemd/user/opencode-t3-serve.service"
+if [ -f "$DEPLOYED_T3" ]; then
+    pass "install.sh deploys opencode-t3-serve.service into \${HOME}/.config/systemd/user/"
+else
+    fail "opencode-t3-serve.service not deployed into systemd user directory"
+fi
+
+USER_HOME="${SANDBOX_T3}" HOME="${SANDBOX_T3}" "${REPO_DIR}/uninstall.sh" --global --yes >/dev/null 2>&1 || true
+
+if [ ! -f "$DEPLOYED_T3" ]; then
+    pass "uninstall.sh cleanly removed opencode-t3-serve.service"
+else
+    fail "uninstall.sh failed to remove opencode-t3-serve.service"
 fi
 
 echo "================================================================================"

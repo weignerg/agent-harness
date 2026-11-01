@@ -77,6 +77,18 @@ WITH_HEALTHCHECK="${WITH_HEALTHCHECK:-true}"
 EXPLICIT_HEALTHCHECK=false
 NO_BACKUP=false
 WIPE_BACKUPS=false
+ENABLE_T3_SERVE="${ENABLE_T3_SERVE:-false}"
+EXPLICIT_WITH_T3=false
+EXPLICIT_NO_T3=false
+
+SYSTEMD_UNITS=(
+    "opencode-server.service"
+    "opencode-agent.slice"
+    "opencode-colbert-reindex.service"
+    "opencode-colbert-reindex.timer"
+    "opencode-sglang-ornith-35b.service"
+    "opencode-t3-serve.service"
+)
 
 PROBED_MODEL_NAME=""
 PROBED_MODEL_PATH=""
@@ -107,8 +119,9 @@ Actions:
 Parity & Modules:
   --with-obsidian / --no-obsidian      Toggle Obsidian detection & pacman install (default: with)
   --with-vault / --no-vault            Toggle ~/Vaults/home starter scaffolding (default: with)
-  --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096 & 30000 (default: with)
+  --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096, 4097, 3773 & 30000 (default: with)
   --with-backends / --no-backends      Toggle SGLang systemd units & backend venv (default: with)
+  --with-t3 / --no-t3                  Toggle T3 Code (t3 serve) unified frontend server & unit (default: auto-detect)
   --download-models / --no-download-models Toggle automatic HF model weights acquisition (default: with backends)
   --skip-warmup / --warmup             Toggle foreground SGLang warmup & live weight download (default: with)
   --healthcheck / --no-healthcheck, --skip-healthcheck Toggle live systemd & port healthcheck verification (default: with)
@@ -254,6 +267,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-backends)
             WITH_BACKENDS=false
+            shift
+            ;;
+        --with-t3)
+            ENABLE_T3_SERVE=true
+            EXPLICIT_WITH_T3=true
+            EXPLICIT_NO_T3=false
+            shift
+            ;;
+        --no-t3|--without-t3)
+            ENABLE_T3_SERVE=false
+            EXPLICIT_NO_T3=true
+            EXPLICIT_WITH_T3=false
             shift
             ;;
         --download-models|--with-download-models)
@@ -543,7 +568,7 @@ provision_home_vault() {
 
 configure_firewall() {
     echo "================================================================================"
-    echo "🛡️ CONFIGURING LOCAL FIREWALL RULES (PORTS 4096 & 30000)"
+    echo "🛡️ CONFIGURING LOCAL FIREWALL RULES (PORTS 4096, 4097, 3773 & 30000)"
     echo "================================================================================"
     if [ "$WITH_FIREWALL" != true ]; then
         echo "  ℹ️  Firewall rule management skipped (--no-firewall)."
@@ -551,13 +576,17 @@ configure_firewall() {
     fi
 
     if command -v ufw >/dev/null 2>&1; then
-        echo "  Applying UFW firewall rules for ports 4096/tcp and 30000/tcp..."
+        echo "  Applying UFW firewall rules for ports 4096/tcp, 4097/tcp, 3773/tcp, and 30000/tcp..."
         run_sudo ufw allow 4096/tcp comment 'OpenCode Server'
+        run_sudo ufw allow 4097/tcp comment 'OpenCode Server Alt'
+        run_sudo ufw allow 3773/tcp comment 'T3 Code Unified Server'
         run_sudo ufw allow 30000/tcp comment 'OpenCode SGLang Server'
         echo "  ✅ UFW rules processed."
     elif command -v iptables >/dev/null 2>&1; then
-        echo "  Applying iptables rules for ports 4096/tcp and 30000/tcp..."
+        echo "  Applying iptables rules for ports 4096/tcp, 4097/tcp, 3773/tcp, and 30000/tcp..."
         run_sudo iptables -I INPUT -p tcp --dport 4096 -j ACCEPT
+        run_sudo iptables -I INPUT -p tcp --dport 4097 -j ACCEPT
+        run_sudo iptables -I INPUT -p tcp --dport 3773 -j ACCEPT
         run_sudo iptables -I INPUT -p tcp --dport 30000 -j ACCEPT
         echo "  ✅ iptables rules processed."
     else
@@ -1186,6 +1215,7 @@ print_completion_summary() {
 
     local server_svc_status="⚪ installed"
     local sglang_svc_status="⚪ installed"
+    local t3_svc_status="⚪ installed"
     local svc_name="${PROBED_SERVICE_NAME:-opencode-sglang-ornith-35b.service}"
 
     if command -v systemctl >/dev/null 2>&1; then
@@ -1199,6 +1229,12 @@ print_completion_summary() {
             sglang_svc_status="🟢 running"
         elif systemctl --user is-enabled --quiet "$svc_name" 2>/dev/null; then
             sglang_svc_status="🟡 enabled"
+        fi
+
+        if systemctl --user is-active --quiet opencode-t3-serve.service 2>/dev/null; then
+            t3_svc_status="🟢 running"
+        elif systemctl --user is-enabled --quiet opencode-t3-serve.service 2>/dev/null; then
+            t3_svc_status="🟡 enabled"
         fi
     fi
 
@@ -1232,14 +1268,14 @@ print_completion_summary() {
             echo "   [✓] Systemd User Services   : ${SYSTEMD_USER_DIR}/"
             echo "       Installed Units         : opencode-server.service, opencode-agent.slice,"
             echo "                                 opencode-colbert-reindex.service, opencode-colbert-reindex.timer,"
-            echo "                                 ${svc_name}"
+            echo "                                 opencode-t3-serve.service, ${svc_name}"
             echo "   [✓] Probed Inference Model  : ${probed_model_disp} (${probed_model_path_disp})"
             echo "       Hardware Configuration  : Context: ${probed_ctx_disp} tokens | MemFraction: ${probed_mem_disp}"
         fi
         echo "   [✓] Knowledge Vault Memory  : ~/Vaults/home (Obsidian config registered)"
         echo "   [✓] ColBERT Semantic Engine : ~/.local/share/opencode-sglang-stack/ (FastMCP integration)"
         if [ "$WITH_FIREWALL" = true ]; then
-            echo "   [✓] Network Firewall Hardening: Ports 4096 (OpenCode) & 30000 (SGLang loopback) permitted"
+            echo "   [✓] Network Firewall Hardening: Ports 4096 (OpenCode), 3773 (T3 Code) & 30000 (SGLang loopback) permitted"
         else
             echo "   [-] Network Firewall Hardening: Skipped (--no-firewall)"
         fi
@@ -1253,6 +1289,7 @@ print_completion_summary() {
     echo "   OpenCode     : opencode"
     echo "   Claude Code  : claude"
     echo "   Antigravity  : agy"
+    echo "   T3 Code      : t3 serve --host 0.0.0.0 --port 3773"
     echo "   Obsidian     : obsidian ~/Vaults/home"
     echo "   ColBERT      : ~/.local/share/opencode-sglang-stack/reindex_vault.sh (or '/reindex' in OpenCode)"
 
@@ -1261,6 +1298,7 @@ print_completion_summary() {
         echo "📡 Server Endpoints & Launch Commands:"
         echo "   OpenCode Headless Server : http://${lan_ip}:4096 [${server_svc_status}]"
         echo "                              username: ${user_display} | password: ${pass_display}"
+        echo "   T3 Code Unified Server   : http://${lan_ip}:3773 [${t3_svc_status}]"
         echo "   SGLang Inference Server  : http://127.0.0.1:30000/v1 [${sglang_svc_status}]"
         echo "   Antigravity Remote       : agy remote-control start"
         echo "   Claude Code Server       : claude server"
@@ -1286,6 +1324,7 @@ print_completion_summary() {
     if [ "$WITH_BACKENDS" = true ]; then
         echo "   systemctl --user status ${svc_name}"
         echo "   systemctl --user status opencode-server.service"
+        echo "   systemctl --user status opencode-t3-serve.service"
         echo "   systemctl --user status opencode-colbert-reindex.timer"
     fi
     echo "   ./install.sh --verify       (Verify harness file integrity)"
@@ -1519,7 +1558,7 @@ verify_backend_healthchecks() {
     local failure_reasons=()
 
     # 1. Start / enable units if systemctl is available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
@@ -1904,13 +1943,7 @@ with open(path, 'w') as f:
     fi
 
     # 4. Deploy systemd user units into systemd_dest (~/.config/systemd/user)
-    local units=(
-        "opencode-server.service"
-        "opencode-agent.slice"
-        "opencode-colbert-reindex.service"
-        "opencode-colbert-reindex.timer"
-        "opencode-sglang-ornith-35b.service"
-    )
+    local units=("${SYSTEMD_UNITS[@]}")
 
     for u in "${units[@]}"; do
         if [ -f "${SCRIPT_DIR}/config/systemd/${u}" ]; then
@@ -1940,9 +1973,41 @@ with open(path, 'w') as f:
             "${systemd_dest}/opencode-sglang-ornith-35b.service"
     fi
 
-    # 5. Reload systemd daemon if available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+    # 5. Reload systemd daemon if available (prior to enabling or starting services)
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
+    fi
+
+    # 6. Manage T3 Code (t3 serve) service activation & optional installation
+    local t3_installed=false
+    if command -v t3 >/dev/null 2>&1 || [ -x "${USER_HOME}/.bun/bin/t3" ] || [ -x "${USER_HOME}/.local/bin/t3" ]; then
+        t3_installed=true
+    fi
+
+    local t3_should_enable=false
+    if [ "$ENABLE_T3_SERVE" = true ]; then
+        t3_should_enable=true
+    elif [ "$EXPLICIT_NO_T3" != true ] && [ "$t3_installed" = true ]; then
+        t3_should_enable=true
+    fi
+
+    if [ "$ENABLE_T3_SERVE" = true ] && [ "$t3_installed" != true ]; then
+        if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+            echo "  📦 Installing t3 CLI via bun or npm..."
+            if command -v bun >/dev/null 2>&1; then
+                bun install -g t3 2>/dev/null || true
+            elif command -v npm >/dev/null 2>&1; then
+                npm install -g t3 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    if [ "$t3_should_enable" = true ]; then
+        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+            echo "  🚀 Enabling and starting opencode-t3-serve.service..."
+            systemctl --user enable opencode-t3-serve.service 2>/dev/null || true
+            systemctl --user start opencode-t3-serve.service 2>/dev/null || true
+        fi
     fi
     echo "  ✅ Deployed systemd user units to ${systemd_dest}/"
 }
@@ -2383,7 +2448,7 @@ EOF
                 install_opencode_local
                 recorded_roots+=("${TARGET_REPO}/.opencode")
                 if [ "$ENABLE_SYSTEMD" = true ]; then
-                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                    for u in "${SYSTEMD_UNITS[@]}"; do
                         if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
                             recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                         fi
@@ -2395,7 +2460,7 @@ EOF
                 recorded_roots+=("${TARGET_REPO}/.orchestration" "${TARGET_REPO}/.claude" "${TARGET_REPO}/.opencode")
                 recorded_symlinks+=("${TARGET_REPO}/.agents:.orchestration")
                 if [ "$ENABLE_SYSTEMD" = true ]; then
-                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                    for u in "${SYSTEMD_UNITS[@]}"; do
                         if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
                             recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                         fi
@@ -2452,7 +2517,7 @@ EOF
                 mkdir -p "${USER_HOME}/.orchestration"
                 install_opencode_global
                 recorded_roots+=("${USER_HOME}/.config/opencode")
-                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                for u in "${SYSTEMD_UNITS[@]}"; do
                     if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
                         recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                     fi
@@ -2465,7 +2530,7 @@ EOF
                 install_all_global
                 recorded_roots+=("${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${USER_HOME}/.claude" "${USER_HOME}/.config/opencode")
                 recorded_symlinks+=("${USER_HOME}/.agents:${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}/plugins/agy-harness:${GEMINI_CONFIG_DIR}/plugins/agent-harness")
-                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
+                for u in "${SYSTEMD_UNITS[@]}"; do
                     if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
                         recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                     fi
@@ -2562,17 +2627,27 @@ run_uninstall() {
 
             local systemd_user_dir="${SYSTEMD_USER_DIR:-${USER_HOME}/.config/systemd/user}"
             if [ -d "${systemd_user_dir}" ]; then
+                for u_name in "${SYSTEMD_UNITS[@]}"; do
+                    local u="${systemd_user_dir}/${u_name}"
+                    if [ -f "$u" ]; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+                            systemctl --user stop "$u_name" 2>/dev/null || true
+                            systemctl --user disable "$u_name" 2>/dev/null || true
+                        fi
+                        rm -f "$u"
+                    fi
+                done
                 for u in "${systemd_user_dir}"/opencode-*.service "${systemd_user_dir}"/opencode-*.timer "${systemd_user_dir}"/opencode-*.slice; do
                     if [ -f "$u" ]; then
                         local unit_name="$(basename "$u")"
-                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                             systemctl --user stop "$unit_name" 2>/dev/null || true
                             systemctl --user disable "$unit_name" 2>/dev/null || true
                         fi
                         rm -f "$u"
                     fi
                 done
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user daemon-reload 2>/dev/null || true
                 fi
             fi
