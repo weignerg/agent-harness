@@ -1060,20 +1060,26 @@ EOF
         active_service="opencode-sglang-ornith-35b.service"
     fi
 
+    local qwen27b_kv_dtype="nvfp4"
+    if [ "$qwen27b_quant" = "gguf" ]; then
+        qwen27b_kv_dtype="auto"
+    fi
+
     local sglang_vars=(
         "SGLANG_SERVICE=${active_service}"
         "SGLANG_PRIMARY_MODEL=${primary_model}"
         "SGLANG_27B_MODEL_PATH=${qwen27b_path}"
         "SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
         "SGLANG_27B_QUANTIZATION=${qwen27b_quant}"
-        "SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
+        "SGLANG_27B_KV_CACHE_DTYPE=${qwen27b_kv_dtype}"
         "SGLANG_27B_MEM_FRACTION=0.88"
         "SGLANG_27B_CONTEXT_LENGTH=65536"
         "SGLANG_27B_CHUNKED_PREFILL=8192"
         "SGLANG_27B_ATTENTION_BACKEND=flashinfer"
         "SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
-        "SGLANG_27B_SPECULATIVE_ALGO=NEXTN"
-        "SGLANG_27B_SPECULATIVE_ARGS=\"--speculative-algorithm NEXTN --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4\""
+        "SGLANG_27B_TORCH_COMPILE="
+        "SGLANG_27B_SPECULATIVE_ALGO="
+        "SGLANG_27B_SPECULATIVE_ARGS="
     )
 
     for kv in "${sglang_vars[@]}"; do
@@ -1541,9 +1547,18 @@ warmup_sglang_service() {
         --max-running-requests 1
         --port "${sglang_port}"
         --host 127.0.0.1
+        --disable-cuda-graph
     )
     if [ -n "$quant" ]; then
         run_args+=(--quantization "${quant}")
+    fi
+
+    local warmup_kv_dtype="${SGLANG_27B_KV_CACHE_DTYPE:-}"
+    if [ -z "$warmup_kv_dtype" ] && { [[ "$model_path" =~ Qwen3\.8-27B-NVFP4 ]] || [[ "$model_path" == "nvidia/Qwen3.8-27B-NVFP4" ]]; }; then
+        warmup_kv_dtype="nvfp4"
+    fi
+    if [ -n "$warmup_kv_dtype" ]; then
+        run_args+=(--kv-cache-dtype "${warmup_kv_dtype}")
     fi
 
     (
@@ -1561,7 +1576,7 @@ warmup_sglang_service() {
 
     local warmup_success=false
     local elapsed=0
-    local timeout="${SGLANG_WARMUP_TIMEOUT:-180}"
+    local timeout="${SGLANG_WARMUP_TIMEOUT:-300}"
 
     while [ $elapsed -lt $timeout ]; do
         if ! kill -0 "$warmup_pid" 2>/dev/null; then
@@ -1660,6 +1675,12 @@ verify_backend_healthchecks() {
 
     # 1. Start / enable units if systemctl is available
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+        # Ensure mutually exclusive port-30000 service switching
+        if [ "${svc_name}" = "opencode-sglang-qwen27b.service" ]; then
+            systemctl --user disable --now opencode-sglang-ornith-35b.service 2>/dev/null || true
+        elif [ "${svc_name}" = "opencode-sglang-ornith-35b.service" ]; then
+            systemctl --user disable --now opencode-sglang-qwen27b.service 2>/dev/null || true
+        fi
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
@@ -1800,7 +1821,7 @@ verify_backend_healthchecks() {
     # 5. Poll SGLang (systemctl and 127.0.0.1:30000/v1/models)
     echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
     local sglang_ok=false
-    local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-120}}}"
+    local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-240}}}"
     local elapsed=0
     local model_name="${PROBED_MODEL_NAME:-ornith}"
 
@@ -2185,9 +2206,46 @@ with open(path, 'w') as f:
             "${systemd_dest}/opencode-sglang-ornith-35b.service"
     fi
 
-    if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${systemd_dest}/opencode-sglang-qwen27b.service" ]; then
-        sed -i "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|" "${systemd_dest}/opencode-sglang-qwen27b.service"
-    fi
+    for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+        if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${dest_dir}/opencode-sglang-qwen27b.service" ]; then
+            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${dest_dir}/opencode-sglang-qwen27b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_27B_MEM_FRACTION=[0-9.]*\"|Environment=\"SGLANG_27B_MEM_FRACTION=${mem_fraction}\"|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            else
+                sed -i \
+                    "/\[Service\]/a Environment=\"SGLANG_27B_MEM_FRACTION=${mem_fraction}\"" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            fi
+            if grep -q 'Environment="SGLANG_27B_CONTEXT_LENGTH=' "${dest_dir}/opencode-sglang-qwen27b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_27B_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_27B_CONTEXT_LENGTH=${max_context}\"|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            else
+                sed -i \
+                    "/\[Service\]/a Environment=\"SGLANG_27B_CONTEXT_LENGTH=${max_context}\"" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            fi
+            if grep -q '\${SGLANG_27B_MEM_FRACTION}' "${dest_dir}/opencode-sglang-qwen27b.service"; then
+                sed -i \
+                    "s|--mem-fraction-static [0-9.]*\${SGLANG_27B_MEM_FRACTION}|--mem-fraction-static \${SGLANG_27B_MEM_FRACTION}|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            else
+                sed -i \
+                    "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            fi
+            if grep -q '\${SGLANG_27B_CONTEXT_LENGTH}' "${dest_dir}/opencode-sglang-qwen27b.service"; then
+                sed -i \
+                    "s|--context-length [0-9]*\${SGLANG_27B_CONTEXT_LENGTH}|--context-length \${SGLANG_27B_CONTEXT_LENGTH}|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            else
+                sed -i \
+                    "s|--context-length [0-9]*|--context-length ${max_context}|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            fi
+        fi
+    done
 
     # 5. Reload systemd daemon if available (prior to enabling or starting services)
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then

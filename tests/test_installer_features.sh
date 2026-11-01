@@ -1002,8 +1002,15 @@ if [ -f "$ENV_FILE" ] && \
    [ -f "$GPU_PROF" ] && \
    grep -q '"model_path": "nvidia/Qwen3.8-27B-NVFP4"' "$GPU_PROF" && \
    ! grep -q "Qwen/Qwen3.8-27B-FP4" "$GPU_PROF" && \
-   [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ]; then
-    pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units"
+   [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ] && \
+   [ -f "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" ] && \
+   ! grep -q "0.880.88" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
+   ! grep -q -- "--mem-fraction-static 0.88\${SGLANG_27B_MEM_FRACTION}" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
+   grep -q -- "--mem-fraction-static \${SGLANG_27B_MEM_FRACTION}" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
+   grep -q 'Environment="SGLANG_27B_MEM_FRACTION=0.88"' "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
+   grep -q -- "--disable-prefill-cuda-graph" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
+   ! grep -q -- "^ *--enable-torch-compile" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service"; then
+    pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units without sed corruption"
 else
     fail "Installer failed to provision Qwen 3.8 27B profile configuration"
 fi
@@ -1039,6 +1046,18 @@ if [ -f "$QS_FILE" ] && [ -f "$README_FILE" ] && \
     pass "docs/QUICKSTART.md exists, linked from README.md, and documents all 4 surfaces and model switching"
 else
     fail "docs/QUICKSTART.md missing required sections, README link, or multi-runtime documentation"
+fi
+
+# --- Test 34: SGLang Warmup CUDA Graph & Port 30000 Switching (Issue #23) ---
+echo "[Test 34] Verifying SGLang warmup disables CUDA graphs and enforces mutually exclusive port 30000 switching..."
+if grep -q -- "--disable-cuda-graph" "${INSTALL_SCRIPT}" && \
+   grep -q 'SGLANG_WARMUP_TIMEOUT:-300' "${INSTALL_SCRIPT}" && \
+   grep -q 'SGLANG_HEALTHCHECK_RETRIES:-240' "${INSTALL_SCRIPT}" && \
+   grep -q 'disable --now opencode-sglang-ornith-35b.service' "${INSTALL_SCRIPT}" && \
+   grep -q 'disable --now opencode-sglang-qwen27b.service' "${INSTALL_SCRIPT}"; then
+    pass "install.sh implements fast warmup without throwaway CUDA graphs and mutually exclusive port 30000 switching"
+else
+    fail "install.sh missing warmup --disable-cuda-graph or mutually exclusive port 30000 service switching"
 fi
 
 echo "================================================================================"
