@@ -12,8 +12,11 @@
     ],
     "deny": [
       "Bash(claude stop *)",
+      "Bash(claude stop*)",
       "Bash(claude kill *)",
-      "Bash(claude rm *)"
+      "Bash(claude kill*)",
+      "Bash(claude rm *)",
+      "Bash(claude rm*)"
     ]
   }
 }

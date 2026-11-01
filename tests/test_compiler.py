@@ -40,8 +40,11 @@ class TestClaudeSettingsCore(unittest.TestCase):
         denied = perms.get("deny", [])
         expected_deny = [
             "Bash(claude stop *)",
+            "Bash(claude stop*)",
             "Bash(claude kill *)",
+            "Bash(claude kill*)",
             "Bash(claude rm *)",
+            "Bash(claude rm*)",
         ]
         for rule in expected_deny:
             self.assertIn(rule, denied, f"Missing deny rule in core.json: {rule}")
@@ -134,6 +137,10 @@ class TestDocumentationClaudeBg(unittest.TestCase):
         self.assertIn("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", doc)
         self.assertIn("claude agents", doc)
         self.assertIn("claude logs", doc)
+        self.assertIn("claude attach", doc)
+        self.assertIn("interactive human terminal inspection", doc)
+        self.assertIn(".orchestration/kickoffs/<Branch_Name>.md", doc)
+        self.assertIn(".claude/orchestration/kickoffs/<Branch_Name>.md", doc)
 
     def test_team_orchestrator_documents_claude_bg_n(self):
         doc = (CORE_DIR / "agents" / "team-orchestrator.md").read_text(encoding="utf-8")
@@ -141,6 +148,9 @@ class TestDocumentationClaudeBg(unittest.TestCase):
         self.assertIn("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", doc)
         self.assertIn("claude agents", doc)
         self.assertIn("claude logs", doc)
+        self.assertIn("claude attach", doc)
+        self.assertIn("interactive human terminal inspection", doc)
+        self.assertIn(".orchestration/kickoffs/<Branch_Name>.md", doc)
 
     def test_launching_teams_documents_claude_bg_n(self):
         doc = (CONFIG_DIR / "orchestration" / "launching-teams.md").read_text(encoding="utf-8")

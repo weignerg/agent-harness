@@ -650,8 +650,11 @@ if [ -f "${CLAUDE_CORE_JSON}" ] && \
    grep -q '"Bash(claude agents\*)' "${CLAUDE_CORE_JSON}" && \
    grep -q '"Bash(claude logs \*)' "${CLAUDE_CORE_JSON}" && \
    grep -q '"Bash(claude stop \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude stop\*)' "${CLAUDE_CORE_JSON}" && \
    grep -q '"Bash(claude kill \*)' "${CLAUDE_CORE_JSON}" && \
-   grep -q '"Bash(claude rm \*)' "${CLAUDE_CORE_JSON}"; then
+   grep -q '"Bash(claude kill\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude rm \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude rm\*)' "${CLAUDE_CORE_JSON}"; then
     pass "config/claude/settings/core.json specifies CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS and background allow/deny permissions"
 else
     fail "config/claude/settings/core.json missing required agent teams env or allow/deny permissions"
