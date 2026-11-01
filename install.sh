@@ -160,10 +160,19 @@ while [[ $# -gt 0 ]]; do
             val="${1#*=}"
             if [[ "$val" == "global" ]]; then
                 MODE="global"
+                shift
             elif [[ "$val" == "local" || "$val" == "repo" ]]; then
                 MODE="local"
+                if [[ $# -gt 1 && ! "$2" =~ ^- ]]; then
+                    TARGET_REPO="$2"
+                    shift 2
+                else
+                    TARGET_REPO="$(pwd)"
+                    shift
+                fi
+            else
+                shift
             fi
-            shift
             ;;
         --mode)
             if [[ "$2" == "global" ]]; then
@@ -657,6 +666,94 @@ prune_harness_links() {
     rmdir "$dir" 2>/dev/null || true
 }
 
+# Workspace root instruction entrypoints. Real (user-authored) files are never overwritten; only
+# missing paths or previously harness-created symlinks are (re)linked.
+link_workspace_entrypoint() {
+    local link_path="$1" link_target="$2"
+    if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+        echo "  ⚠️ Keeping existing ${link_path} (not a symlink); harness entrypoint not linked"
+        return 0
+    fi
+    ln -sfn "$link_target" "$link_path"
+}
+
+link_workspace_entrypoints() {
+    local target_repo="$1"
+    [ -d "$target_repo" ] || return 0
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
+
+    local agents_target=".orchestration/AGENTS.md"
+    if [ -f "${target_repo}/.orchestration/AGENTS.md" ]; then
+        agents_target=".orchestration/AGENTS.md"
+    elif [ -f "${target_repo}/.agents/AGENTS.md" ]; then
+        agents_target=".agents/AGENTS.md"
+    elif [ -f "${core_dir}/CHARTER.md" ]; then
+        agents_target="${core_dir}/CHARTER.md"
+    fi
+
+    local gemini_target=".orchestration/GEMINI.md"
+    if [ -f "${target_repo}/.orchestration/GEMINI.md" ]; then
+        gemini_target=".orchestration/GEMINI.md"
+    elif [ -f "${target_repo}/.agents/GEMINI.md" ]; then
+        gemini_target=".agents/GEMINI.md"
+    elif [ -f "${canonical_repo}/config/agy/GEMINI.md" ]; then
+        gemini_target="${canonical_repo}/config/agy/GEMINI.md"
+    fi
+
+    link_workspace_entrypoint "${target_repo}/AGENTS.md" "$agents_target"
+    link_workspace_entrypoint "${target_repo}/GEMINI.md" "$gemini_target"
+    link_workspace_entrypoint "${target_repo}/CLAUDE.md" "AGENTS.md"
+}
+
+sync_t3_antigravity_providers() {
+    local user_home="$1"
+    local gemini_dir="$2"
+    local orch_dest="$3"
+    local t3_providers_dir="${user_home}/.t3/userdata/providers/antigravity"
+
+    local default_hash="ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32"
+    local target_dirs=()
+
+    if [ -d "$t3_providers_dir" ]; then
+        for d in "${t3_providers_dir}"/*; do
+            if [ -d "$d" ]; then
+                target_dirs+=("$d")
+            fi
+        done
+    fi
+
+    if [ -d "${user_home}/.t3" ]; then
+        local default_prov="${t3_providers_dir}/${default_hash}"
+        mkdir -p "${default_prov}/config" "${default_prov}/antigravity-cli"
+        local found=false
+        for d in "${target_dirs[@]}"; do
+            [ "$d" = "$default_prov" ] && found=true && break
+        done
+        [ "$found" = false ] && target_dirs+=("$default_prov")
+    fi
+
+    if [ ${#target_dirs[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    for inst_dir in "${target_dirs[@]}"; do
+        mkdir -p "${inst_dir}/config"
+        [ -f "${gemini_dir}/GEMINI.md" ] && ln -sfn "${gemini_dir}/GEMINI.md" "${inst_dir}/GEMINI.md"
+        [ -f "${gemini_dir}/AGENTS.md" ] && ln -sfn "${gemini_dir}/AGENTS.md" "${inst_dir}/AGENTS.md"
+        [ -d "${gemini_dir}/config/rules" ] && ln -sfn "${gemini_dir}/config/rules" "${inst_dir}/config/rules"
+        [ -d "${gemini_dir}/config/plugins" ] && ln -sfn "${gemini_dir}/config/plugins" "${inst_dir}/config/plugins"
+        [ -f "${gemini_dir}/config/mcp_config.json" ] && ln -sfn "${gemini_dir}/config/mcp_config.json" "${inst_dir}/config/mcp_config.json"
+        if [ -d "${orch_dest}/skills" ]; then
+            ln -sfn "${orch_dest}/skills" "${inst_dir}/config/skills"
+        elif [ -d "${gemini_dir}/config/skills" ]; then
+            ln -sfn "${gemini_dir}/config/skills" "${inst_dir}/config/skills"
+        fi
+    done
+    echo "  ✅ Synced harness charters, rules, and plugins into T3 Code Antigravity providers"
+}
+
 install_agy_global() {
     local gemini_dir="${USER_HOME}/.gemini"
     local plugin_dest="${GEMINI_CONFIG_DIR}/plugins/agent-harness"
@@ -824,6 +921,14 @@ EOF
             --orch-dir "${orch_dest}"
     fi
     echo "  ✅ Registered vault-memory and worktree-manager in ${mcp_config}"
+
+    # Sync canonical AGY configuration into any T3 Code Antigravity provider sandboxes
+    sync_t3_antigravity_providers "${USER_HOME}" "${gemini_dir}" "${orch_dest}"
+
+    # Ensure repository workspace has entrypoint links for T3 Code / native discovery
+    if [ -d "$canonical_repo" ]; then
+        link_workspace_entrypoints "$canonical_repo"
+    fi
 }
 
 install_claude_global() {
@@ -2589,19 +2694,7 @@ install_agy_local() {
     fi
     ln -sfn .orchestration "${dest_agents}"
 
-    # Workspace root instruction entrypoints. Real (user-authored) files are never overwritten; only
-    # missing paths or previously harness-created symlinks are (re)linked.
-    link_workspace_entrypoint() {
-        local link_path="$1" link_target="$2"
-        if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
-            echo "  ⚠️ Keeping existing ${link_path} (not a symlink); harness entrypoint not linked"
-            return 0
-        fi
-        ln -sfn "$link_target" "$link_path"
-    }
-    link_workspace_entrypoint "${repo_path}/AGENTS.md" ".agents/AGENTS.md"
-    link_workspace_entrypoint "${repo_path}/GEMINI.md" ".agents/GEMINI.md"
-    link_workspace_entrypoint "${repo_path}/CLAUDE.md" "AGENTS.md"
+    link_workspace_entrypoints "${repo_path}"
 
     ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".claude/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
     echo "  ✅ Installed Antigravity operational assets to ${dest_orch}/ and linked ${dest_agents}"
@@ -2675,6 +2768,7 @@ install_claude_local() {
         --template-settings "${template_settings[@]}" \
         --output "${dest_claude}/settings.json"
 
+    link_workspace_entrypoints "${repo_path}"
     ensure_gitignore_entries "${repo_path}/.gitignore" ".claude/" ".orchestration_root"
     echo "  ✅ Installed Claude Code local configuration to ${dest_claude}/"
 }
@@ -2777,6 +2871,7 @@ install_opencode_local() {
         deploy_opencode_backend_and_units "${SYSTEMD_USER_DIR}" "${BACKEND_DIR}"
     fi
 
+    link_workspace_entrypoints "${repo_path}"
     ensure_gitignore_entries "${repo_path}/.gitignore" ".opencode/" ".orchestration_root"
     echo "  ✅ Installed OpenCode 10-component hierarchy to ${dest_opencode}/"
 }
