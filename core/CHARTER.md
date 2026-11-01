@@ -112,7 +112,7 @@ When a request matches a scenario below, load the skill before proceeding:
 - **Unified Server Endpoints**:
   - Local SGLang Inference API: `http://127.0.0.1:30000/v1`
   - OpenCode Headless Server: `http://0.0.0.0:4096` (`opencode-server.service`)
-  - T3 Code Unified Web/API Server: `http://0.0.0.0:3773` (`opencode-t3-serve.service`)
+  - T3 Code Unified Web/API Server: `http://0.0.0.0:3773` (`t3-serve.service`)
 - **Fast Operational Shortcuts & CLI Gotchas**:
   - Always `cd` into the target git repository root before invoking `python3 scripts/worktree_manager.py` or `gh` CLI commands.
   - Validate SGLang CLI flags offline before editing service units using the SGLang venv (`~/.local/share/opencode-sglang-stack/venv/bin/python3 -c "from sglang.srt.server_args import prepare_server_args; ..."`).

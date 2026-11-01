@@ -833,7 +833,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("ornith-ai/Ornith-1.5-35B-A3B-NVFP4", charter_text)
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", charter_text)
         self.assertIn("http://127.0.0.1:30000/v1", charter_text)
-        self.assertIn("opencode-t3-serve.service", charter_text)
+        self.assertIn("t3-serve.service", charter_text)
 
         agent_teams_text = (CORE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
         self.assertIn("Drive-to-Completion", agent_teams_text)
