@@ -818,7 +818,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("install.sh --sglang-model", qs_text)
         self.assertIn("claude --bg -n", qs_text)
         self.assertIn("agy remote-control", qs_text)
-        self.assertIn("opencode-t3-serve.service", qs_text)
+        self.assertIn("t3-serve.service", qs_text)
         self.assertIn("opencode-sglang-qwen27b.service", qs_text)
         self.assertIn("qwen3.8-27b", qs_text)
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", qs_text)

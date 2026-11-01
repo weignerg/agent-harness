@@ -33,6 +33,7 @@ SYSTEMD_UNITS=(
     "opencode-colbert-reindex.timer"
     "opencode-sglang-ornith-35b.service"
     "opencode-sglang-qwen27b.service"
+    "t3-serve.service"
     "opencode-t3-serve.service"
 )
 

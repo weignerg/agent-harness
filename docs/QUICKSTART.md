@@ -23,7 +23,7 @@ Configures SGLang for Qwen 3.8 27B Dense (`qwen3.8-27b`, HuggingFace model path 
 ```
 
 ### T3 Code (`t3 serve`) Unified Web UI Server
-The T3 Code unified frontend server listening on port `3773` is set up and enabled by default on standard installs (and honors `--no-t3` / `--without-t3` to disable):
+The T3 Code unified frontend server listening on port `3773` is set up and enabled by default on standard installs (and honors `--no-t3` / `--without-t3` to disable). If the `t3` CLI is not yet installed on the machine, install it anytime via `curl -fsSL https://t3.codes/install.sh | sh`:
 ```bash
 # Standard installation automatically sets up and enables t3 serve:
 ./install.sh
@@ -149,8 +149,12 @@ T3 Code provides a single web-based interface and REST/WebSocket API to manage C
 
 - **Manage via Systemd User Unit**:
   ```bash
-  systemctl --user enable --now opencode-t3-serve.service
-  systemctl --user status opencode-t3-serve.service
+  systemctl --user enable --now t3-serve.service
+  systemctl --user status t3-serve.service
+  ```
+- **Install CLI**:
+  ```bash
+  curl -fsSL https://t3.codes/install.sh | sh
   ```
 - **Or Run Ad-Hoc CLI**:
   ```bash

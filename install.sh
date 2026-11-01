@@ -93,7 +93,7 @@ SYSTEMD_UNITS=(
     "opencode-colbert-reindex.timer"
     "opencode-sglang-ornith-35b.service"
     "opencode-sglang-qwen27b.service"
-    "opencode-t3-serve.service"
+    "t3-serve.service"
 )
 
 PROBED_MODEL_NAME=""
@@ -1309,9 +1309,9 @@ print_completion_summary() {
 
         if [ "$ENABLE_T3_SERVE" != true ]; then
             t3_svc_status="⚪ disabled (--no-t3)"
-        elif systemctl --user is-active --quiet opencode-t3-serve.service 2>/dev/null; then
+        elif systemctl --user is-active --quiet t3-serve.service 2>/dev/null; then
             t3_svc_status="🟢 running"
-        elif systemctl --user is-enabled --quiet opencode-t3-serve.service 2>/dev/null; then
+        elif systemctl --user is-enabled --quiet t3-serve.service 2>/dev/null; then
             t3_svc_status="🟡 enabled"
         fi
     fi
@@ -1346,7 +1346,7 @@ print_completion_summary() {
             echo "   [✓] Systemd User Services   : ${SYSTEMD_USER_DIR}/"
             echo "       Installed Units         : opencode-server.service, opencode-agent.slice,"
             echo "                                 opencode-colbert-reindex.service, opencode-colbert-reindex.timer,"
-            echo "                                 opencode-t3-serve.service, ${svc_name}"
+            echo "                                 t3-serve.service, ${svc_name}"
             echo "   [✓] Probed Inference Model  : ${probed_model_disp} (${probed_model_path_disp})"
             echo "       Hardware Configuration  : Context: ${probed_ctx_disp} tokens | MemFraction: ${probed_mem_disp}"
         fi
@@ -1402,7 +1402,7 @@ print_completion_summary() {
     if [ "$WITH_BACKENDS" = true ]; then
         echo "   systemctl --user status ${svc_name}"
         echo "   systemctl --user status opencode-server.service"
-        echo "   systemctl --user status opencode-t3-serve.service"
+        echo "   systemctl --user status t3-serve.service"
         echo "   systemctl --user status opencode-colbert-reindex.timer"
     fi
     echo "   ./install.sh --verify       (Verify harness file integrity)"
@@ -1669,8 +1669,8 @@ verify_backend_healthchecks() {
                 t3_bin_available=true
             fi
             if [ "$t3_bin_available" = true ]; then
-                systemctl --user enable opencode-t3-serve.service 2>/dev/null || true
-                systemctl --user start opencode-t3-serve.service 2>/dev/null || true
+                systemctl --user enable t3-serve.service 2>/dev/null || true
+                systemctl --user start t3-serve.service 2>/dev/null || true
             fi
         fi
     fi
@@ -1746,12 +1746,12 @@ verify_backend_healthchecks() {
         fi
 
         if [ "$t3_bin_found" != true ]; then
-            echo "  ℹ️  T3 Code binary (t3) not found in PATH; opencode-t3-serve.service deployed and ready once t3 is installed"
+            echo "  ℹ️  T3 Code binary (t3) not found in PATH; t3-serve.service deployed and ready once t3 is installed"
         else
             echo "  Checking T3 Code unified server (port 3773)..."
             if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
-                systemctl --user enable opencode-t3-serve.service 2>/dev/null || true
-                systemctl --user start opencode-t3-serve.service 2>/dev/null || true
+                systemctl --user enable t3-serve.service 2>/dev/null || true
+                systemctl --user start t3-serve.service 2>/dev/null || true
             fi
 
             local t3_server_ok=false
@@ -1761,11 +1761,11 @@ verify_backend_healthchecks() {
             while [ "$t3_elapsed" -lt "$max_t3_wait" ]; do
                 local t3_status=""
                 if command -v systemctl >/dev/null 2>&1; then
-                    t3_status="$(systemctl --user is-active opencode-t3-serve.service 2>/dev/null || true)"
+                    t3_status="$(systemctl --user is-active t3-serve.service 2>/dev/null || true)"
                 fi
 
                 if [ "$t3_status" = "failed" ]; then
-                    echo "  ❌ T3 Code server (opencode-t3-serve.service) status is failed; aborting wait."
+                    echo "  ❌ T3 Code server (t3-serve.service) status is failed; aborting wait."
                     break
                 elif [ "$t3_status" = "active" ] || [ "$t3_status" = "activating" ]; then
                     echo "  [$(date +%T)] ⏳ T3 Code server starting up (elapsed: ${t3_elapsed}s / max: ${max_t3_wait}s)..."
@@ -1791,7 +1791,7 @@ verify_backend_healthchecks() {
                 echo "  ✅ T3 Code unified server is active and listening on port 3773."
             else
                 health_failed=true
-                failure_reasons+=("T3 Code server (opencode-t3-serve.service / port 3773) failed healthcheck")
+                failure_reasons+=("T3 Code server (t3-serve.service / port 3773) failed healthcheck")
                 echo "  ❌ T3 Code unified server failed healthcheck."
             fi
         fi
@@ -1870,7 +1870,7 @@ EOF
         echo "📋 Diagnostic Information:" >&2
         if command -v systemctl >/dev/null 2>&1; then
             echo "--- Systemd User Unit Statuses ---" >&2
-            systemctl --user status opencode-colbert-reindex.timer opencode-server.service opencode-t3-serve.service "${svc_name}" --no-pager 2>&1 | head -n 35 >&2 || true
+            systemctl --user status opencode-colbert-reindex.timer opencode-server.service t3-serve.service "${svc_name}" --no-pager 2>&1 | head -n 35 >&2 || true
         fi
         echo "--- Socket Listening Status (Port 4096, 3773, 30000) ---" >&2
         if command -v ss >/dev/null 2>&1; then
@@ -1879,9 +1879,9 @@ EOF
 
         echo "" >&2
         echo "🔧 Remediation Steps:" >&2
-        echo "  1. Check unit journal logs: journalctl --user -u ${svc_name} -u opencode-server.service -u opencode-t3-serve.service -n 50" >&2
+        echo "  1. Check unit journal logs: journalctl --user -u ${svc_name} -u opencode-server.service -u t3-serve.service -n 50" >&2
         echo "  2. Ensure model weights are downloaded (run with --download-models)" >&2
-        echo "  3. Manually start services: systemctl --user start ${svc_name} opencode-server.service opencode-t3-serve.service opencode-colbert-reindex.timer" >&2
+        echo "  3. Manually start services: systemctl --user start ${svc_name} opencode-server.service t3-serve.service opencode-colbert-reindex.timer" >&2
         echo "  4. Re-run installer with --no-healthcheck to bypass live polling if testing in container/sandbox" >&2
         echo "========================================================================" >&2
         exit 1
@@ -2195,6 +2195,12 @@ with open(path, 'w') as f:
     fi
 
     # 6. Manage T3 Code (t3 serve) service activation & optional installation
+    # Clean up legacy opencode-t3-serve.service if present on host
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+        systemctl --user disable --now opencode-t3-serve.service 2>/dev/null || true
+    fi
+    rm -f "${systemd_dest}/opencode-t3-serve.service" "${backend_env_dir}/opencode-t3-serve.service"
+
     local t3_installed=false
     if command -v t3 >/dev/null 2>&1 || [ -x "${USER_HOME}/.bun/bin/t3" ] || [ -x "${USER_HOME}/.local/bin/t3" ]; then
         t3_installed=true
@@ -2209,16 +2215,9 @@ with open(path, 'w') as f:
 
     if [ "$ENABLE_T3_SERVE" = true ] && [ "$t3_installed" != true ]; then
         if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
-            echo "  📦 Installing t3 CLI via official installer, bun, or npm..."
+            echo "  📦 Installing t3 CLI via official installer..."
             if command -v curl >/dev/null 2>&1; then
                 curl -fsSL https://t3.codes/install.sh | T3CODE_INSTALL_BIN_DIR="${USER_HOME}/.local/bin" T3CODE_HOME="${USER_HOME}/.t3" sh 2>/dev/null || true
-            fi
-            if ! command -v t3 >/dev/null 2>&1 && [ ! -x "${USER_HOME}/.local/bin/t3" ] && [ ! -x "${USER_HOME}/.bun/bin/t3" ]; then
-                if command -v bun >/dev/null 2>&1; then
-                    bun install -g t3 2>/dev/null || true
-                elif command -v npm >/dev/null 2>&1; then
-                    npm install -g --prefix "${USER_HOME}/.local" t3 2>/dev/null || npm install -g t3 2>/dev/null || true
-                fi
             fi
             if command -v t3 >/dev/null 2>&1 || [ -x "${USER_HOME}/.bun/bin/t3" ] || [ -x "${USER_HOME}/.local/bin/t3" ]; then
                 t3_installed=true
@@ -2228,18 +2227,18 @@ with open(path, 'w') as f:
 
     if [ "$t3_should_enable" = true ]; then
         if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
-            if [ "$t3_installed" = true ] || command -v bunx >/dev/null 2>&1 || command -v npx >/dev/null 2>&1; then
-                echo "  🚀 Enabling and starting opencode-t3-serve.service..."
-                systemctl --user enable opencode-t3-serve.service 2>/dev/null || true
-                systemctl --user start opencode-t3-serve.service 2>/dev/null || true
+            systemctl --user enable t3-serve.service 2>/dev/null || true
+            if [ "$t3_installed" = true ]; then
+                echo "  🚀 Enabling and starting t3-serve.service..."
+                systemctl --user start t3-serve.service 2>/dev/null || true
             else
-                echo "  ℹ️  T3 Code binary (t3) not found; opencode-t3-serve.service deployed and ready once t3 is installed."
+                echo "  ℹ️  T3 Code binary (t3) not found; t3-serve.service enabled and ready once t3 is installed."
             fi
         fi
     elif [ "$EXPLICIT_NO_T3" = true ]; then
         if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
-            systemctl --user stop opencode-t3-serve.service 2>/dev/null || true
-            systemctl --user disable opencode-t3-serve.service 2>/dev/null || true
+            systemctl --user stop t3-serve.service 2>/dev/null || true
+            systemctl --user disable t3-serve.service 2>/dev/null || true
         fi
     fi
     echo "  ✅ Deployed systemd user units to ${systemd_dest}/"

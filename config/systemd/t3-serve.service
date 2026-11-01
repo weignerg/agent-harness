@@ -1,0 +1,21 @@
+[Unit]
+Description=T3 Code Unified Multi-Runtime Frontend Server (t3 serve on 0.0.0.0:3773)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="HOME=%h"
+Environment="CLAUDE_CONFIG_DIR=%h/.claude"
+Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"
+Environment="T3_SERVE_HOST=0.0.0.0"
+Environment="T3_SERVE_PORT=3773"
+ExecCondition=/bin/bash -lc 'for p in "$HOME/.bun/bin" "$HOME/.local/bin" /usr/local/bin /usr/bin; do [ -x "$p/t3" ] && exit 0; done; command -v t3 >/dev/null 2>&1 && exit 0; exit 1'
+ExecStart=/bin/bash -lc 'for p in "$HOME/.bun/bin" "$HOME/.local/bin" /usr/local/bin /usr/bin; do [ -x "$p/t3" ] && T3_BIN="$p/t3" && break; done; if [ -z "$T3_BIN" ]; then T3_BIN="$(command -v t3 || true)"; fi; if [ -z "$T3_BIN" ]; then echo "Error: t3 executable not found in PATH" >&2; exit 1; fi; exec "$T3_BIN" serve --host "${T3_SERVE_HOST:-0.0.0.0}" --port "${T3_SERVE_PORT:-3773}"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

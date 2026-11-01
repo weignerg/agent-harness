@@ -197,11 +197,11 @@ set +a
 - **Git Worktree Isolation**: Native browsing and switching between isolated worktrees located in `<repo>/.orchestration/worktrees/` (`feat/issue-<n>-*`, `fix/issue-<n>-*`).
 
 ### 6.2 Enabling & Managing the Service
-The T3 Code frontend is packaged as the systemd user service `opencode-t3-serve.service`.
+The T3 Code frontend is packaged as the systemd user service `t3-serve.service`.
 
 1. **Installer Configuration**:
    ```bash
-   # Enable T3 Code server during installation
+   # Enable T3 Code server during installation (default: with)
    ./install.sh --with-t3
 
    # Skip T3 Code server deployment
@@ -211,16 +211,16 @@ The T3 Code frontend is packaged as the systemd user service `opencode-t3-serve.
 2. **Systemd Daemon Control**:
    ```bash
    # Enable and start the service immediately
-   systemctl --user enable --now opencode-t3-serve.service
+   systemctl --user enable --now t3-serve.service
 
    # Check status and listening port
-   systemctl --user status opencode-t3-serve.service
+   systemctl --user status t3-serve.service
 
    # Stream live logs
-   journalctl --user -u opencode-t3-serve.service -f
+   journalctl --user -u t3-serve.service -f
 
    # Stop and disable service
-   systemctl --user disable --now opencode-t3-serve.service
+   systemctl --user disable --now t3-serve.service
    ```
 
 3. **Standalone / Ad-Hoc Invocation**:
@@ -276,7 +276,7 @@ sudo ufw reload
 | Symptom | Diagnostic Command | Remediation |
 |---|---|---|
 | OpenCode Server connection refused | `systemctl --user status opencode-server` | Run `systemctl --user start opencode-server` |
-| T3 Code Server connection refused | `systemctl --user status opencode-t3-serve` | Run `systemctl --user start opencode-t3-serve` |
+| T3 Code Server connection refused | `systemctl --user status t3-serve` | Run `systemctl --user start t3-serve` |
 | HTTP 401 Unauthorized from Mobile | `grep OPENCODE_SERVER ~/.config/opencode-backends/env` | Re-verify password matching `~/.config/opencode-backends/env` |
 | Port 4096 or 3773 unreachable across LAN | `sudo ufw status` | Allow ports 4096/3773 from client subnet in UFW |
 | SGLang inference backend unhealthy | `curl http://127.0.0.1:30000/v1/models` | Check `systemctl --user status opencode-sglang*.service` |
