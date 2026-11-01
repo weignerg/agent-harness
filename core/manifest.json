@@ -75,7 +75,7 @@
         "edit": false,
         "bash": true
       },
-      "claude_tools": "Read, Grep, Glob, Bash",
+      "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
         "view_file",
         "run_command",
@@ -93,7 +93,7 @@
         "edit": true,
         "bash": true
       },
-      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash, Task",
       "agy_tools": [
         "view_file",
         "replace_file_content",
@@ -113,7 +113,7 @@
         "edit": true,
         "bash": true
       },
-      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash, Task",
       "agy_tools": [
         "view_file",
         "replace_file_content",
@@ -133,7 +133,7 @@
         "edit": false,
         "bash": true
       },
-      "claude_tools": "Read, Grep, Glob, Bash",
+      "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
         "view_file",
         "run_command",

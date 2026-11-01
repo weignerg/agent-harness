@@ -65,6 +65,7 @@ The first prompt must start with `Role: Team Orchestrator.`, because that routes
 | Tab in the user's konsole window (preferred when you launch) | `konsole --new-tab -e bash -lic "cd <repo> && opencode run --name '<name>' '<first prompt>'; exec bash" >/dev/null 2>&1 </dev/null &` | The user's running konsole starts the tab's shell with its own environment. `exec bash` keeps the tab open. |
 | The user opens a terminal | `cd <repo> && opencode run --name '<name>' '<first prompt>'` | Works from any terminal the user opened. |
 | Subagent delegation via task tool | `task(agent: "team-orchestrator", prompt: "<first prompt>")` | Runs directly within the OpenCode session using local SGLang Ornith-35B on port 30000. |
+| Claude Code background session (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) | `claude --bg -n "<type>/issue-<n>-<desc>" --agent team-orchestrator --add-dir "<worktree_path>" -p "<kickoff_prompt>"` | Runs in an isolated background session named after the issue branch. Gives `team-orchestrator` a fresh top-level subagent nesting budget to coordinate `architect`, `worker`, `tester`, `reviewer`, `scout`, and `grunt`. |
 | Headless remote server | Connect via `http://127.0.0.1:4096` or OpenCode Mobile | For remote sessions and mobile monitoring. |
 
 ## 5. Start table for the user
@@ -75,6 +76,7 @@ When the user starts the teams, give one block per team in exactly this format, 
 ────────────────────────────────────────
 #: <n> - Team: <short name> - Work: <one line>
 Start command: `cd <repo> && opencode run --name '<Branch_Name>' 'Role: Team Orchestrator. Read ~/.config/opencode/orchestration/kickoffs/<file>.md and follow it as your kickoff.'`
+Claude background command: `claude --bg -n "<Branch_Name>" --agent team-orchestrator --add-dir "<worktree_path>" -p "Role: Team Orchestrator. Read ~/.claude/orchestration/kickoffs/<file>.md and follow it as your kickoff."`
 ────────────────────────────────────────
 ```
 
@@ -84,10 +86,15 @@ When a team restarts after writing an end-of-day handoff, append this to its fir
 
 | Check | Command |
 |---|---|
-| Listed and live | OpenCode session list or `ps aux | grep opencode` |
+| Listed and live (OpenCode) | OpenCode session list or `ps aux | grep opencode` |
+| Listed and live (Claude Code) | `claude agents` or `claude agents --all --json` |
+| Claude Code session logs | `claude logs "<type>/issue-<n>-<desc>"` |
+| Claude Code interactive attach | `claude attach "<type>/issue-<n>-<desc>"` |
 | SGLang endpoint | `curl http://127.0.0.1:30000/v1/models` |
 | Tab is in the user's window | The parent of the tab's shell is the user's konsole pid |
 | Two-way messaging | Task confirmation or READY reply to "Supreme Orchestrator" |
+
+**Orchestrator Non-Termination Invariant**: Never kill, stop, or remove a running orchestrator session (`claude stop`, `claude kill`, `claude rm` are strictly denied by permission policy). Await its completion report or session handoff.
 
 **Gated, one-at-a-time launch**: When the user asks to stagger launches so limits aren't hit, append this to each first prompt: ` When you have read your kickoff and started work, send Supreme Orchestrator a one-line STARTED message.` Launch the next team only after the previous one's STARTED arrives and its checks above pass. Issue-creating teams also get ` Also send it every new issue number you create.` so the Supreme Orchestrator can pass the issue numbers on.
 

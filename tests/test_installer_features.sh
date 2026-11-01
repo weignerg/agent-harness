@@ -50,7 +50,7 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" 2>/dev/null || true
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -635,6 +635,67 @@ if echo "$HC_FAIL_OUT" | grep -q "SGLang service (opencode-sglang-ornith-35b.ser
     pass "SGLang healthcheck aborted immediately upon failed unit state without waiting full timeout"
 else
     fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
+fi
+
+# --- Test 28: Verify Claude Code Background Session & Agent Teams Integration (Issue #12) ---
+echo "[Test 28] Verifying Claude Code background session dispatch and agent-teams configuration..."
+CLAUDE_CORE_JSON="${REPO_DIR}/config/claude/settings/core.json"
+MANIFEST_JSON="${REPO_DIR}/core/manifest.json"
+SUPREME_MD="${REPO_DIR}/core/agents/supreme-orchestrator.md"
+LAUNCH_MD="${REPO_DIR}/config/orchestration/launching-teams.md"
+
+if [ -f "${CLAUDE_CORE_JSON}" ] && \
+   grep -q '"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude --bg \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude agents\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude logs \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude stop \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude stop\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude kill \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude kill\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude rm \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude rm\*)' "${CLAUDE_CORE_JSON}"; then
+    pass "config/claude/settings/core.json specifies CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS and background allow/deny permissions"
+else
+    fail "config/claude/settings/core.json missing required agent teams env or allow/deny permissions"
+fi
+
+if [ -f "${MANIFEST_JSON}" ] && \
+   $PY_BIN -c "
+import json
+with open('${MANIFEST_JSON}') as f:
+    m = json.load(f)
+roles = m['roles']
+for r in ['supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester', 'reviewer']:
+    assert 'Task' in roles[r]['claude_tools'], f'Role {r} missing Task'
+for r in ['scout', 'grunt']:
+    assert 'Task' not in roles[r]['claude_tools'], f'Role {r} must not have Task'
+"; then
+    pass "core/manifest.json grants Task to orchestrators/subagents and omits Task from scout and grunt"
+else
+    fail "core/manifest.json Task permissions validation failed"
+fi
+
+if grep -q "claude --bg -n" "${SUPREME_MD}" && \
+   grep -q "claude --bg -n" "${LAUNCH_MD}" && \
+   grep -q "claude agents" "${LAUNCH_MD}" && \
+   grep -q "claude logs" "${LAUNCH_MD}"; then
+    pass "Documentation in supreme-orchestrator.md and launching-teams.md details claude --bg -n workflow"
+else
+    fail "Documentation missing claude --bg -n background session dispatch details"
+fi
+
+SANDBOX_CLAUDE="$(mktemp -d /tmp/installer-test-claude-XXXXXX)"
+$PY_BIN -m harness.installer.compiler --core-dir "${REPO_DIR}/core" --runtime claude --output-dir "${SANDBOX_CLAUDE}/agents" >/dev/null 2>&1
+if grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/architect.md" && \
+   grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/worker.md" && \
+   grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/tester.md" && \
+   grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/reviewer.md" && \
+   ! grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/scout.md" && \
+   ! grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/grunt.md"; then
+    pass "Compiled Claude agents enforce Task tool permissions for agent teams"
+else
+    fail "Compiled Claude agents failed Task tool permission verification"
 fi
 
 echo "================================================================================"

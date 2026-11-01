@@ -64,6 +64,14 @@ def compile_claude_frontmatter(role_name: str, meta: Dict[str, Any], tier_models
     desc = meta.get("description", "").replace('"', '\\"')
     claude_tools = meta.get("claude_tools", "Read, Grep, Glob, Bash")
 
+    tools_list = [t.strip() for t in claude_tools.split(",") if t.strip()]
+    if role_name in ("scout", "grunt", "compaction", "summary"):
+        tools_list = [t for t in tools_list if t != "Task"]
+    elif role_name in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
+        if "Task" not in tools_list:
+            tools_list.append("Task")
+    claude_tools = ", ".join(tools_list)
+
     lines = [
         "---",
         f"name: {role_name}",
