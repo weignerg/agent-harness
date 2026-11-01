@@ -179,6 +179,17 @@ def prune_legacy_trusted_workspaces(
     return True
 
 
+def _resolve_py_bin(py_bin: Union[str, Path], repo_p: Path) -> str:
+    raw = str(py_bin)
+    if "/" in raw or os.sep in raw:
+        return os.path.abspath(os.path.expanduser(raw))
+    repo_venv_py = repo_p / ".venv" / "bin" / "python"
+    if repo_venv_py.is_file() and os.access(repo_venv_py, os.X_OK):
+        return str(repo_venv_py)
+    found = shutil.which(raw)
+    return found if found else sys.executable
+
+
 def sync_opencode_json(
     opencode_json_path: Union[str, Path],
     repo_dir: Union[str, Path],
@@ -190,7 +201,7 @@ def sync_opencode_json(
     """Configure ~/.config/opencode/opencode.json with exact schema and zero double-ingestion."""
     op_path = Path(opencode_json_path).expanduser().resolve()
     repo_p = Path(repo_dir).expanduser().resolve()
-    py_p = Path(os.path.abspath(os.path.expanduser(str(py_bin))))
+    py_p = _resolve_py_bin(py_bin, repo_p)
     orch_p = Path(orch_dir).expanduser().resolve()
     oc_p = Path(opencode_dir).expanduser().resolve()
     v_p = Path(vault_path).expanduser().resolve() if vault_path else (Path.home() / "Vaults" / "home").resolve()
@@ -272,7 +283,7 @@ def sync_claude_json(
     """Configure ~/.claude.json with exact mcpServers schema without destroying other keys."""
     cl_path = Path(claude_json_path).expanduser().resolve()
     repo_p = Path(repo_dir).expanduser().resolve()
-    py_p = Path(os.path.abspath(os.path.expanduser(str(py_bin))))
+    py_p = _resolve_py_bin(py_bin, repo_p)
     orch_p = Path(orch_dir).expanduser().resolve()
     v_p = Path(vault_path).expanduser().resolve() if vault_path else (Path.home() / "Vaults" / "home").resolve()
 
@@ -328,7 +339,7 @@ def sync_agy_mcp_config(
     """Configure the documented global ~/.gemini/config/mcp_config.json with the exact mcpServers schema."""
     mcp_path = Path(mcp_config_path).expanduser().resolve()
     repo_p = Path(repo_dir).expanduser().resolve()
-    py_p = Path(os.path.abspath(os.path.expanduser(str(py_bin))))
+    py_p = _resolve_py_bin(py_bin, repo_p)
     orch_p = Path(orch_dir).expanduser().resolve()
     v_p = Path(vault_path).expanduser().resolve() if vault_path else (Path.home() / "Vaults" / "home").resolve()
 

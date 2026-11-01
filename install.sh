@@ -2042,6 +2042,12 @@ install_opencode_global() {
         cp -f "${canonical_repo}/config/opencode/opencode.json" "${opencode_dest}/opencode.json"
     fi
 
+    deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
+
+    if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
+        py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
+    fi
+
     python3 -m harness.installer.config_sync sync-opencode \
         --opencode-json "${opencode_dest}/opencode.json" \
         --repo-dir "${canonical_repo}" \
@@ -2049,7 +2055,6 @@ install_opencode_global() {
         --orch-dir "${orch_dest}" \
         --opencode-dir "${opencode_dest}"
 
-    deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
     echo "  ✅ Installed OpenCode 10-component hierarchy & systemd backend services to ${opencode_dest}/"
 }
 
