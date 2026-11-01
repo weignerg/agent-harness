@@ -29,5 +29,31 @@ class TestWorktreeManager(unittest.TestCase):
         self.mgr.prune_worktree(self.target)
         self.assertFalse(self.target.exists())
 
+    def test_provision_with_custom_base(self):
+        nested_branch = f"{self.branch}-nested"
+        nested_target = Path(self.tmp.name) / "nested_wt"
+        try:
+            self.mgr.provision_worktree(self.branch, self.target, base="HEAD")
+            self.mgr.provision_worktree(nested_branch, nested_target, base=self.branch)
+            self.assertTrue(nested_target.exists())
+            self.assertTrue((nested_target / ".git").exists())
+        finally:
+            self.mgr.prune_worktree(nested_target)
+            self.mgr.prune_worktree(self.target)
+            import subprocess
+            subprocess.run(["git", "branch", "-D", nested_branch], cwd=ROOT, check=False, capture_output=True)
+
+    def test_provision_existing_branch(self):
+        # First provision creates branch
+        self.mgr.provision_worktree(self.branch, self.target)
+        self.mgr.prune_worktree(self.target)
+        # Second provision re-attaches existing branch without error
+        re_target = Path(self.tmp.name) / "re_wt"
+        try:
+            self.mgr.provision_worktree(self.branch, re_target)
+            self.assertTrue(re_target.exists())
+        finally:
+            self.mgr.prune_worktree(re_target)
+
 if __name__ == "__main__":
     unittest.main()

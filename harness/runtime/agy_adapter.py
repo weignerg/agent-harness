@@ -28,7 +28,7 @@ class AgyRuntimeAdapter(BaseRuntimeAdapter):
 
     @property
     def global_config_dir(self) -> Path:
-        return Path.home() / ".gemini" / "config" / "plugins" / "agy-harness"
+        return Path.home() / ".gemini" / "config" / "plugins" / "agent-harness"
 
     @property
     def model_tiers(self) -> Dict[str, Any]:
@@ -77,4 +77,4 @@ class AgyRuntimeAdapter(BaseRuntimeAdapter):
 
     def get_plugin_manifest_path(self, repo_path: Path | str = ".") -> Path:
         """Return the path to the Antigravity plugin manifest template."""
-        return Path(repo_path).resolve() / "templates" / "agy" / "plugins" / "agy-harness" / "plugin.json"
+        return Path(repo_path).resolve() / "config" / "agy" / "plugins" / "agent-harness" / "plugin.json"

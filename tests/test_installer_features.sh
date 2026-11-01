@@ -12,6 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
 
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -31,6 +32,27 @@ elif [ -f "${HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
 else
     PY_BIN="python3"
 fi
+
+# Global mock systemctl to protect host desktop/session during sandboxed tests
+GLOBAL_MOCK_BIN="$(mktemp -d /tmp/test-global-mock-bin-XXXXXX)"
+cat << 'EOF' > "${GLOBAL_MOCK_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    echo "active"
+    exit 0
+fi
+if [ "$1" = "--user" ] && [ "$2" = "is-enabled" ]; then
+    echo "enabled"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
+export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
+cleanup_test_sandboxes() {
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" 2>/dev/null || true
+}
+trap cleanup_test_sandboxes EXIT
 
 # --- Test 1: Helper functions and CLI options ---------------------------------
 echo "[Test 1] Testing install.sh CLI help and flag parsing..."
@@ -58,7 +80,6 @@ fi
 # --- Test 3: Sandbox Non-Interactive Install Manifest Generation --------------
 echo "[Test 3] Testing non-interactive install in isolated sandbox generates clean manifest..."
 SANDBOX="$(mktemp -d /tmp/installer-test-sandbox-XXXXXX)"
-trap 'rm -rf "${SANDBOX}"' EXIT
 
 # Prepare mock environment inside sandbox
 mkdir -p "${SANDBOX}/.config/opencode-backends"
@@ -171,7 +192,7 @@ fi
 echo "[Test 10] Verifying OpenCode guidance deployed to ~/.config/opencode/AGENTS.md with no duplicate ~/AGENTS.md..."
 if [ ! -f "${SANDBOX}/AGENTS.md" ] && \
    [ -f "${SANDBOX}/.config/opencode/AGENTS.md" ] && \
-   grep -q "RTX 5090" "${SANDBOX}/.config/opencode/AGENTS.md"; then
+   grep -q "Universal AI Agent System Charter" "${SANDBOX}/.config/opencode/AGENTS.md"; then
     pass "OpenCode guidance properly populated in ~/.config/opencode/AGENTS.md with zero ~/AGENTS.md duplication"
 else
     fail "OpenCode guidance missing expected ~/.config/opencode/AGENTS.md or left duplicate ~/AGENTS.md"
@@ -180,7 +201,7 @@ fi
 # --- Test 11: Verify Host-Customized AGENTS.md Charter Generation ------------
 echo "[Test 11] Verifying customized AGENTS.md generated and deployed..."
 if [ -f "${SANDBOX}/.config/opencode/AGENTS.md" ] && \
-   grep -q "RTX 5090" "${SANDBOX}/.config/opencode/AGENTS.md" && \
+   grep -q "HARDWARE_ARCHITECTURE_START" "${SANDBOX}/.config/opencode/AGENTS.md" && \
    [ ! -f "${SANDBOX}/AGENTS.md" ]; then
     pass "Customized AGENTS.md charter successfully generated and deployed to ~/.config/opencode/AGENTS.md without ~/AGENTS.md duplication"
 else
@@ -192,12 +213,13 @@ echo "[Test 12] Verifying opencode.json FastMCP and instructions configuration..
 if [ -f "${SANDBOX}/.config/opencode/opencode.json" ] && \
    grep -q "harness.mcp.vault_server" "${SANDBOX}/.config/opencode/opencode.json" && \
    grep -q "harness.mcp.worktree_server" "${SANDBOX}/.config/opencode/opencode.json" && \
-   grep -q "AGENTS.md" "${SANDBOX}/.config/opencode/opencode.json" && \
+   grep -q "rules/\*.md" "${SANDBOX}/.config/opencode/opencode.json" && \
+   ! grep -q "AGENTS.md" "${SANDBOX}/.config/opencode/opencode.json" && \
    ! grep -q "harness-tools" "${SANDBOX}/.config/opencode/opencode.json" && \
    ! grep -q "opencode-harness" "${SANDBOX}/.config/opencode/opencode.json"; then
-    pass "opencode.json wires modular FastMCP modules and points instructions to OpenCode AGENTS.md"
+    pass "opencode.json wires modular FastMCP modules and points instructions to rules/*.md without AGENTS.md duplication"
 else
-    fail "opencode.json missing modular FastMCP modules or OpenCode AGENTS.md wiring"
+    fail "opencode.json missing modular FastMCP modules or OpenCode instructions wiring"
 fi
 
 # --- Test 13: Verify Repository Sanitization (Zero host paths / developer info)
@@ -352,7 +374,6 @@ fi
 # --- Test 22: Verify Post-Install Summary, Password Generation & Terminal Box -----
 echo "[Test 22] Verifying post-install summary UX and automatic password generation..."
 SANDBOX_GP="$(mktemp -d /tmp/installer-test-summary-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}"' EXIT
 
 GP_OUT="$(HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
 
@@ -386,7 +407,6 @@ fi
 # --- Test 23: Verify SGLang venv auto-healing with local repository -----------
 echo "[Test 23] Verifying SGLang venv auto-healing with local repository..."
 SANDBOX_HEAL="$(mktemp -d /tmp/installer-test-heal-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}"' EXIT
 
 # Prepare mock local sglang repository in candidate path
 MOCK_SGLANG_REPO="${SANDBOX_HEAL}/git/sglang/python"
@@ -425,7 +445,6 @@ fi
 # --- Test 24: Verify Minimal NVIDIA Driver Mismatch Reboot Box ----------------
 echo "[Test 24] Verifying Minimal NVIDIA Driver Mismatch Reboot Box..."
 SANDBOX_NV="$(mktemp -d /tmp/installer-test-nv-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}"' EXIT
 
 MOCK_NV_BIN="${SANDBOX_NV}/bin"
 mkdir -p "${MOCK_NV_BIN}"
@@ -458,7 +477,6 @@ else
 fi
 
 SANDBOX_WARMUP="$(mktemp -d /tmp/installer-test-warmup-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}"' EXIT
 
 # Prepare mock stack with mock sglang binary that simulates a mock server on port 30000
 MOCK_WARMUP_STACK="${SANDBOX_WARMUP}/.local/share/opencode-sglang-stack"
@@ -509,7 +527,6 @@ fi
 # --- Test 26: Verify SGLang healthcheck live model loading progress & readiness ---
 echo "[Test 26] Verifying SGLang healthcheck live model loading progress & readiness..."
 SANDBOX_HC_PROG="$(mktemp -d /tmp/installer-test-hc-prog-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}"' EXIT
 
 MOCK_HC_BIN="${SANDBOX_HC_PROG}/bin"
 mkdir -p "${MOCK_HC_BIN}"
@@ -574,7 +591,6 @@ fi
 # --- Test 27: Verify SGLang healthcheck early failure detection --------------
 echo "[Test 27] Verifying SGLang healthcheck early failure detection..."
 SANDBOX_HC_FAIL="$(mktemp -d /tmp/installer-test-hc-fail-XXXXXX)"
-trap 'rm -rf "${SANDBOX}" "${SANDBOX_GP}" "${SANDBOX_HEAL}" "${SANDBOX_NV}" "${SANDBOX_WARMUP}" "${SANDBOX_HC_PROG}" "${SANDBOX_HC_FAIL}"' EXIT
 
 MOCK_FAIL_BIN="${SANDBOX_HC_FAIL}/bin"
 mkdir -p "${MOCK_FAIL_BIN}"

@@ -24,7 +24,7 @@ if [ -f "$DEPLOYED" ]; then
     if grep -qE -- '--context-length [0-9]+\$' "$DEPLOYED"; then fail "corrupted context-length string in deployed unit"; else pass "deployed unit context-length valid"; fi
 fi
 if grep -qiE 'speculative|eagle|dflash|d-flash|draft|cpu-offload' "$U"; then fail "no speculative/offload flags"; else pass "no speculative/offload flags"; fi
-grep -q 'ornith-local' "$R/templates/opencode/opencode.json" && grep -q '"baseURL": "http://127.0.0.1:30000/v1"' "$R/templates/opencode/opencode.json" && grep -q '"apiKey": "EMPTY"' "$R/templates/opencode/opencode.json" && pass "opencode.json provider direct to :30000" || fail "opencode provider"
+grep -q 'ornith-local' "$R/config/opencode/opencode.json" && grep -q '"baseURL": "http://127.0.0.1:30000/v1"' "$R/config/opencode/opencode.json" && grep -q '"apiKey": "EMPTY"' "$R/config/opencode/opencode.json" && pass "opencode.json provider direct to :30000" || fail "opencode provider"
 [ -s "$R/docs/inference_architecture.md" ] && grep -q 'eagle-3' "$R/docs/inference_architecture.md" && grep -q 'continuous batching' "$R/docs/inference_architecture.md" && pass "docs/inference_architecture.md present" || fail "architecture doc"
 if curl -sf --max-time 2 http://127.0.0.1:30000/v1/models -o /tmp/_models.json 2>/dev/null; then
     grep -q '"max_model_len": *262144\|262144' /tmp/_models.json && pass "live /v1/models reports 262144" || fail "live max_model_len"

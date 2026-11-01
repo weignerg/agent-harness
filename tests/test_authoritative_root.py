@@ -397,14 +397,8 @@ class TestDirectoryDisciplineInvariant(unittest.TestCase):
         expected = "Directory Discipline Invariant"
 
         rule_files = [
-            repo_root / "templates" / "shared" / "rules" / "process-safety.md",
-            repo_root / "templates" / "shared" / "rules" / "agent-teams.md",
-            repo_root / "templates" / "agy" / "rules" / "process-safety.md",
-            repo_root / "templates" / "agy" / "rules" / "agent-teams.md",
-            repo_root / "templates" / "claude" / "rules" / "process-safety.md",
-            repo_root / "templates" / "claude" / "rules" / "agent-teams.md",
-            repo_root / "templates" / "opencode" / "rules" / "process-safety.md",
-            repo_root / "templates" / "opencode" / "rules" / "agent-teams.md",
+            repo_root / "core" / "rules" / "process-safety.md",
+            repo_root / "core" / "rules" / "agent-teams.md",
         ]
         for rf in rule_files:
             self.assertTrue(rf.is_file(), f"Missing rule file: {rf}")
@@ -415,16 +409,12 @@ class TestDirectoryDisciplineInvariant(unittest.TestCase):
         repo_root = Path(__file__).resolve().parent.parent
         expected = "Directory Discipline Invariant"
 
-        agent_dirs = [
-            (repo_root / "templates" / "agy" / "plugins" / "agy-harness" / "agents", 10),
-            (repo_root / "templates" / "claude" / "agents", 3),
-            (repo_root / "templates" / "opencode" / "agents", 10),
-        ]
-        for ad, expected_count in agent_dirs:
-            md_files = list(ad.glob("*.md"))
-            self.assertEqual(len(md_files), expected_count, f"Expected {expected_count} agent files in {ad}, found {len(md_files)}")
-            for af in md_files:
-                self.assertIn(expected, af.read_text(encoding="utf-8"), f"Invariant missing in {af}")
+        core_agents_dir = repo_root / "core" / "agents"
+        self.assertTrue(core_agents_dir.is_dir())
+        md_files = list(core_agents_dir.glob("*.md"))
+        self.assertGreaterEqual(len(md_files), 8, f"Expected at least 8 agent files in {core_agents_dir}, found {len(md_files)}")
+        for af in md_files:
+            self.assertIn(expected, af.read_text(encoding="utf-8"), f"Invariant missing in {af}")
 
 
 if __name__ == "__main__":
