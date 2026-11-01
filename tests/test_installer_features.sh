@@ -890,10 +890,18 @@ echo "[Test 32] Verifying SGLang selectable model profiles and backend setup..."
 SANDBOX_PROF="$(mktemp -d /tmp/installer-test-prof-XXXXXX)"
 PROF_OUT="$(USER_HOME="${SANDBOX_PROF}" HOME="${SANDBOX_PROF}" "${INSTALL_SCRIPT}" --target=opencode --sglang-model=27b-nvfp4 --non-interactive 2>&1 || true)"
 ENV_FILE="${SANDBOX_PROF}/.config/opencode-backends/env"
+GPU_PROF="${SANDBOX_PROF}/.config/opencode-backends/gpu_profile.json"
 
 if [ -f "$ENV_FILE" ] && \
    grep -q "SGLANG_PRIMARY_MODEL=local-sglang/qwen3.8-27b" "$ENV_FILE" && \
    grep -q "SGLANG_SERVICE=opencode-sglang-qwen27b.service" "$ENV_FILE" && \
+   grep -q "SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4" "$ENV_FILE" && \
+   grep -q "SGLANG_27B_QUANTIZATION=modelopt" "$ENV_FILE" && \
+   ! grep -q "Qwen/Qwen3.8-27B-FP4" "$ENV_FILE" && \
+   ! grep -q "SGLANG_27B_QUANTIZATION=fp4" "$ENV_FILE" && \
+   [ -f "$GPU_PROF" ] && \
+   grep -q '"model_path": "nvidia/Qwen3.8-27B-NVFP4"' "$GPU_PROF" && \
+   ! grep -q "Qwen/Qwen3.8-27B-FP4" "$GPU_PROF" && \
    [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ]; then
     pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units"
 else

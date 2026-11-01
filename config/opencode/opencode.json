@@ -13,28 +13,43 @@
           "name": "Ornith 1.5 35B-A3B MoE (Workhorse Model)",
           "context": 262144,
           "output": 32768,
-          "modalities": [
-            "text",
-            "image"
-          ]
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
         },
         "ornith-1.5-9b": {
           "name": "Ornith 1.5 9B (Fast Model)",
           "context": 262144,
           "output": 32768,
-          "modalities": [
-            "text",
-            "image"
-          ]
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
         },
         "qwen3.8-27b": {
           "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)",
           "context": 131072,
           "output": 32768,
-          "modalities": [
-            "text",
-            "image"
-          ],
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
           "variants": {
             "high": {
               "reasoningEffort": "high",
