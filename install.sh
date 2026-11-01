@@ -84,6 +84,7 @@ WIPE_BACKUPS=false
 ENABLE_T3_SERVE="${ENABLE_T3_SERVE:-true}"
 EXPLICIT_WITH_T3=false
 EXPLICIT_NO_T3=false
+T3_SERVE_WORKDIR="${T3_SERVE_WORKDIR:-}"
 SGLANG_MODEL="${SGLANG_MODEL:-ornith-35b}"
 
 SYSTEMD_UNITS=(
@@ -129,6 +130,7 @@ Parity & Modules:
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096, 4097, 3773 & 30000 (default: with)
   --with-backends / --no-backends      Toggle SGLang systemd units & backend venv (default: with)
   --with-t3 / --no-t3                  Toggle T3 Code (t3 serve) unified frontend server & unit (default: with)
+  --t3-workdir <path>                  Set custom working directory for t3-serve.service (default: user home)
   --download-models / --no-download-models Toggle automatic HF model weights acquisition (default: with backends)
   --skip-warmup / --warmup             Toggle foreground SGLang warmup & live weight download (default: with)
   --healthcheck / --no-healthcheck, --skip-healthcheck Toggle live systemd & port healthcheck verification (default: with)
@@ -294,6 +296,14 @@ while [[ $# -gt 0 ]]; do
             ENABLE_T3_SERVE=false
             EXPLICIT_NO_T3=true
             EXPLICIT_WITH_T3=false
+            shift
+            ;;
+        --t3-workdir)
+            T3_SERVE_WORKDIR="$2"
+            shift 2
+            ;;
+        --t3-workdir=*)
+            T3_SERVE_WORKDIR="${1#*=}"
             shift
             ;;
         --download-models|--with-download-models)
@@ -2280,6 +2290,25 @@ with open(path, 'w') as f:
             fi
         fi
     done
+
+    # Tune T3 Code working directory if custom path requested
+    if [ -n "$T3_SERVE_WORKDIR" ]; then
+        local resolved_t3_workdir="$T3_SERVE_WORKDIR"
+        if [[ "$resolved_t3_workdir" == "~"* ]]; then
+            resolved_t3_workdir="${USER_HOME}${resolved_t3_workdir:1}"
+        elif [[ "$resolved_t3_workdir" != /* ]] && [[ "$resolved_t3_workdir" != "%"* ]]; then
+            resolved_t3_workdir="$(cd "$resolved_t3_workdir" 2>/dev/null && pwd || echo "$resolved_t3_workdir")"
+        fi
+        for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+            if [ -f "${dest_dir}/t3-serve.service" ]; then
+                if grep -q '^WorkingDirectory=' "${dest_dir}/t3-serve.service"; then
+                    sed -i "s|^WorkingDirectory=.*|WorkingDirectory=${resolved_t3_workdir}|" "${dest_dir}/t3-serve.service"
+                else
+                    sed -i "/\\[Service\\]/a WorkingDirectory=${resolved_t3_workdir}" "${dest_dir}/t3-serve.service"
+                fi
+            fi
+        done
+    fi
 
     # 5. Reload systemd daemon if available (prior to enabling or starting services)
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then

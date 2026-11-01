@@ -166,6 +166,11 @@ T3 Code provides a single web-based interface and REST/WebSocket API to manage C
   systemctl --user enable --now t3-serve.service
   systemctl --user status t3-serve.service
   ```
+- **Working Directory Configuration**:
+  The systemd service defaults to your home directory (`WorkingDirectory=%h`). To customize the starting workspace or project directory, deploy with:
+  ```bash
+  ./install.sh --t3-workdir /path/to/project
+  ```
 - **Install CLI**:
   ```bash
   curl -fsSL https://t3.codes/install.sh | sh
