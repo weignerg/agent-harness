@@ -229,7 +229,33 @@ The T3 Code frontend is packaged as the systemd user service `t3-serve.service`.
    t3 serve --host 0.0.0.0 --port 3773
    ```
 
-### 6.3 Pairing Desktop, Web & Mobile Clients
+### 6.3 Pairing Token Generation & Authentication (`t3 pair`)
+T3 Code protects access to `t3 serve` using cryptographically signed pairing tokens.
+
+1. **Token Lifetime & Expiration**:
+   - Default pairing tokens minted on server startup or via `t3 pair` expire in **5 minutes** (`--ttl 5m`).
+   - `./install.sh` automatically attempts to mint and display a fresh pairing token and Pairing URL in the post-install summary.
+
+2. **Minting Fresh Pairing Tokens**:
+   Whenever your pairing token expires or when connecting a new browser or device, mint a fresh token from your terminal:
+   ```bash
+   # Mint a new 5-minute pairing token, QR code, and Pairing URL:
+   t3 pair
+
+   # Mint a longer-lived 1-hour pairing token:
+   t3 pair --ttl 1h
+
+   # Mint a pairing token with a specific device label:
+   t3 pair --label "MacBook-Pro"
+   ```
+
+3. **Inspecting Initial Startup Token**:
+   If you did not run `t3 pair`, the initial startup token can be retrieved from recent systemd unit journal logs:
+   ```bash
+   journalctl --user -u t3-serve.service -n 30 --no-pager
+   ```
+
+### 6.4 Pairing Desktop, Web & Mobile Clients
 
 1. **Local Area Network (LAN) Web Access**:
    Navigate to `http://<HOST_LAN_IP>:3773` in any modern web browser (Chrome, Edge, Firefox, Safari).
@@ -277,6 +303,7 @@ sudo ufw reload
 |---|---|---|
 | OpenCode Server connection refused | `systemctl --user status opencode-server` | Run `systemctl --user start opencode-server` |
 | T3 Code Server connection refused | `systemctl --user status t3-serve` | Run `systemctl --user start t3-serve` |
+| T3 Code pairing token expired or invalid | `t3 pair` | Run 't3 pair' (or 't3 pair --ttl 1h') to mint a fresh pairing token and URL |
 | HTTP 401 Unauthorized from Mobile | `grep OPENCODE_SERVER ~/.config/opencode-backends/env` | Re-verify password matching `~/.config/opencode-backends/env` |
 | Port 4096 or 3773 unreachable across LAN | `sudo ufw status` | Allow ports 4096/3773 from client subnet in UFW |
 | SGLang inference backend unhealthy | `curl http://127.0.0.1:30000/v1/models` | Check `systemctl --user status opencode-sglang*.service` |

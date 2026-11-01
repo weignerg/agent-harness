@@ -972,6 +972,13 @@ class TestUniversalInstaller(unittest.TestCase):
                 '            printf "OpenCode Server\\n"\n'
                 '        fi\n'
                 '        exit 0\n'
+                '    elif echo "$arg" | grep -q "3773"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "T3 Code Server\\n200"\n'
+                '        else\n'
+                '            printf "T3 Code Server\\n"\n'
+                '        fi\n'
+                '        exit 0\n'
                 '    fi\n'
                 'done\n'
                 'exit 1\n',
@@ -1028,6 +1035,13 @@ class TestUniversalInstaller(unittest.TestCase):
                 '            printf "OpenCode Server\\n200"\n'
                 '        else\n'
                 '            printf "OpenCode Server\\n"\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    elif echo "$arg" | grep -q "3773"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "T3 Code Server\\n200"\n'
+                '        else\n'
+                '            printf "T3 Code Server\\n"\n'
                 '        fi\n'
                 '        exit 0\n'
                 '    fi\n'
@@ -1093,6 +1107,13 @@ class TestUniversalInstaller(unittest.TestCase):
                 '            printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n200\'\n'
                 '        else\n'
                 '            printf \'{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\\n\'\n'
+                '        fi\n'
+                '        exit 0\n'
+                '    elif echo "$arg" | grep -q "3773"; then\n'
+                '        if echo "$*" | grep -q "%{http_code}"; then\n'
+                '            printf "T3 Code Server\\n200"\n'
+                '        else\n'
+                '            printf "T3 Code Server\\n"\n'
                 '        fi\n'
                 '        exit 0\n'
                 '    fi\n'
@@ -1214,6 +1235,10 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("OPENCODE_SERVER_PORT=4096", env_content)
             self.assertIn("OPENCODE_SERVER_HOST=0.0.0.0", env_content)
 
+            # Verify installer summary output includes t3 pair instructions
+            self.assertIn("t3 pair", proc_inst.stdout)
+            self.assertIn("t3 pair --ttl 1h", proc_inst.stdout)
+
             # Verify manifest tracks it
             manifest_file = sandbox / ".orchestration" / "install_manifest.json"
             self.assertTrue(manifest_file.is_file())
@@ -1225,6 +1250,17 @@ class TestUniversalInstaller(unittest.TestCase):
             proc_uninst = self.run_installer("--uninstall", "--mode", "global", "--non-interactive", env=env)
             self.assertEqual(proc_uninst.returncode, 0, f"Uninstall failed: {proc_uninst.stderr}\n{proc_uninst.stdout}")
             self.assertFalse(t3_unit.exists(), "t3-serve.service should be removed by uninstall")
+
+            # Verify documentation mentions t3 pair and t3 pair --ttl 1h
+            qs_doc = (REPO_ROOT / "docs" / "QUICKSTART.md").read_text(encoding="utf-8")
+            readme_doc = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+            remote_doc = (REPO_ROOT / "docs" / "remote_connections.md").read_text(encoding="utf-8")
+            self.assertIn("t3 pair", qs_doc)
+            self.assertIn("t3 pair --ttl 1h", qs_doc)
+            self.assertIn("t3 pair", readme_doc)
+            self.assertIn("t3 pair --ttl 1h", readme_doc)
+            self.assertIn("t3 pair", remote_doc)
+            self.assertIn("t3 pair --ttl 1h", remote_doc)
 
 
 if __name__ == "__main__":

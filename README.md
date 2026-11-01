@@ -52,7 +52,8 @@ agy remote-control start
 
 # D. T3 Code (Unified web cockpit on port 3773):
 systemctl --user enable --now t3-serve.service
-# Open http://127.0.0.1:3773 in your browser
+t3 pair                     # Mint new 5m pairing token & URL (or 't3 pair --ttl 1h')
+# Open http://127.0.0.1:3773 in your browser (or follow printed Pairing URL)
 ```
 
 ---
