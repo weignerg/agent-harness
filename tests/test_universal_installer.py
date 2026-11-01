@@ -1176,7 +1176,10 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn('Environment="HOME=%h"', content)
         self.assertIn('Environment="CLAUDE_CONFIG_DIR=%h/.claude"', content)
         self.assertIn('Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"', content)
+        self.assertIn('Environment="T3_SERVE_HOST=0.0.0.0"', content)
         self.assertIn('Environment="T3_SERVE_PORT=3773"', content)
+        self.assertIn("StartLimitIntervalSec=60", content)
+        self.assertIn("StartLimitBurst=5", content)
         self.assertIn("t3", content)
         self.assertIn("serve", content)
         self.assertIn("3773", content)
@@ -1195,7 +1198,7 @@ class TestUniversalInstaller(unittest.TestCase):
             systemd_user_dir = sandbox / ".config" / "systemd" / "user"
             env = {
                 "USER_HOME": str(sandbox),
-                "HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
             }
 
             # Install with --with-t3

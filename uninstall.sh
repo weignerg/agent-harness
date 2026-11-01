@@ -225,7 +225,7 @@ if [ "$MODE" = "global" ]; then
         for u_name in "${SYSTEMD_UNITS[@]}"; do
             u="${SYSTEMD_USER_DIR}/${u_name}"
             if [ -f "$u" ]; then
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user stop "$u_name" 2>/dev/null || true
                     systemctl --user disable "$u_name" 2>/dev/null || true
                 fi
@@ -235,14 +235,14 @@ if [ "$MODE" = "global" ]; then
         for u in "${SYSTEMD_USER_DIR}"/opencode-*.service "${SYSTEMD_USER_DIR}"/opencode-*.timer "${SYSTEMD_USER_DIR}"/opencode-*.slice; do
             if [ -f "$u" ]; then
                 unit_name="$(basename "$u")"
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user stop "$unit_name" 2>/dev/null || true
                     systemctl --user disable "$unit_name" 2>/dev/null || true
                 fi
                 rm -f "$u"
             fi
         done
-        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
             systemctl --user daemon-reload 2>/dev/null || true
         fi
     fi

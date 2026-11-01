@@ -1556,7 +1556,7 @@ verify_backend_healthchecks() {
     local failure_reasons=()
 
     # 1. Start / enable units if systemctl is available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
@@ -1941,14 +1941,7 @@ with open(path, 'w') as f:
     fi
 
     # 4. Deploy systemd user units into systemd_dest (~/.config/systemd/user)
-    local units=(
-        "opencode-server.service"
-        "opencode-agent.slice"
-        "opencode-colbert-reindex.service"
-        "opencode-colbert-reindex.timer"
-        "opencode-sglang-ornith-35b.service"
-        "opencode-t3-serve.service"
-    )
+    local units=("${SYSTEMD_UNITS[@]}")
 
     for u in "${units[@]}"; do
         if [ -f "${SCRIPT_DIR}/config/systemd/${u}" ]; then
@@ -1958,33 +1951,6 @@ with open(path, 'w') as f:
             cp -f "${SCRIPT_DIR}/config/systemd/${u}" "${systemd_dest}/${u}"
         fi
     done
-
-    # Manage T3 Code (t3 serve) service activation & optional installation
-    local t3_should_enable=false
-    if [ "$ENABLE_T3_SERVE" = true ]; then
-        t3_should_enable=true
-    elif [ "$EXPLICIT_NO_T3" != true ] && command -v t3 >/dev/null 2>&1; then
-        t3_should_enable=true
-    fi
-
-    if [ "$ENABLE_T3_SERVE" = true ] && ! command -v t3 >/dev/null 2>&1; then
-        if [ "${USER_HOME}" = "${HOME}" ] && [ "$DRY_RUN" != true ]; then
-            echo "  📦 Installing t3 CLI via bun or npm..."
-            if command -v bun >/dev/null 2>&1; then
-                bun install -g t3 2>/dev/null || true
-            elif command -v npm >/dev/null 2>&1; then
-                npm install -g t3 2>/dev/null || true
-            fi
-        fi
-    fi
-
-    if [ "$t3_should_enable" = true ]; then
-        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && [ "$DRY_RUN" != true ]; then
-            echo "  🚀 Enabling and starting opencode-t3-serve.service..."
-            systemctl --user enable opencode-t3-serve.service 2>/dev/null || true
-            systemctl --user start opencode-t3-serve.service 2>/dev/null || true
-        fi
-    fi
 
     # Tune primary SGLang service with probed parameters
     if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${systemd_dest}/opencode-sglang-ornith-35b.service" ]; then
@@ -2005,9 +1971,41 @@ with open(path, 'w') as f:
             "${systemd_dest}/opencode-sglang-ornith-35b.service"
     fi
 
-    # 5. Reload systemd daemon if available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+    # 5. Reload systemd daemon if available (prior to enabling or starting services)
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
+    fi
+
+    # 6. Manage T3 Code (t3 serve) service activation & optional installation
+    local t3_installed=false
+    if command -v t3 >/dev/null 2>&1 || [ -x "${USER_HOME}/.bun/bin/t3" ] || [ -x "${USER_HOME}/.local/bin/t3" ]; then
+        t3_installed=true
+    fi
+
+    local t3_should_enable=false
+    if [ "$ENABLE_T3_SERVE" = true ]; then
+        t3_should_enable=true
+    elif [ "$EXPLICIT_NO_T3" != true ] && [ "$t3_installed" = true ]; then
+        t3_should_enable=true
+    fi
+
+    if [ "$ENABLE_T3_SERVE" = true ] && [ "$t3_installed" != true ]; then
+        if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+            echo "  📦 Installing t3 CLI via bun or npm..."
+            if command -v bun >/dev/null 2>&1; then
+                bun install -g t3 2>/dev/null || true
+            elif command -v npm >/dev/null 2>&1; then
+                npm install -g t3 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    if [ "$t3_should_enable" = true ]; then
+        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+            echo "  🚀 Enabling and starting opencode-t3-serve.service..."
+            systemctl --user enable opencode-t3-serve.service 2>/dev/null || true
+            systemctl --user start opencode-t3-serve.service 2>/dev/null || true
+        fi
     fi
     echo "  ✅ Deployed systemd user units to ${systemd_dest}/"
 }
@@ -2626,7 +2624,7 @@ run_uninstall() {
                 for u_name in "${SYSTEMD_UNITS[@]}"; do
                     local u="${systemd_user_dir}/${u_name}"
                     if [ -f "$u" ]; then
-                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                             systemctl --user stop "$u_name" 2>/dev/null || true
                             systemctl --user disable "$u_name" 2>/dev/null || true
                         fi
@@ -2636,14 +2634,14 @@ run_uninstall() {
                 for u in "${systemd_user_dir}"/opencode-*.service "${systemd_user_dir}"/opencode-*.timer "${systemd_user_dir}"/opencode-*.slice; do
                     if [ -f "$u" ]; then
                         local unit_name="$(basename "$u")"
-                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                             systemctl --user stop "$unit_name" 2>/dev/null || true
                             systemctl --user disable "$unit_name" 2>/dev/null || true
                         fi
                         rm -f "$u"
                     fi
                 done
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user daemon-reload 2>/dev/null || true
                 fi
             fi
