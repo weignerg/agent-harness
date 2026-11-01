@@ -824,6 +824,26 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", qs_text)
         self.assertNotIn("qwen3.5", qs_text)
 
+    def test_zero_warmup_session_context_and_drive_to_completion_invariants(self) -> None:
+        """Verify core/CHARTER.md has Zero-Warmup Session Context and core/rules/agent-teams.md has Drive-to-Completion (Issue #25)."""
+        charter_text = (CORE_DIR / "CHARTER.md").read_text(encoding="utf-8")
+        self.assertIn("## ⚡ Zero-Warmup Session Context & Host Ground Truth", charter_text)
+        self.assertIn("Zero-Warmup Session Context", charter_text)
+        self.assertIn("RTX 5090", charter_text)
+        self.assertIn("ornith-ai/Ornith-1.5-35B-A3B-NVFP4", charter_text)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", charter_text)
+        self.assertIn("http://127.0.0.1:30000/v1", charter_text)
+        self.assertIn("opencode-t3-serve.service", charter_text)
+
+        agent_teams_text = (CORE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
+        self.assertIn("Drive-to-Completion", agent_teams_text)
+        self.assertIn("Autonomous \"Drive-to-Completion\" Execution Mode", agent_teams_text)
+        self.assertIn("Two-Round Adversarial Review Gate", agent_teams_text)
+
+        gemini_text = (CONFIG_DIR / "agy" / "GEMINI.md").read_text(encoding="utf-8")
+        self.assertIn("## Zero-Warmup Orchestration & Reactive Turn Discipline", gemini_text)
+        self.assertIn("Immediate Turn Termination on Async Dispatch", gemini_text)
+
 
 if __name__ == "__main__":
     unittest.main()

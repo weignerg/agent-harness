@@ -119,6 +119,16 @@ Across all supported runtimes, roles align strictly to model reasoning tiers wit
 
 ---
 
+## Autonomous "Drive-to-Completion" Execution Mode
+When the human operator pre-authorizes driving one or more tickets to completion (e.g., *"drive them to completion with 2 rounds of adversarial review and merge to develop"*), the orchestrator executes the full pipeline autonomously without pausing at intermediate steps:
+1. **Ticket & Worktree Provisioning**: Create the GitHub Issue(s) (`gh issue create`) and provision an isolated worktree per issue (`python3 scripts/worktree_manager.py create --branch <type>/issue-<n>-<desc> --path <repo>/.orchestration/worktrees/issue-<n>-<desc> --base develop`).
+2. **High-Signal Pre-Flight Prompting**: Give each spawned `worker` exact `file:line` pointers, traceback/journal root causes, and concrete verification commands so workers complete implementation in 1–2 turns.
+3. **Two-Round Adversarial Review Gate**: Automatically run **Pass 1 Adversarial Review** (`reviewer`), dispatch `worker` to fix any findings (including warnings when applicable), and run **Pass 2 Second-Pass Scope Gate** (`reviewer`).
+4. **Develop Sync & Post-Conflict Review**: Merge/rebase latest `develop` (or parent branch) into the worktree, resolve any conflicts, and run a **Post-Conflict Adversarial Review** + **Supreme Orchestrator Final Pre-Merge Audit** (`git diff develop...HEAD`).
+5. **PR, Merge, Prune & Live Host Sync**: Push branch, create PR (`gh pr create`), merge into `develop`, prune the worktree (`worktree_manager.py remove`), run the fast `./install.sh` global config resync, and append an audit entry to `~/HISTORY.md`.
+
+---
+
 ## Handoff Convention
 - Each `team-orchestrator`, upon completing its issue, writes a session handoff to the authoritative `.orchestration/handoffs/{session-description}-dd-mm-yyyy-handoff.md`.
 - The `supreme-orchestrator` writes the master session handoff to `.orchestration/handoffs/supreme-orchestrator-dd-mm-yyyy-handoff.md`.

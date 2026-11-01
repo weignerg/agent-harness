@@ -103,6 +103,24 @@ When a request matches a scenario below, load the skill before proceeding:
 
 ---
 
+## ⚡ Zero-Warmup Session Context & Host Ground Truth
+- **Workstation & GPU Profile**: NVIDIA GeForce RTX 5090 (32 GB Blackwell VRAM, Compute Capability `12.0` / `sm_120`), 125 GB Host RAM, 48 CPU threads on CachyOS Linux.
+- **Authoritative Local Model Checkpoints & Services (Port `30000`)**:
+  - **Workhorse MoE (`ornith-1.5-35b`)**: `ornith-ai/Ornith-1.5-35B-A3B-NVFP4` via `opencode-sglang-ornith-35b.service` (`262144` context, `--mem-fraction-static 0.88`).
+  - **Dense 27B (`qwen3.8-27b` / `27b-nvfp4`)**: `nvidia/Qwen3.8-27B-NVFP4` via `opencode-sglang-qwen27b.service` (`65536` context, `--quantization modelopt --disable-prefill-cuda-graph --cuda-graph-max-bs-decode 8`). Never use `qwen3.5` or `Qwen/Qwen3.8-27B-FP4`.
+  - **Fast 9B Leaf (`ornith-1.5-9b`)**: `ornith-ai/Ornith-1.5-9B-NVFP4`.
+- **Unified Server Endpoints**:
+  - Local SGLang Inference API: `http://127.0.0.1:30000/v1`
+  - OpenCode Headless Server: `http://0.0.0.0:4096` (`opencode-server.service`)
+  - T3 Code Unified Web/API Server: `http://0.0.0.0:3773` (`opencode-t3-serve.service`)
+- **Fast Operational Shortcuts & CLI Gotchas**:
+  - Always `cd` into the target git repository root before invoking `python3 scripts/worktree_manager.py` or `gh` CLI commands.
+  - Validate SGLang CLI flags offline before editing service units using the SGLang venv (`~/.local/share/opencode-sglang-stack/venv/bin/python3 -c "from sglang.srt.server_args import prepare_server_args; ..."`).
+  - After merging harness changes into `develop`, immediately synchronize the live global installation in ~5s via:
+    `./install.sh --target all --global --no-backends --no-firewall --no-obsidian --skip-warmup --no-healthcheck -y`
+
+---
+
 ## ⚙️ Runtime Behavior & Execution Invariants
 1. Execute tool calls directly without conversational preamble, status narration, or chat transitions.
 2. Parse compiler errors and test tracebacks directly into patch diffs.
