@@ -1407,6 +1407,8 @@ print_completion_summary() {
         if [ "$DRY_RUN" != true ] && [ -n "$t3_bin" ] && [ -x "$t3_bin" ]; then
             if command -v timeout >/dev/null 2>&1; then
                 pair_output="$(timeout 5 "$t3_bin" pair 2>/dev/null || true)"
+            elif command -v python3 >/dev/null 2>&1; then
+                pair_output="$(python3 -c 'import subprocess, sys; r = subprocess.run([sys.argv[1], "pair"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5); print(r.stdout, end="")' "$t3_bin" 2>/dev/null || true)"
             else
                 pair_output="$("$t3_bin" pair 2>/dev/null || true)"
             fi
