@@ -498,7 +498,7 @@ class TestUniversalInstaller(unittest.TestCase):
                 "opencode-colbert-reindex.service",
                 "opencode-colbert-reindex.timer",
                 "opencode-sglang-ornith-35b.service",
-                "opencode-t3-serve.service",
+                "t3-serve.service",
             ]
             for unit in expected_units:
                 unit_path = systemd_user_dir / unit
@@ -597,7 +597,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.service").is_file())
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.timer").is_file())
             self.assertTrue((systemd_user_dir / "opencode-sglang-ornith-35b.service").is_file())
-            self.assertTrue((systemd_user_dir / "opencode-t3-serve.service").is_file())
+            self.assertTrue((systemd_user_dir / "t3-serve.service").is_file())
 
             # Manifest in local repo tracks them
             manifest_file = repo_dir / ".orchestration" / "install_manifest.json"
@@ -605,7 +605,7 @@ class TestUniversalInstaller(unittest.TestCase):
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             recorded_file_paths = [f["path"] for f in manifest_data.get("files", [])]
             self.assertIn(str((systemd_user_dir / "opencode-server.service").resolve()), recorded_file_paths)
-            self.assertIn(str((systemd_user_dir / "opencode-t3-serve.service").resolve()), recorded_file_paths)
+            self.assertIn(str((systemd_user_dir / "t3-serve.service").resolve()), recorded_file_paths)
 
             # Verify integrity
             proc_verify = self.run_installer("--verify", "--mode", "local", str(repo_dir), env=env)
@@ -617,7 +617,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(proc_uninst.returncode, 0)
             self.assertFalse((systemd_user_dir / "opencode-server.service").exists())
             self.assertFalse((systemd_user_dir / "opencode-agent.slice").exists())
-            self.assertFalse((systemd_user_dir / "opencode-t3-serve.service").exists())
+            self.assertFalse((systemd_user_dir / "t3-serve.service").exists())
 
     def test_opencode_gpu_probe_tuning_in_service_unit(self):
         """Test GPU probe detects profile and tunes service unit memory fraction and context length."""
@@ -1161,8 +1161,8 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(expected_root))
 
     def test_t3_code_serve_systemd_unit_definition(self):
-        """Test Issue #15: opencode-t3-serve.service definition and structure."""
-        svc_path = REPO_ROOT / "config" / "systemd" / "opencode-t3-serve.service"
+        """Test Issue #15 & #24: t3-serve.service definition, ExecCondition, and structure."""
+        svc_path = REPO_ROOT / "config" / "systemd" / "t3-serve.service"
         self.assertTrue(svc_path.is_file(), f"Missing unit file: {svc_path}")
         content = svc_path.read_text(encoding="utf-8")
         self.assertIn("EnvironmentFile=-%h/.config/opencode-backends/env", content)
@@ -1171,15 +1171,19 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn('Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"', content)
         self.assertIn('Environment="T3_SERVE_HOST=0.0.0.0"', content)
         self.assertIn('Environment="T3_SERVE_PORT=3773"', content)
+        self.assertIn("ExecCondition=", content)
         self.assertIn("StartLimitIntervalSec=60", content)
         self.assertIn("StartLimitBurst=5", content)
         self.assertIn("t3", content)
         self.assertIn("serve", content)
         self.assertIn("3773", content)
+        self.assertNotIn("http.server", content)
+        self.assertNotIn("bunx", content)
+        self.assertNotIn("npx", content)
         self.assertIn("WantedBy=default.target", content)
 
     def test_t3_code_serve_installer_flags_and_deployment(self):
-        """Test Issue #15: install.sh --help documents T3 flags, and deploys opencode-t3-serve.service."""
+        """Test Issue #15 & #24: install.sh --help documents T3 flags, and automatically deploys t3-serve.service by default."""
         proc_help = self.run_installer("--help")
         self.assertEqual(proc_help.returncode, 0)
         self.assertIn("--with-t3", proc_help.stdout)
@@ -1194,13 +1198,21 @@ class TestUniversalInstaller(unittest.TestCase):
                 "SYSTEMD_USER_DIR": str(systemd_user_dir),
             }
 
-            # Install with --with-t3
-            proc_inst = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", "--with-t3", env=env)
+            # Standard install by default (without explicit --with-t3) automatically provisions T3 serve
+            proc_inst = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", env=env)
             self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
 
-            t3_unit = systemd_user_dir / "opencode-t3-serve.service"
-            self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed")
+            t3_unit = systemd_user_dir / "t3-serve.service"
+            self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed by default")
             self.assertIn("T3_SERVE_PORT=3773", t3_unit.read_text(encoding="utf-8"))
+
+            env_file = sandbox / ".config" / "opencode-backends" / "env"
+            self.assertTrue(env_file.is_file(), f"Expected {env_file} to exist")
+            env_content = env_file.read_text(encoding="utf-8")
+            self.assertIn("T3_SERVE_PORT=3773", env_content)
+            self.assertIn("T3_SERVE_HOST=0.0.0.0", env_content)
+            self.assertIn("OPENCODE_SERVER_PORT=4096", env_content)
+            self.assertIn("OPENCODE_SERVER_HOST=0.0.0.0", env_content)
 
             # Verify manifest tracks it
             manifest_file = sandbox / ".orchestration" / "install_manifest.json"
@@ -1212,7 +1224,7 @@ class TestUniversalInstaller(unittest.TestCase):
             # Uninstall and verify removal
             proc_uninst = self.run_installer("--uninstall", "--mode", "global", "--non-interactive", env=env)
             self.assertEqual(proc_uninst.returncode, 0, f"Uninstall failed: {proc_uninst.stderr}\n{proc_uninst.stdout}")
-            self.assertFalse(t3_unit.exists(), "opencode-t3-serve.service should be removed by uninstall")
+            self.assertFalse(t3_unit.exists(), "t3-serve.service should be removed by uninstall")
 
 
 if __name__ == "__main__":

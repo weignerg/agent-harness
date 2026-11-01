@@ -51,7 +51,7 @@ agy --agent supreme-orchestrator --effort high
 agy remote-control start
 
 # D. T3 Code (Unified web cockpit on port 3773):
-systemctl --user enable --now opencode-t3-serve.service
+systemctl --user enable --now t3-serve.service
 # Open http://127.0.0.1:3773 in your browser
 ```
 

@@ -837,18 +837,22 @@ else
     fail "config/agy/GEMINI.md missing required tool or mechanism documentation"
 fi
 
-# --- Test 31: Verifying T3 Code (t3 serve) systemd unit and installer flags ---
-echo "[Test 31] Verifying T3 Code (t3 serve) systemd unit and installer integration (Issue #15)..."
-T3_UNIT_SRC="${REPO_DIR}/config/systemd/opencode-t3-serve.service"
+# --- Test 31: Verifying T3 Code (t3 serve) automatic setup & parity (Issues #15 & #24) ---
+echo "[Test 31] Verifying T3 Code (t3 serve) automatic setup, env config, and healthcheck parity (Issue #24)..."
+T3_UNIT_SRC="${REPO_DIR}/config/systemd/t3-serve.service"
 if [ -f "$T3_UNIT_SRC" ] && \
    grep -q '^EnvironmentFile=-%h/\.config/opencode-backends/env' "$T3_UNIT_SRC" && \
    grep -q 'Environment="T3_SERVE_PORT=3773"' "$T3_UNIT_SRC" && \
    grep -q 't3' "$T3_UNIT_SRC" && \
    grep -q 'serve' "$T3_UNIT_SRC" && \
-   grep -q '3773' "$T3_UNIT_SRC"; then
-    pass "opencode-t3-serve.service exists with valid t3 serve port 3773 and EnvironmentFile configuration"
+   grep -q '3773' "$T3_UNIT_SRC" && \
+   grep -q 'ExecCondition=' "$T3_UNIT_SRC" && \
+   ! grep -q 'http\.server' "$T3_UNIT_SRC" && \
+   ! grep -q 'bunx' "$T3_UNIT_SRC" && \
+   ! grep -q 'npx' "$T3_UNIT_SRC"; then
+    pass "t3-serve.service exists with secure t3 serve, port 3773, and ExecCondition guard"
 else
-    fail "opencode-t3-serve.service missing expected t3 serve configuration"
+    fail "t3-serve.service missing expected t3 serve configuration or contains forbidden fallbacks"
 fi
 
 HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
@@ -858,32 +862,127 @@ else
     fail "install.sh --help missing --with-t3 or --no-t3"
 fi
 
-SANDBOX_T3="$(mktemp -d /tmp/test-installer-t3-XXXXXX)"
-mkdir -p "${SANDBOX_T3}/.config/opencode-backends"
-cat << 'EOF' > "${SANDBOX_T3}/.config/opencode-backends/env"
+# 31a: Default install (without --with-t3) automatically provisions T3 Code serve env and units
+SANDBOX_T3_DEF="$(mktemp -d /tmp/test-installer-t3-def-XXXXXX)"
+USER_HOME="${SANDBOX_T3_DEF}" HOME="${SANDBOX_T3_DEF}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive >/dev/null 2>&1 || true
+
+DEPLOYED_T3_DEF="${SANDBOX_T3_DEF}/.config/systemd/user/t3-serve.service"
+ENV_T3_DEF="${SANDBOX_T3_DEF}/.config/opencode-backends/env"
+
+if [ -f "$DEPLOYED_T3_DEF" ] && [ -f "$ENV_T3_DEF" ] && \
+   grep -q "^T3_SERVE_PORT=3773" "$ENV_T3_DEF" && \
+   grep -q "^T3_SERVE_HOST=0.0.0.0" "$ENV_T3_DEF" && \
+   grep -q "^OPENCODE_SERVER_PORT=4096" "$ENV_T3_DEF" && \
+   grep -q "^OPENCODE_SERVER_HOST=0.0.0.0" "$ENV_T3_DEF"; then
+    pass "Default install automatically provisions T3_SERVE_PORT and OPENCODE_SERVER_PORT in env and deploys unit"
+else
+    fail "Default install failed to automatically configure T3 Code serve env and unit"
+fi
+
+# 31b: Update existing env file with missing T3 config
+SANDBOX_T3_UPD="$(mktemp -d /tmp/test-installer-t3-upd-XXXXXX)"
+mkdir -p "${SANDBOX_T3_UPD}/.config/opencode-backends"
+cat << 'EOF' > "${SANDBOX_T3_UPD}/.config/opencode-backends/env"
 HF_TOKEN=hf_mock_secret_token_123456
 OPENCODE_SERVER_USERNAME=testuser
 OPENCODE_SERVER_PASSWORD=secret_server_password_987
-OPENCODE_SERVER_PORT=4096
-OPENCODE_SERVER_HOST=0.0.0.0
 EOF
-chmod 600 "${SANDBOX_T3}/.config/opencode-backends/env"
+chmod 600 "${SANDBOX_T3_UPD}/.config/opencode-backends/env"
 
-USER_HOME="${SANDBOX_T3}" HOME="${SANDBOX_T3}" "${INSTALL_SCRIPT}" --target=opencode --with-t3 --non-interactive >/dev/null 2>&1 || true
+USER_HOME="${SANDBOX_T3_UPD}" HOME="${SANDBOX_T3_UPD}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive >/dev/null 2>&1 || true
 
-DEPLOYED_T3="${SANDBOX_T3}/.config/systemd/user/opencode-t3-serve.service"
-if [ -f "$DEPLOYED_T3" ]; then
-    pass "install.sh deploys opencode-t3-serve.service into \${HOME}/.config/systemd/user/"
+ENV_T3_UPD="${SANDBOX_T3_UPD}/.config/opencode-backends/env"
+if grep -q "^T3_SERVE_PORT=3773" "$ENV_T3_UPD" && grep -q "^T3_SERVE_HOST=0.0.0.0" "$ENV_T3_UPD" && \
+   grep -q "^OPENCODE_SERVER_PORT=4096" "$ENV_T3_UPD" && grep -q "^OPENCODE_SERVER_HOST=0.0.0.0" "$ENV_T3_UPD"; then
+    pass "Installer idempotently updates existing env file with T3_SERVE and OPENCODE_SERVER config"
 else
-    fail "opencode-t3-serve.service not deployed into systemd user directory"
+    fail "Installer failed to update existing env file with T3_SERVE config"
 fi
 
-USER_HOME="${SANDBOX_T3}" HOME="${SANDBOX_T3}" "${REPO_DIR}/uninstall.sh" --global --yes >/dev/null 2>&1 || true
-
-if [ ! -f "$DEPLOYED_T3" ]; then
-    pass "uninstall.sh cleanly removed opencode-t3-serve.service"
+# 31c: Verify --no-t3 flag disables T3 Code serve in summary dashboard
+NO_T3_OUT="$(USER_HOME="${SANDBOX_T3_DEF}" HOME="${SANDBOX_T3_DEF}" "${INSTALL_SCRIPT}" --target=opencode --no-t3 --non-interactive 2>&1 || true)"
+if echo "$NO_T3_OUT" | grep -q "T3 Code Unified Server.*disabled (--no-t3)"; then
+    pass "--no-t3 flag correctly reflects disabled state in dashboard"
 else
-    fail "uninstall.sh failed to remove opencode-t3-serve.service"
+    fail "--no-t3 flag did not reflect disabled state in dashboard"
+fi
+
+# 31d: Verify healthcheck parity when t3 is absent vs present
+SANDBOX_HC_T3="$(mktemp -d /tmp/test-installer-t3-hc-XXXXXX)"
+MOCK_T3_BIN="${SANDBOX_HC_T3}/bin"
+mkdir -p "${MOCK_T3_BIN}"
+
+cat << 'EOF' > "${MOCK_T3_BIN}/curl"
+#!/bin/sh
+for arg in "$@"; do
+    if echo "$arg" | grep -q "4096"; then
+        if echo "$*" | grep -q "%{http_code}"; then
+            printf "OpenCode Server\n200"
+        else
+            printf "OpenCode Server\n"
+        fi
+        exit 0
+    elif echo "$arg" | grep -q "3773"; then
+        if echo "$*" | grep -q "%{http_code}"; then
+            printf "T3 Code Server\n200"
+        else
+            printf "T3 Code Server\n"
+        fi
+        exit 0
+    elif echo "$arg" | grep -q "30000/v1/models"; then
+        if echo "$*" | grep -q "%{http_code}"; then
+            printf '{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\n200'
+        else
+            printf '{"object":"list","data":[{"id":"ornith-1.5-35b"}]}\n'
+        fi
+        exit 0
+    fi
+done
+exit 1
+EOF
+chmod 0755 "${MOCK_T3_BIN}/curl"
+
+cat << 'EOF' > "${MOCK_T3_BIN}/systemctl"
+#!/bin/sh
+if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
+    echo "active"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_T3_BIN}/systemctl"
+
+# When t3 binary is not in PATH, logs informational message without failing
+HC_NO_T3_OUT="$(PATH="${MOCK_T3_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_T3}" HOME="${SANDBOX_HC_T3}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --skip-warmup --non-interactive 2>&1 || true)"
+if echo "$HC_NO_T3_OUT" | grep -q "T3 Code binary (t3) not found in PATH; t3-serve.service deployed and ready once t3 is installed" && \
+   echo "$HC_NO_T3_OUT" | grep -q "All backend service healthchecks passed!"; then
+    pass "Healthcheck logs info message and passes when t3 binary is not in PATH"
+else
+    fail "Healthcheck failed when t3 binary was absent"
+fi
+
+# When mock t3 binary is in PATH, polls port 3773 and confirms active
+cat << 'EOF' > "${MOCK_T3_BIN}/t3"
+#!/bin/sh
+exit 0
+EOF
+chmod 0755 "${MOCK_T3_BIN}/t3"
+
+HC_WITH_T3_OUT="$(PATH="${MOCK_T3_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_T3}" HOME="${SANDBOX_HC_T3}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --skip-warmup --non-interactive 2>&1 || true)"
+if echo "$HC_WITH_T3_OUT" | grep -q "Checking T3 Code unified server (port 3773)..." && \
+   echo "$HC_WITH_T3_OUT" | grep -q "T3 Code unified server is active and listening on port 3773." && \
+   echo "$HC_WITH_T3_OUT" | grep -q "All backend service healthchecks passed!"; then
+    pass "Healthcheck actively verifies T3 Code server on port 3773 when t3 binary is installed"
+else
+    fail "Healthcheck failed to actively verify T3 Code server when t3 binary was present"
+fi
+
+# 31e: Uninstall cleanly removes t3-serve.service
+USER_HOME="${SANDBOX_T3_DEF}" HOME="${SANDBOX_T3_DEF}" "${REPO_DIR}/uninstall.sh" --global --yes >/dev/null 2>&1 || true
+if [ ! -f "$DEPLOYED_T3_DEF" ]; then
+    pass "uninstall.sh cleanly removed t3-serve.service"
+else
+    fail "uninstall.sh failed to remove t3-serve.service"
 fi
 
 # --- Test 32: SGLang Selectable Model Profiles (Qwen 3.8 27B) -----------
@@ -939,7 +1038,7 @@ if [ -f "$QS_FILE" ] && [ -f "$README_FILE" ] && \
    grep -q "install.sh --sglang-model" "$QS_FILE" && \
    grep -q "claude --bg -n" "$QS_FILE" && \
    grep -q "agy remote-control" "$QS_FILE" && \
-   grep -q "opencode-t3-serve.service" "$QS_FILE" && \
+   grep -q "t3-serve.service" "$QS_FILE" && \
    grep -q "opencode-sglang-qwen27b.service" "$QS_FILE" && \
    grep -q "qwen3.8-27b" "$QS_FILE" && \
    grep -q "nvidia/Qwen3.8-27B-NVFP4" "$QS_FILE" && \
