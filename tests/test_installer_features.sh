@@ -672,19 +672,24 @@ assert roles['grunt']['allowed_subagents'] == []
 bash_perm = opencode_cfg['permission']['bash']
 for pkill in ('kill *', 'pkill *', 'killall *', 'systemctl stop *', 'systemctl --user stop *', 'claude stop *', 'claude kill *'):
     assert bash_perm[pkill] == 'deny', pkill
-for ask_cmd in ('git push*', 'gh pr create*', 'gh pr merge*', 'gh issue close*'):
+for ask_cmd in ('git push*', 'git merge*', 'gh pr create*', 'gh pr merge*', 'gh issue close*'):
     assert bash_perm[ask_cmd] == 'ask', ask_cmd
 
-for ro in ('architect', 'reviewer', 'scout'):
+for ro in ('supreme-orchestrator', 'architect', 'reviewer', 'scout'):
     ro_bash = opencode_cfg['agent'][ro]['permission']['bash']
     assert ro_bash['git commit*'] == 'deny', ro
+    assert ro_bash['git merge*'] == 'deny', ro
+
+to_bash = opencode_cfg['agent']['team-orchestrator']['permission']['bash']
+assert to_bash['git commit*'] == 'deny'
+assert to_bash['git merge*'] == 'deny'
 
 # 3. claude settings
 claude_deny = claude_cfg['permissions']['deny']
 claude_ask = claude_cfg['permissions']['ask']
-for cd in ('Bash(kill *)', 'Bash(pkill *)', 'Bash(killall *)', 'Bash(systemctl stop *)', 'Bash(systemctl --user stop *)'):
+for cd in ('Bash(kill *)', 'Bash(kill*)', 'Bash(pkill *)', 'Bash(pkill*)', 'Bash(systemctl stop *)', 'Bash(claude stop*)'):
     assert cd in claude_deny, cd
-for ca in ('Bash(git push *)', 'Bash(gh pr create *)', 'Bash(gh pr merge *)', 'Bash(gh issue close *)'):
+for ca in ('Bash(git push*)', 'Bash(git merge*)', 'Bash(gh pr create*)', 'Bash(gh pr merge*)', 'Bash(gh issue close*)'):
     assert ca in claude_ask, ca
 "; then
     pass "Runtime bash gates, outward-facing ask rules, and per-role fan-out allow-lists verified"

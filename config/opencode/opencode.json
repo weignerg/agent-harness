@@ -94,6 +94,7 @@
       "claude stop *": "deny",
       "claude kill *": "deny",
       "git push*": "ask",
+      "git merge*": "ask",
       "gh pr create*": "ask",
       "gh pr merge*": "ask",
       "gh pr review*": "ask",
@@ -114,6 +115,17 @@
       "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
       "tools": {
         "question": true
+      },
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git reset*": "deny",
+          "git checkout*": "deny"
+        }
       }
     },
     "team-orchestrator": {
@@ -121,6 +133,14 @@
       "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges",
       "tools": {
         "question": true
+      },
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny"
+        }
       }
     },
     "architect": {

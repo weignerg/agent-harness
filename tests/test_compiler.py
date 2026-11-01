@@ -169,6 +169,7 @@ class TestCompilerAndPermissionGates(unittest.TestCase):
         ]
         outward_mutations = [
             "git push*",
+            "git merge*",
             "gh pr create*",
             "gh pr merge*",
             "gh pr review*",
@@ -186,26 +187,35 @@ class TestCompilerAndPermissionGates(unittest.TestCase):
             "git checkout*",
         ]
 
-        # Check worker has process-killing deny and outward-facing ask, but NOT mutating git deny
+        # Check worker has process-killing deny and outward-facing ask, but NOT mutating git commit deny
         worker_fm = parse_yaml_frontmatter(_build_opencode_frontmatter("worker", self.roles["worker"], self.tier_models))
         w_bash = worker_fm.get("permission", {}).get("bash", {})
         for cmd in process_kills:
             self.assertEqual(w_bash.get(cmd), "deny", f"Worker missing deny on {cmd}")
         for cmd in outward_mutations:
             self.assertEqual(w_bash.get(cmd), "ask", f"Worker missing ask on {cmd}")
-        for cmd in mutating_git:
-            self.assertNotIn(cmd, w_bash, f"Worker should not have mutating git denied: {cmd}")
+        self.assertNotIn("git commit*", w_bash, "Worker should not have git commit* denied")
 
-        # Check read-only leaf/audit roles have mutating git commands denied
-        for ro_role in ("architect", "reviewer", "scout"):
+        # Check supreme-orchestrator and read-only roles have all mutating git commands denied
+        for ro_role in ("supreme-orchestrator", "architect", "reviewer", "scout"):
             ro_fm = parse_yaml_frontmatter(_build_opencode_frontmatter(ro_role, self.roles[ro_role], self.tier_models))
             ro_bash = ro_fm.get("permission", {}).get("bash", {})
             for cmd in process_kills:
                 self.assertEqual(ro_bash.get(cmd), "deny", f"{ro_role} missing deny on {cmd}")
             for cmd in outward_mutations:
-                self.assertEqual(ro_bash.get(cmd), "ask", f"{ro_role} missing ask on {cmd}")
+                # If command is denied by role override (e.g. git merge*), role deny takes precedence
+                if cmd in mutating_git:
+                    self.assertEqual(ro_bash.get(cmd), "deny", f"{ro_role} must have {cmd} denied")
+                else:
+                    self.assertEqual(ro_bash.get(cmd), "ask", f"{ro_role} missing ask on {cmd}")
             for cmd in mutating_git:
                 self.assertEqual(ro_bash.get(cmd), "deny", f"{ro_role} must have {cmd} denied")
+
+        # Check team-orchestrator has git commit* and git merge* denied
+        team_fm = parse_yaml_frontmatter(_build_opencode_frontmatter("team-orchestrator", self.roles["team-orchestrator"], self.tier_models))
+        team_bash = team_fm.get("permission", {}).get("bash", {})
+        self.assertEqual(team_bash.get("git commit*"), "deny")
+        self.assertEqual(team_bash.get("git merge*"), "deny")
 
     def test_opencode_json_permissions(self):
         """Verify config/opencode/opencode.json contains required bash deny/ask rules."""
@@ -221,16 +231,23 @@ class TestCompilerAndPermissionGates(unittest.TestCase):
             self.assertEqual(perm_bash.get(cmd), "deny", f"opencode.json bash missing deny for {cmd}")
 
         # Outward-facing mutating ask gates
-        for cmd in ("git push*", "gh pr create*", "gh pr merge*", "gh pr review*", "gh pr comment*", "gh issue create*", "gh issue close*", "gh issue comment*", "gh workflow run*"):
+        for cmd in ("git push*", "git merge*", "gh pr create*", "gh pr merge*", "gh pr review*", "gh pr comment*", "gh issue create*", "gh issue close*", "gh issue comment*", "gh workflow run*"):
             self.assertEqual(perm_bash.get(cmd), "ask", f"opencode.json bash missing ask for {cmd}")
 
         # Agent restrictions
         agents = data.get("agent", {})
-        for ro_agent in ("architect", "reviewer", "scout"):
+        # supreme-orchestrator, architect, reviewer, scout
+        for ro_agent in ("supreme-orchestrator", "architect", "reviewer", "scout"):
             self.assertIn(ro_agent, agents)
             agent_bash = agents[ro_agent].get("permission", {}).get("bash", {})
             for cmd in ("git commit*", "git merge*", "git rebase*", "git reset*", "git checkout*"):
                 self.assertEqual(agent_bash.get(cmd), "deny", f"{ro_agent} in opencode.json missing deny on {cmd}")
+
+        # team-orchestrator
+        self.assertIn("team-orchestrator", agents)
+        to_bash = agents["team-orchestrator"].get("permission", {}).get("bash", {})
+        self.assertEqual(to_bash.get("git commit*"), "deny")
+        self.assertEqual(to_bash.get("git merge*"), "deny")
 
     def test_claude_settings_core_json(self):
         """Verify config/claude/settings/core.json contains permissions.deny and permissions.ask."""
@@ -242,22 +259,37 @@ class TestCompilerAndPermissionGates(unittest.TestCase):
         denied = perms.get("deny", [])
         asked = perms.get("ask", [])
 
-        # Process-killing deny rules
+        # Process-killing deny rules (both spaced and unspaced)
         for expected_deny in (
             "Bash(kill *)",
+            "Bash(kill*)",
             "Bash(pkill *)",
+            "Bash(pkill*)",
             "Bash(killall *)",
+            "Bash(killall*)",
             "Bash(systemctl stop *)",
+            "Bash(systemctl stop*)",
             "Bash(systemctl --user stop *)",
+            "Bash(systemctl --user stop*)",
+            "Bash(claude stop *)",
+            "Bash(claude stop*)",
+            "Bash(claude kill *)",
+            "Bash(claude kill*)",
         ):
             self.assertIn(expected_deny, denied, f"Missing deny rule in core.json: {expected_deny}")
 
-        # Outward-facing ask rules
+        # Outward-facing ask rules without space-before-asterisk traps
         for expected_ask in (
-            "Bash(git push *)",
-            "Bash(gh pr create *)",
-            "Bash(gh pr merge *)",
-            "Bash(gh issue close *)",
+            "Bash(git push*)",
+            "Bash(git merge*)",
+            "Bash(gh pr create*)",
+            "Bash(gh pr merge*)",
+            "Bash(gh pr review*)",
+            "Bash(gh pr comment*)",
+            "Bash(gh issue create*)",
+            "Bash(gh issue close*)",
+            "Bash(gh issue comment*)",
+            "Bash(gh workflow run*)",
         ):
             self.assertIn(expected_ask, asked, f"Missing ask rule in core.json: {expected_ask}")
 

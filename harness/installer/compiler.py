@@ -33,12 +33,7 @@ def _build_opencode_frontmatter(
     desc = meta.get("description", "").replace('"', '\\"')
     tools = meta.get("tools", {})
     readonly = meta.get("readonly", False)
-    allowed_subagents = meta.get("allowed_subagents")
-    if allowed_subagents is None:
-        if role_name in ("scout", "grunt"):
-            allowed_subagents = []
-        else:
-            allowed_subagents = []
+    allowed_subagents = meta.get("allowed_subagents") or []
 
     tools_yaml = []
     for k, v in tools.items():
@@ -56,33 +51,45 @@ def _build_opencode_frontmatter(
         f"  edit: {'deny' if readonly else 'allow'}",
         f"  write: {'deny' if readonly else 'allow'}",
         "  bash:",
-        '    "*": allow',
-        '    "kill *": deny',
-        '    "pkill *": deny',
-        '    "killall *": deny',
-        '    "systemctl stop *": deny',
-        '    "systemctl --user stop *": deny',
-        '    "claude stop *": deny',
-        '    "claude kill *": deny',
-        '    "git push*": ask',
-        '    "gh pr create*": ask',
-        '    "gh pr merge*": ask',
-        '    "gh pr review*": ask',
-        '    "gh pr comment*": ask',
-        '    "gh issue create*": ask',
-        '    "gh issue close*": ask',
-        '    "gh issue comment*": ask',
-        '    "gh workflow run*": ask',
     ]
 
-    if role_name in ("architect", "reviewer", "scout"):
-        lines.extend([
-            '    "git commit*": deny',
-            '    "git merge*": deny',
-            '    "git rebase*": deny',
-            '    "git reset*": deny',
-            '    "git checkout*": deny',
-        ])
+    bash_perms = {
+        "*": "allow",
+        "kill *": "deny",
+        "pkill *": "deny",
+        "killall *": "deny",
+        "systemctl stop *": "deny",
+        "systemctl --user stop *": "deny",
+        "claude stop *": "deny",
+        "claude kill *": "deny",
+        "git push*": "ask",
+        "git merge*": "ask",
+        "gh pr create*": "ask",
+        "gh pr merge*": "ask",
+        "gh pr review*": "ask",
+        "gh pr comment*": "ask",
+        "gh issue create*": "ask",
+        "gh issue close*": "ask",
+        "gh issue comment*": "ask",
+        "gh workflow run*": "ask",
+    }
+
+    if role_name in ("supreme-orchestrator", "architect", "reviewer", "scout"):
+        bash_perms.update({
+            "git commit*": "deny",
+            "git merge*": "deny",
+            "git rebase*": "deny",
+            "git reset*": "deny",
+            "git checkout*": "deny",
+        })
+    elif role_name == "team-orchestrator":
+        bash_perms.update({
+            "git commit*": "deny",
+            "git merge*": "deny",
+        })
+
+    for cmd, action in bash_perms.items():
+        lines.append(f'    "{cmd}": {action}')
 
     if not allowed_subagents:
         lines.append("  task: deny")

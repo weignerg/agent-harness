@@ -19,6 +19,7 @@ permission:
     "claude stop *": deny
     "claude kill *": deny
     "git push*": ask
+    "git merge*": ask
     "gh pr create*": ask
     "gh pr merge*": ask
     "gh pr review*": ask
@@ -50,4 +51,6 @@ Reporting: you cannot call other agents. End every reply with:
 ## Evidence (commands run and their outcomes)
 ## Requests for team-orchestrator (or none)
 ## Blockers / questions for the human (or none)
+
+
 

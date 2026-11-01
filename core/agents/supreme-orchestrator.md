@@ -20,6 +20,7 @@ permission:
     "claude stop *": deny
     "claude kill *": deny
     "git push*": ask
+    "git merge*": deny
     "gh pr create*": ask
     "gh pr merge*": ask
     "gh pr review*": ask
@@ -28,6 +29,10 @@ permission:
     "gh issue close*": ask
     "gh issue comment*": ask
     "gh workflow run*": ask
+    "git commit*": deny
+    "git rebase*": deny
+    "git reset*": deny
+    "git checkout*": deny
   task:
     "*": deny
     "team-orchestrator": allow
@@ -92,4 +97,6 @@ Follow the complete orchestration workflow in `~/.config/opencode/orchestration/
 - Collect all STOPPED replies, move any draft notes from worktree `tmp/` folders into handoffs archive.
 - Write the master orchestration handoff to `.opencode/orchestration/handoffs/Supreme Orchestrator.md` (archiving prior version to `handoffs/archive/`).
 - **Never merge.** Merges require human approval (the two-key merge gate).
+
+
 

@@ -20,6 +20,7 @@ permission:
     "claude stop *": deny
     "claude kill *": deny
     "git push*": ask
+    "git merge*": deny
     "gh pr create*": ask
     "gh pr merge*": ask
     "gh pr review*": ask
@@ -28,6 +29,7 @@ permission:
     "gh issue close*": ask
     "gh issue comment*": ask
     "gh workflow run*": ask
+    "git commit*": deny
   task:
     "*": deny
     "architect": allow
@@ -86,4 +88,6 @@ Follow `.opencode/orchestration/team-orchestrator.md` (or `~/.config/opencode/or
 - **Kickoff Intake**: Read kickoff from `.opencode/orchestration/kickoffs/<Branch_Name>.md` (or `~/.config/opencode/orchestration/kickoffs/`). First response is blueprint only; run no mutations; `/rename {Branch_Name}`; send `STARTED` to `supreme-orchestrator`.
 - **End of Day**: On `END OF DAY` from `supreme-orchestrator`, finish current phase without starting new ones; save any worktree `tmp/` notes; write task handoff to `.opencode/orchestration/handoffs/<session_name_with_underscores>.md` (or `.opencode/handoffs/{session-description}-dd-mm-yyyy-handoff.md`); reply with `STOPPED: <handoff_path> — <state>`.
 - **Completion / Final Report**: When work is completed, report back to `supreme-orchestrator` via `task` / message ending with `Result`, `Evidence`, `Requests for supreme-orchestrator`, and `Blockers`.
+
+
 

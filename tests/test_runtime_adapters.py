@@ -73,6 +73,7 @@ class TestRuntimeAdapters(unittest.TestCase):
         base = {
             "permissions": {
                 "deny": ["git push*"],
+                "ask": ["Bash(git push*)", "Bash(gh pr create*)"],
             },
             "theme": "dark",
         }
@@ -80,6 +81,7 @@ class TestRuntimeAdapters(unittest.TestCase):
             "permissions": {
                 "deny": ["gh pr merge*"],
                 "allow": ["read_file"],
+                "ask": ["Bash(gh pr create*)", "Bash(gh pr merge*)"],
             },
         }
         override2 = {
@@ -92,6 +94,10 @@ class TestRuntimeAdapters(unittest.TestCase):
         self.assertEqual(merged["permissions"]["allow"], ["read_file"])
         self.assertIn("git push*", merged["permissions"]["deny"])
         self.assertIn("gh pr merge*", merged["permissions"]["deny"])
+        self.assertEqual(
+            merged["permissions"]["ask"],
+            ["Bash(git push*)", "Bash(gh pr create*)", "Bash(gh pr merge*)"],
+        )
 
     def test_opencode_model_tiers(self):
         adapter = OpenCodeRuntimeAdapter()
