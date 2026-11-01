@@ -132,7 +132,19 @@ if grep -q -- "--mem-fraction-static [0-9.]*0.88" "$QWEN27B_FILE" || grep -q "0.
     echo "❌ FAIL: opencode-sglang-qwen27b.service contains corrupted mem-fraction-static"
     exit 1
 fi
-echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, and uncorrupted mem-fraction."
+if grep -q '\${SGLANG_27B_TORCH_COMPILE}' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service uses braced \${SGLANG_27B_TORCH_COMPILE} instead of unbraced \$SGLANG_27B_TORCH_COMPILE"
+    exit 1
+fi
+if grep -q '\${SGLANG_27B_SPECULATIVE_ARGS}' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service uses braced \${SGLANG_27B_SPECULATIVE_ARGS} instead of unbraced \$SGLANG_27B_SPECULATIVE_ARGS"
+    exit 1
+fi
+if ! grep -q '\$SGLANG_27B_TORCH_COMPILE' "$QWEN27B_FILE" || ! grep -q '\$SGLANG_27B_SPECULATIVE_ARGS' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing unbraced \$SGLANG_27B_TORCH_COMPILE or \$SGLANG_27B_SPECULATIVE_ARGS"
+    exit 1
+fi
+echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
 
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"

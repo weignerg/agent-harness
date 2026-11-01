@@ -28,6 +28,9 @@ EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
 Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+# Note: Unbraced $VAR syntax is required for optional flags ($SGLANG_27B_TORCH_COMPILE and $SGLANG_27B_SPECULATIVE_ARGS)
+# because systemd unbraced $VAR emits 0 arguments when empty and splits on whitespace when set,
+# whereas braced ${VAR} emits an empty argument "" when empty which causes argparse errors.
 ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --model-path ${SGLANG_27B_MODEL_PATH} \
   --served-model-name ${SGLANG_27B_SERVED_MODEL_NAME} \
@@ -39,8 +42,8 @@ ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --attention-backend ${SGLANG_27B_ATTENTION_BACKEND} \
   --disable-prefill-cuda-graph \
   --cuda-graph-max-bs-decode ${SGLANG_27B_CUDA_GRAPH_MAX_BS} \
-  ${SGLANG_27B_TORCH_COMPILE} \
-  ${SGLANG_27B_SPECULATIVE_ARGS} \
+  $SGLANG_27B_TORCH_COMPILE \
+  $SGLANG_27B_SPECULATIVE_ARGS \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
   --max-running-requests 1 \

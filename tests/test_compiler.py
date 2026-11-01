@@ -721,12 +721,16 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         )
 
     def test_regression_issue23_sglang_warmup_and_sed_fix(self) -> None:
-        """Verify Issue #23: SGLang warmup disables CUDA graph, no sed corruption of mem-fraction, and service optimizations."""
+        """Verify Issue #23: SGLang warmup disables CUDA graph, unbraced optional systemd args, and service optimizations."""
         service_content = self.qwen27b_service_path.read_text(encoding="utf-8")
         self.assertIn("--disable-prefill-cuda-graph", service_content)
         self.assertNotIn("\n  --enable-torch-compile", service_content)
         self.assertIn("SGLANG_27B_KV_CACHE_DTYPE=nvfp4", service_content)
         self.assertNotIn("0.880.88", service_content)
+        self.assertIn("$SGLANG_27B_TORCH_COMPILE", service_content)
+        self.assertIn("$SGLANG_27B_SPECULATIVE_ARGS", service_content)
+        self.assertNotIn("${SGLANG_27B_TORCH_COMPILE}", service_content)
+        self.assertNotIn("${SGLANG_27B_SPECULATIVE_ARGS}", service_content)
 
         install_sh_content = self.install_sh_path.read_text(encoding="utf-8")
         self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
