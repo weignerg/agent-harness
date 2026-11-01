@@ -10,20 +10,69 @@
 #      OPENCODE_OOM_LOG (file to scan for "out of memory", optional).
 # ==============================================================================
 set -uo pipefail
+
 SERVICE="opencode-sglang-ornith-35b.service"
+
+detect_service() {
+    if [ -n "${SGLANG_SERVICE:-}" ]; then
+        echo "$SGLANG_SERVICE"
+        return
+    fi
+    if [ -f "${HOME}/.config/opencode-backends/env" ]; then
+        local env_svc
+        env_svc="$(grep -s '^SGLANG_SERVICE=' "${HOME}/.config/opencode-backends/env" | head -n1 | cut -d'=' -f2- | tr -d '"\047')"
+        if [ -n "$env_svc" ]; then
+            echo "$env_svc"
+            return
+        fi
+        local env_primary
+        env_primary="$(grep -s '^SGLANG_PRIMARY_MODEL=' "${HOME}/.config/opencode-backends/env" | head -n1 | cut -d'=' -f2- | tr -d '"\047')"
+        if [[ "$env_primary" == *"27b"* ]]; then
+            echo "opencode-sglang-qwen27b.service"
+            return
+        elif [[ "$env_primary" == *"35b"* ]]; then
+            echo "opencode-sglang-qwen35b.service"
+            return
+        fi
+    fi
+    echo "$SERVICE"
+}
+
+SERVICE="$(detect_service)"
 STATE_DIR="${HOME}/.config/opencode-backends"
 STATE="${STATE_DIR}/context_length.state"
-LADDER=(262144 131072 65536 32768)
+
+if [[ "$SERVICE" == *"27b"* ]]; then
+    LADDER=(65536 32768 16384)
+else
+    LADDER=(262144 131072 65536 32768)
+fi
 
 current() {
     local v=""
-    [ -r "$STATE" ] && v="$(sed -n 's/^SGLANG_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
+    if [ -r "$STATE" ]; then
+        if [[ "$SERVICE" == *"27b"* ]]; then
+            v="$(sed -n 's/^SGLANG_27B_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
+        fi
+        if [ -z "$v" ]; then
+            v="$(sed -n 's/^SGLANG_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
+        fi
+    fi
     echo "${v:-${LADDER[0]}}"
 }
+
 write_state() {
     mkdir -p "$STATE_DIR"
     local t; t="$(mktemp "${STATE}.XXXXXX")"
-    echo "SGLANG_CONTEXT_LENGTH=$1" > "$t" && mv "$t" "$STATE"
+    if [[ "$SERVICE" == *"27b"* ]]; then
+        cat << EOF > "$t"
+SGLANG_CONTEXT_LENGTH=$1
+SGLANG_27B_CONTEXT_LENGTH=$1
+EOF
+    else
+        echo "SGLANG_CONTEXT_LENGTH=$1" > "$t"
+    fi
+    mv "$t" "$STATE"
 }
 case "${1:-}" in
     --status) current; exit 0 ;;

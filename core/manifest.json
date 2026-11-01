@@ -20,6 +20,29 @@
       "agy_model_id": "gemini-3.8-flash-low"
     }
   },
+  "model_profiles": {
+    "ornith-1.5-35b": {
+      "heavy": "ornith-local/ornith-1.5-35b",
+      "workhorse": "ornith-local/ornith-1.5-35b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    },
+    "qwen3.8-27b": {
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    },
+    "qwen3.5-27b": {
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    },
+    "qwen3.5-35b-a3b": {
+      "heavy": "local-sglang/qwen3.5-35b-a3b",
+      "workhorse": "local-sglang/qwen3.5-35b-a3b",
+      "fast": "local-sglang/qwen3.5-9b"
+    }
+  },
+  "default_model_profile": "ornith-1.5-35b",
   "roles": {
     "supreme-orchestrator": {
       "tier": "heavy",

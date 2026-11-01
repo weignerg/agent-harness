@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+import os
+
+
 def extract_body(agent_file: Path) -> str:
     """Extract markdown prompt body, stripping any pre-existing frontmatter."""
     content = agent_file.read_text(encoding="utf-8")
@@ -21,14 +24,18 @@ def extract_body(agent_file: Path) -> str:
     return content.lstrip()
 
 
-def _build_opencode_frontmatter(
+def compile_opencode_frontmatter(
     role_name: str,
     meta: Dict[str, Any],
     tier_models: Optional[Dict[str, Any]] = None,
+    primary_model: Optional[str] = None,
 ) -> str:
     tier_models = tier_models or {}
     tier = meta.get("tier", "workhorse")
-    model = tier_models.get(tier, {}).get("opencode", "ornith-local/ornith-1.5-35b")
+    if tier in ("heavy", "workhorse") and primary_model:
+        model = primary_model
+    else:
+        model = tier_models.get(tier, {}).get("opencode", "ornith-local/ornith-1.5-35b")
     mode = meta.get("mode", "subagent")
     desc = meta.get("description", "").replace('"', '\\"')
     tools = meta.get("tools", {})
@@ -105,7 +112,7 @@ def _build_opencode_frontmatter(
     return "\n".join(lines)
 
 
-compile_opencode_frontmatter = _build_opencode_frontmatter
+_build_opencode_frontmatter = compile_opencode_frontmatter
 
 
 def compile_claude_frontmatter(role_name: str, meta: Dict[str, Any], tier_models: Dict[str, Any]) -> str:
@@ -177,6 +184,8 @@ def compile_agents(
     core_dir: Path,
     target_runtime: str,
     output_dir: Path,
+    model_profile: Optional[str] = None,
+    primary_model: Optional[str] = None,
 ) -> List[Path]:
     manifest_path = core_dir / "manifest.json"
     if not manifest_path.is_file():
@@ -185,6 +194,29 @@ def compile_agents(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     tier_models = manifest.get("model_tiers", {})
     roles = manifest.get("roles", {})
+    profiles = manifest.get("model_profiles", {})
+
+    effective_model = primary_model or os.environ.get("SGLANG_PRIMARY_MODEL")
+    effective_profile = model_profile or os.environ.get("SGLANG_MODEL_PROFILE") or os.environ.get("MODEL_PROFILE")
+
+    if not effective_model and effective_profile:
+        if effective_profile in profiles:
+            effective_model = profiles[effective_profile].get("workhorse")
+        elif effective_profile in ("qwen3.8-27b", "qwen3.5-27b", "27b-nvfp4", "27b-q6"):
+            effective_model = "local-sglang/qwen3.8-27b"
+        elif effective_profile == "qwen3.5-27b":
+            effective_model = "local-sglang/qwen3.5-27b"
+        elif effective_profile in ("qwen3.5-35b-a3b", "35b-a3b"):
+            effective_model = "local-sglang/qwen3.5-35b-a3b"
+        elif effective_profile in ("ornith-1.5-35b", "ornith-35b"):
+            effective_model = "ornith-local/ornith-1.5-35b"
+
+    if not effective_model:
+        default_prof_name = manifest.get("default_model_profile", "ornith-1.5-35b")
+        if default_prof_name in profiles:
+            effective_model = profiles[default_prof_name].get("workhorse")
+        if not effective_model:
+            effective_model = tier_models.get("workhorse", {}).get("opencode", "ornith-local/ornith-1.5-35b")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     generated: List[Path] = []
@@ -200,7 +232,7 @@ def compile_agents(
         body = extract_body(src_file)
 
         if target_runtime == "opencode":
-            fm = compile_opencode_frontmatter(role_name, meta, tier_models)
+            fm = compile_opencode_frontmatter(role_name, meta, tier_models, primary_model=effective_model)
         elif target_runtime == "claude":
             fm = compile_claude_frontmatter(role_name, meta, tier_models)
         elif target_runtime in ("agy", "gemini", "antigravity"):
@@ -220,13 +252,21 @@ def main():
     parser.add_argument("--core-dir", default=None, help="Path to core/ directory")
     parser.add_argument("--runtime", required=True, choices=["opencode", "claude", "agy", "gemini", "antigravity"], help="Target runtime")
     parser.add_argument("--output-dir", required=True, help="Destination directory for compiled agents")
+    parser.add_argument("--model-profile", default=None, help="Model profile override (e.g. qwen3.5-27b, qwen3.5-35b-a3b)")
+    parser.add_argument("--primary-model", default=None, help="Primary model override (e.g. local-sglang/qwen3.5-27b)")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent.parent
     core_dir = Path(args.core_dir).resolve() if args.core_dir else (repo_root / "core")
     output_dir = Path(args.output_dir).resolve()
 
-    res = compile_agents(core_dir=core_dir, target_runtime=args.runtime, output_dir=output_dir)
+    res = compile_agents(
+        core_dir=core_dir,
+        target_runtime=args.runtime,
+        output_dir=output_dir,
+        model_profile=args.model_profile,
+        primary_model=args.primary_model,
+    )
     print(f"Compiled {len(res)} agents for {args.runtime} -> {output_dir}")
 
 

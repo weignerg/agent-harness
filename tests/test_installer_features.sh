@@ -50,7 +50,7 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" 2>/dev/null || true
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" "${SANDBOX_PROF:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -59,8 +59,9 @@ echo "[Test 1] Testing install.sh CLI help and flag parsing..."
 HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
 if echo "$HELP_OUT" | grep -q -- "--dry-run" && \
    echo "$HELP_OUT" | grep -q -- "--reinstall" && \
-   echo "$HELP_OUT" | grep -q -- "--non-interactive"; then
-    pass "install.sh document flags: --dry-run, --reinstall, --non-interactive"
+   echo "$HELP_OUT" | grep -q -- "--non-interactive" && \
+   echo "$HELP_OUT" | grep -q -- "--sglang-model"; then
+    pass "install.sh document flags: --dry-run, --reinstall, --non-interactive, --sglang-model"
 else
     fail "install.sh --help missing expected flags"
 fi
@@ -648,6 +649,7 @@ fi
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # --- Test 28: Verify Claude Code Background Session & Agent Teams Integration (Issue #12) ---
 echo "[Test 28] Verifying Claude Code background session dispatch and agent-teams configuration..."
 CLAUDE_CORE_JSON="${REPO_DIR}/config/claude/settings/core.json"
@@ -884,6 +886,22 @@ if [ ! -f "$DEPLOYED_T3" ]; then
     pass "uninstall.sh cleanly removed opencode-t3-serve.service"
 else
     fail "uninstall.sh failed to remove opencode-t3-serve.service"
+fi
+
+# --- Test 32: SGLang Selectable Model Profiles (Qwen 3.5 27B / 35B) -----------
+echo "[Test 32] Verifying SGLang selectable model profiles and backend setup..."
+SANDBOX_PROF="$(mktemp -d /tmp/installer-test-prof-XXXXXX)"
+PROF_OUT="$(USER_HOME="${SANDBOX_PROF}" HOME="${SANDBOX_PROF}" "${INSTALL_SCRIPT}" --target=opencode --sglang-model=27b-nvfp4 --non-interactive 2>&1 || true)"
+ENV_FILE="${SANDBOX_PROF}/.config/opencode-backends/env"
+
+if [ -f "$ENV_FILE" ] && \
+   grep -q "SGLANG_PRIMARY_MODEL=local-sglang/qwen3.8-27b" "$ENV_FILE" && \
+   grep -q "SGLANG_SERVICE=opencode-sglang-qwen27b.service" "$ENV_FILE" && \
+   [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ] && \
+   [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen35b.service" ]; then
+    pass "Installer provisions Qwen 3.5 27B NVFP4 selectable profile, environment, and units"
+else
+    fail "Installer failed to provision Qwen 3.5 27B profile configuration"
 fi
 
 echo "================================================================================"

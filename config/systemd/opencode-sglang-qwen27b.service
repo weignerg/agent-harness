@@ -1,0 +1,49 @@
+[Unit]
+Description=SGLang Qwen 3.8 27B Dense Stack on Port 30000 (100% VRAM NVFP4/Q6, Speculative Decoding, FP8 KV Cache)
+After=network.target
+
+[Service]
+Type=exec
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="SGLANG_SERVICE=opencode-sglang-qwen27b.service"
+Environment="SGLANG_27B_MODEL_PATH=Qwen/Qwen3.8-27B-FP4"
+Environment="SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
+Environment="SGLANG_27B_QUANTIZATION=fp4"
+Environment="SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
+Environment="SGLANG_27B_MEM_FRACTION=0.88"
+Environment="SGLANG_27B_CONTEXT_LENGTH=65536"
+Environment="SGLANG_27B_CHUNKED_PREFILL=8192"
+Environment="SGLANG_27B_ATTENTION_BACKEND=flashinfer"
+Environment="SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
+Environment="SGLANG_27B_SPECULATIVE_ALGO=NEXTN"
+# Speculative decoding: NEXTN (default multi-token prediction) or EAGLE3 / STANDALONE when draft model path is set
+Environment="SGLANG_27B_SPECULATIVE_ARGS=--speculative-algorithm NEXTN --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4"
+# Example EAGLE3: --speculative-algorithm EAGLE3 --speculative-draft-model-path ${SGLANG_27B_DRAFT_MODEL_PATH} --speculative-num-steps 3 --speculative-eagle-topk 4
+EnvironmentFile=-%h/.config/opencode-backends/context_length.state
+Environment="CUDA_HOME=/opt/cuda"
+Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
+  --model-path ${SGLANG_27B_MODEL_PATH} \
+  --served-model-name ${SGLANG_27B_SERVED_MODEL_NAME} \
+  --quantization ${SGLANG_27B_QUANTIZATION} \
+  --kv-cache-dtype ${SGLANG_27B_KV_CACHE_DTYPE} \
+  --mem-fraction-static ${SGLANG_27B_MEM_FRACTION} \
+  --context-length ${SGLANG_27B_CONTEXT_LENGTH} \
+  --chunked-prefill-size ${SGLANG_27B_CHUNKED_PREFILL} \
+  --attention-backend ${SGLANG_27B_ATTENTION_BACKEND} \
+  --enable-torch-compile \
+  --cuda-graph-max-bs ${SGLANG_27B_CUDA_GRAPH_MAX_BS} \
+  ${SGLANG_27B_SPECULATIVE_ARGS} \
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen3_coder \
+  --max-running-requests 1 \
+  --port 30000 \
+  --host 127.0.0.1
+
+ExecStopPost=%h/.local/share/opencode-sglang-stack/sglang_oom_handler.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
