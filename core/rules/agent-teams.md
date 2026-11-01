@@ -125,7 +125,7 @@ When the human operator pre-authorizes driving one or more tickets to completion
 2. **High-Signal Pre-Flight Prompting**: Give each spawned `worker` exact `file:line` pointers, traceback/journal root causes, and concrete verification commands so workers complete implementation in 1–2 turns.
 3. **Two-Round Adversarial Review Gate**: Automatically run **Pass 1 Adversarial Review** (`reviewer`), dispatch `worker` to fix any findings (including warnings when applicable), and run **Pass 2 Second-Pass Scope Gate** (`reviewer`).
 4. **Develop Sync & Post-Conflict Review**: Merge/rebase latest `develop` (or parent branch) into the worktree, resolve any conflicts, and run a **Post-Conflict Adversarial Review** + **Supreme Orchestrator Final Pre-Merge Audit** (`git diff develop...HEAD`).
-5. **PR, Merge, Prune & Live Host Sync**: Push branch, create PR (`gh pr create`), merge into `develop`, prune the worktree (`worktree_manager.py remove`), run the fast `./install.sh` global config resync, and append an audit entry to `~/HISTORY.md`.
+5. **PR, Merge, Prune & Live Host Sync**: Push branch, create PR (`gh pr create`), merge into `develop`, prune the worktree (`python3 scripts/worktree_manager.py remove --path <worktree_path>`), run the fast `./install.sh` global config resync, and append an audit entry to `~/HISTORY.md`.
 
 ---
 

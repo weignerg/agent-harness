@@ -107,7 +107,7 @@ When a request matches a scenario below, load the skill before proceeding:
 - **Workstation & GPU Profile**: NVIDIA GeForce RTX 5090 (32 GB Blackwell VRAM, Compute Capability `12.0` / `sm_120`), 125 GB Host RAM, 48 CPU threads on CachyOS Linux.
 - **Authoritative Local Model Checkpoints & Services (Port `30000`)**:
   - **Workhorse MoE (`ornith-1.5-35b`)**: `ornith-ai/Ornith-1.5-35B-A3B-NVFP4` via `opencode-sglang-ornith-35b.service` (`262144` context, `--mem-fraction-static 0.88`).
-  - **Dense 27B (`qwen3.8-27b` / `27b-nvfp4`)**: `nvidia/Qwen3.8-27B-NVFP4` via `opencode-sglang-qwen27b.service` (`65536` context, `--quantization modelopt --disable-prefill-cuda-graph --cuda-graph-max-bs-decode 8`). Never use `qwen3.5` or `Qwen/Qwen3.8-27B-FP4`.
+  - **Dense 27B (`qwen3.8-27b` / `27b-nvfp4`)**: `nvidia/Qwen3.8-27B-NVFP4` via `opencode-sglang-qwen27b.service` (`65536` context, `--quantization modelopt --disable-prefill-cuda-graph --cuda-graph-max-bs-decode 8`). Never use legacy `qwen3.5` or non-nvidia FP4 checkpoints.
   - **Fast 9B Leaf (`ornith-1.5-9b`)**: `ornith-ai/Ornith-1.5-9B-NVFP4`.
 - **Unified Server Endpoints**:
   - Local SGLang Inference API: `http://127.0.0.1:30000/v1`
