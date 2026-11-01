@@ -666,11 +666,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("Qwen 3.8 27B", qwen38_27b.get("name", ""))
         self.assertGreaterEqual(qwen38_27b.get("context", 0), 131072)
         self.assertGreaterEqual(qwen38_27b.get("output", 0), 32768)
-        mods = qwen38_27b.get("modalities")
-        if isinstance(mods, dict):
-            self.assertEqual(mods.get("input"), ["text", "image"])
-        else:
-            self.assertEqual(mods, ["text", "image"])
+        self.assertEqual(qwen38_27b.get("modalities"), {"input": ["text", "image"], "output": ["text"]})
         self.assertIn("high", qwen38_27b.get("variants", {}))
 
     def test_core_manifest_profiles_and_baseline_default(self) -> None:
@@ -805,6 +801,28 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("qwen3.8-27b", res.stdout)
         self.assertIn("27b-nvfp4", res.stdout)
         self.assertIn("27b-q6", res.stdout)
+
+    def test_quickstart_documentation_and_readme_link(self) -> None:
+        """Verify docs/QUICKSTART.md exists, is linked from README.md, and covers multi-runtime surfaces (Issue #19)."""
+        quickstart_path = REPO_ROOT / "docs" / "QUICKSTART.md"
+        readme_path = REPO_ROOT / "README.md"
+
+        self.assertTrue(quickstart_path.is_file(), "docs/QUICKSTART.md must exist")
+        self.assertTrue(readme_path.is_file(), "README.md must exist")
+
+        readme_text = readme_path.read_text(encoding="utf-8")
+        self.assertIn("docs/QUICKSTART.md", readme_text, "README.md must link to docs/QUICKSTART.md")
+        self.assertIn("## ⚡ TL;DR Quickstart", readme_text, "README.md must have TL;DR Quickstart section")
+
+        qs_text = quickstart_path.read_text(encoding="utf-8")
+        self.assertIn("install.sh --sglang-model", qs_text)
+        self.assertIn("claude --bg -n", qs_text)
+        self.assertIn("agy remote-control", qs_text)
+        self.assertIn("opencode-t3-serve.service", qs_text)
+        self.assertIn("opencode-sglang-qwen27b.service", qs_text)
+        self.assertIn("qwen3.8-27b", qs_text)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", qs_text)
+        self.assertNotIn("qwen3.5", qs_text)
 
 
 if __name__ == "__main__":

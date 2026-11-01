@@ -35,6 +35,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
 resolve_canonical_repo_dir() {
+    if [ -n "${AGENT_HARNESS_CANONICAL_ROOT:-}" ]; then
+        printf '%s' "${AGENT_HARNESS_CANONICAL_ROOT}"
+        return 0
+    fi
     local canonical_repo="$SCRIPT_DIR"
     if git -C "$SCRIPT_DIR" rev-parse --git-common-dir >/dev/null 2>&1; then
         local common_git
@@ -1034,7 +1038,7 @@ EOF
     elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
         primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
-        qwen27b_quant="q6_k"
+        qwen27b_quant="gguf"
         qwen27b_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         primary_model="ornith-local/ornith-1.5-35b"
@@ -1495,6 +1499,12 @@ warmup_sglang_service() {
     if [ "$quant" = "fp4" ]; then
         quant="modelopt"
     fi
+    if [ "$quant" = "q6_k" ]; then
+        quant="gguf"
+    fi
+    if [ -z "$quant" ] && [[ "$model_path" =~ \.gguf$ ]]; then
+        quant="gguf"
+    fi
     if [ -z "$quant" ] && [[ "$model_path" == "nvidia/Qwen3.8-27B-NVFP4" ]]; then
         quant="modelopt"
     fi
@@ -1665,11 +1675,6 @@ verify_backend_healthchecks() {
     local server_elapsed=0
 
     while [ "$server_elapsed" -lt "$max_server_wait" ]; do
-        local server_out=""
-        server_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:4096" 2>/dev/null || true)"
-        local server_code="${server_out##*$'\n'}"
-        local server_resp="${server_out%$'\n'*}"
-
         local server_status=""
         if command -v systemctl >/dev/null 2>&1; then
             server_status="$(systemctl --user is-active opencode-server.service 2>/dev/null || true)"
@@ -1682,10 +1687,14 @@ verify_backend_healthchecks() {
             echo "  [$(date +%T)] ⏳ OpenCode server starting up (elapsed: ${server_elapsed}s / max: ${max_server_wait}s)..."
         fi
 
+        local server_out=""
+        server_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:4096" 2>/dev/null || true)"
+        local server_code="${server_out##*$'\n'}"
+        local server_resp="${server_out%$'\n'*}"
+
         if [ "$server_code" = "200" ] || [ "$server_code" = "401" ] || \
            curl -s -f -m 2 "http://127.0.0.1:4096" >/dev/null 2>&1 || \
-           echo "$server_resp" | grep -qi "opencode" || \
-           (echo > /dev/tcp/127.0.0.1/4096) 2>/dev/null; then
+           echo "$server_resp" | grep -qi "opencode"; then
             server_ok=true
             break
         fi
