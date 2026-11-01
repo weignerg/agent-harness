@@ -81,7 +81,7 @@ def compile_agy_frontmatter(role_name: str, meta: Dict[str, Any], tier_models: D
     agy_id = tier_models.get(tier, {}).get("agy_model_id", "gemini-3.8-flash-medium")
     desc = meta.get("description", "").replace('"', '\\"')
     is_primary = (meta.get("mode") == "primary")
-    agy_tools = meta.get("agy_tools", ["view_file", "run_command"])
+    agy_tools = meta.get("agy_tools", ["read_file", "view_file", "grep_search", "find_by_name", "run_command"])
 
     tools_yaml = "\n".join(f"  - {t}" for t in agy_tools)
 

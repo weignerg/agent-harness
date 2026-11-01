@@ -34,7 +34,10 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message",
@@ -56,7 +59,10 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message",
@@ -77,10 +83,14 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
-        "send_message"
+        "send_message",
+        "search_web"
       ]
     },
     "worker": {
@@ -95,9 +105,14 @@
       },
       "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
+        "edit_file",
+        "write_file",
         "view_file",
         "replace_file_content",
         "write_to_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message"
@@ -115,9 +130,14 @@
       },
       "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
+        "edit_file",
+        "write_file",
         "view_file",
         "replace_file_content",
         "write_to_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message"
@@ -135,10 +155,14 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
-        "send_message"
+        "send_message",
+        "search_web"
       ]
     },
     "scout": {
@@ -153,9 +177,11 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
         "view_file",
-        "run_command",
-        "send_message"
+        "grep_search",
+        "find_by_name",
+        "run_command"
       ]
     },
     "grunt": {
@@ -170,11 +196,15 @@
       },
       "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
+        "edit_file",
+        "write_file",
         "view_file",
         "replace_file_content",
         "write_to_file",
-        "run_command",
-        "send_message"
+        "grep_search",
+        "find_by_name",
+        "run_command"
       ]
     },
     "compaction": {
@@ -190,6 +220,7 @@
       },
       "claude_tools": "Read",
       "agy_tools": [
+        "read_file",
         "view_file",
         "send_message"
       ]
@@ -207,6 +238,7 @@
       },
       "claude_tools": "Read",
       "agy_tools": [
+        "read_file",
         "view_file",
         "send_message"
       ]
