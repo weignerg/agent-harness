@@ -24,11 +24,11 @@ echo "==========================================================================
 SERVICE_FILES=("$CONFIG_DIR"/*.service)
 NUM_FILES=${#SERVICE_FILES[@]}
 echo "[CHECK 1] Found ${NUM_FILES} service unit files in ${CONFIG_DIR}."
-if [ "$NUM_FILES" -ne 21 ]; then
-    echo "❌ FAIL: Expected exactly 21 service files, found ${NUM_FILES}."
+if [ "$NUM_FILES" -ne 22 ]; then
+    echo "❌ FAIL: Expected exactly 22 service files, found ${NUM_FILES}."
     exit 1
 fi
-echo "✅ Passed: Exactly 21 service files found."
+echo "✅ Passed: Exactly 22 service files found."
 
 # 2. Check for forbidden Environment="HF_TOKEN="
 echo "[CHECK 2] Scanning for forbidden 'Environment=\"HF_TOKEN=\"' overrides..."
