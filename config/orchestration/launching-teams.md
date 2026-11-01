@@ -93,7 +93,7 @@ In Google Antigravity (`agy`), multi-tier orchestration operates natively via in
      - `reviewer` (`Model: "flash"`, Gemini 3.8 Medium): Adversarial code reviews, 4-tier audits, and Second-Pass Scope Gate enforcement.
      - `scout` (`Model: "flash_lite"`, Gemini 3.8 Low): Silent read-only search leaf (grep, glob, file discovery); reports only to its direct caller.
      - `grunt` (`Model: "flash_lite"`, Gemini 3.8 Low): Silent atomic edit/check leaf; reports only to its direct caller.
-   - Non-leaf subagents communicate back to `team-orchestrator` using `send_message(Recipient="<conversationId>", Message="...")`. Silent leaves (`scout`, `grunt`) return results directly to their direct caller and never invoke subagents or call `send_message`.
+   - In Google Antigravity (`agy`), all subagents return results to their caller using `send_message(Recipient="<callerId>", Message="...")`. Silent leaves (`scout`, `grunt`) include `send_message` strictly to report back to their direct calling agent, and omit subagent-spawning tools (`invoke_subagent`, `manage_subagents`).
 
 3. **Visibility & Background Management**:
    - **In-Session Inspection**: Run `manage_subagents(Action="list")` to inspect live child subagents, conversation IDs, and status.

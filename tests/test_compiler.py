@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from harness.installer.compiler import compile_agents
+from harness.installer.compiler import compile_agents, compile_agy_frontmatter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORE_DIR = REPO_ROOT / "core"
@@ -61,8 +61,9 @@ class TestCompilerFrontmatter(unittest.TestCase):
             self.assertIn(role, role_texts, f"Role {role} missing from compiled output")
             text = role_texts[role]
 
-            # 1. read_file must be present in ALL roles
+            # 1. read_file and send_message must be present in ALL roles
             self.assertIn("- read_file", text, f"Role {role} must have read_file")
+            self.assertIn("- send_message", text, f"Role {role} must have send_message")
 
             # 2. edit_file and write_file only in read-write roles
             if role in read_write_roles:
@@ -72,17 +73,49 @@ class TestCompilerFrontmatter(unittest.TestCase):
                 self.assertNotIn("- edit_file", text, f"Role {role} must NOT have edit_file")
                 self.assertNotIn("- write_file", text, f"Role {role} must NOT have write_file")
 
-            # 3. invoke_subagent and send_message in caller roles, NEVER in silent leaves
+            # 3. invoke_subagent only in caller roles, NEVER in silent leaves
             if role in subagent_callers:
                 self.assertIn("- invoke_subagent", text, f"Role {role} must have invoke_subagent")
-                self.assertIn("- send_message", text, f"Role {role} must have send_message")
             if role in silent_leaves:
                 self.assertNotIn("- invoke_subagent", text, f"Leaf role {role} must NEVER have invoke_subagent")
-                self.assertNotIn("- send_message", text, f"Leaf role {role} must NEVER have send_message")
+                self.assertNotIn("- manage_subagents", text, f"Leaf role {role} must NEVER have manage_subagents")
 
         # Architectural search web permission
         self.assertIn("- search_web", role_texts["architect"])
         self.assertIn("- search_web", role_texts["reviewer"])
+
+    def test_compile_agy_frontmatter_invariant_filtering(self):
+        """Verify compile_agy_frontmatter enforces readonly stripping and leaf tool restrictions."""
+        tier_models = {
+            "workhorse": {"agy": "flash", "agy_model_id": "gemini-3.8-flash-medium"},
+            "fast": {"agy": "flash_lite", "agy_model_id": "gemini-3.8-flash-low"},
+        }
+
+        # 1. Read-only role with illegal mutating tools injected in agy_tools
+        ro_meta = {
+            "tier": "workhorse",
+            "readonly": True,
+            "agy_tools": ["read_file", "edit_file", "write_file", "replace_file_content", "write_to_file", "send_message"],
+        }
+        ro_fm = compile_agy_frontmatter("reviewer", ro_meta, tier_models)
+        self.assertIn("- read_file", ro_fm)
+        self.assertIn("- send_message", ro_fm)
+        self.assertNotIn("- edit_file", ro_fm)
+        self.assertNotIn("- write_file", ro_fm)
+        self.assertNotIn("- replace_file_content", ro_fm)
+        self.assertNotIn("- write_to_file", ro_fm)
+
+        # 2. Leaf role with illegal spawning tools injected in agy_tools and missing send_message
+        leaf_meta = {
+            "tier": "fast",
+            "readonly": True,
+            "agy_tools": ["read_file", "invoke_subagent", "manage_subagents"],
+        }
+        leaf_fm = compile_agy_frontmatter("scout", leaf_meta, tier_models)
+        self.assertIn("- read_file", leaf_fm)
+        self.assertIn("- send_message", leaf_fm)
+        self.assertNotIn("- invoke_subagent", leaf_fm)
+        self.assertNotIn("- manage_subagents", leaf_fm)
 
     def test_gemini_md_documents_tools_and_mechanisms(self):
         """Verify config/agy/GEMINI.md documents canonical tools and background mechanisms."""

@@ -673,7 +673,7 @@ for ro_role in supreme-orchestrator team-orchestrator architect reviewer scout; 
     fi
 done
 
-# Check invoke_subagent and send_message in orchestrators/callers, NEVER in scout or grunt
+# Check invoke_subagent and send_message in orchestrators/callers
 for caller in supreme-orchestrator team-orchestrator architect worker tester reviewer; do
     if ! grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${caller}.md" || \
        ! grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${caller}.md"; then
@@ -682,11 +682,16 @@ for caller in supreme-orchestrator team-orchestrator architect worker tester rev
     fi
 done
 
+# Check that leaves include send_message and NEVER include invoke_subagent or manage_subagents
 for leaf in scout grunt; do
-    if grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${leaf}.md" || \
-       grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${leaf}.md"; then
+    if ! grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${leaf}.md"; then
         AGY_TOOLS_OK=false
-        echo "Unexpected invoke_subagent or send_message in leaf ${leaf}.md"
+        echo "Missing send_message in leaf ${leaf}.md"
+    fi
+    if grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${leaf}.md" || \
+       grep -q -- "- manage_subagents" "${SANDBOX_AGY}/agents/${leaf}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Unexpected invoke_subagent or manage_subagents in leaf ${leaf}.md"
     fi
 done
 
