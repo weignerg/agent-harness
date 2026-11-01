@@ -1,13 +1,13 @@
 [Unit]
-Description=SGLang Qwen 3.5 27B Dense Stack on Port 30000 (100% VRAM NVFP4/Q6, Speculative Decoding, FP8 KV Cache)
+Description=SGLang Qwen 3.8 27B Dense Stack on Port 30000 (100% VRAM NVFP4/Q6, Speculative Decoding, FP8 KV Cache)
 After=network.target
 
 [Service]
 Type=exec
 EnvironmentFile=-%h/.config/opencode-backends/env
 Environment="SGLANG_SERVICE=opencode-sglang-qwen27b.service"
-Environment="SGLANG_27B_MODEL_PATH=Qwen/Qwen3.5-27B-FP4"
-Environment="SGLANG_27B_SERVED_MODEL_NAME=qwen3.5-27b"
+Environment="SGLANG_27B_MODEL_PATH=Qwen/Qwen3.8-27B-FP4"
+Environment="SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
 Environment="SGLANG_27B_QUANTIZATION=fp4"
 Environment="SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
 Environment="SGLANG_27B_MEM_FRACTION=0.88"

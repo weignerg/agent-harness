@@ -32,8 +32,8 @@
       "fast": "ornith-local/ornith-1.5-9b"
     },
     "qwen3.5-27b": {
-      "heavy": "local-sglang/qwen3.5-27b",
-      "workhorse": "local-sglang/qwen3.5-27b",
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
       "fast": "ornith-local/ornith-1.5-9b"
     },
     "qwen3.5-35b-a3b": {

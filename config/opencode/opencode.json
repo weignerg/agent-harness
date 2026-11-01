@@ -51,7 +51,7 @@
           }
         },
         "qwen3.5-27b": {
-          "name": "Qwen 3.5 27B Dense (NVFP4/Q6 Speculative Decoding)",
+          "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)",
           "context": 131072,
           "output": 32768,
           "modalities": [
@@ -139,7 +139,7 @@
           "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)"
         },
         "qwen3.5-27b": {
-          "name": "Qwen 3.5 27B Dense (NVFP4/Q6 Speculative Decoding)"
+          "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)"
         }
       }
     },

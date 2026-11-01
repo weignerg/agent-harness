@@ -83,7 +83,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
 
         # Selectable profiles definition
         self.assertEqual(profiles["qwen3.8-27b"].get("workhorse"), "local-sglang/qwen3.8-27b")
-        self.assertEqual(profiles["qwen3.5-27b"].get("workhorse"), "local-sglang/qwen3.5-27b")
+        self.assertEqual(profiles["qwen3.8-27b"].get("workhorse"), "local-sglang/qwen3.8-27b")
         self.assertEqual(profiles["ornith-1.5-35b"].get("workhorse"), "ornith-local/ornith-1.5-35b")
 
     def test_qwen27b_service_unit_configuration(self) -> None:
@@ -166,7 +166,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
             out_qwen35 = base_dir / "agents_qwen35"
             compile_agents(core_dir=self.core_dir, target_runtime="opencode", output_dir=out_qwen35, model_profile="qwen3.5-27b")
             worker_q35 = (out_qwen35 / "worker.md").read_text(encoding="utf-8")
-            self.assertIn("model: local-sglang/qwen3.5-27b", worker_q35)
+            self.assertIn("model: local-sglang/qwen3.8-27b", worker_q35)
 
             # 4. model_profile="27b-nvfp4"
             out_nvfp4 = base_dir / "agents_nvfp4"

@@ -133,7 +133,7 @@ def compile_agents(
     if not effective_model and effective_profile:
         if effective_profile in profiles:
             effective_model = profiles[effective_profile].get("workhorse")
-        elif effective_profile in ("qwen3.8-27b", "27b-nvfp4", "27b-q6"):
+        elif effective_profile in ("qwen3.8-27b", "qwen3.5-27b", "27b-nvfp4", "27b-q6"):
             effective_model = "local-sglang/qwen3.8-27b"
         elif effective_profile == "qwen3.5-27b":
             effective_model = "local-sglang/qwen3.5-27b"

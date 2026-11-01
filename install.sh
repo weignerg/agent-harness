@@ -106,7 +106,7 @@ Actions:
   --uninstall                          Safely roll back installed files using install manifest
 
 Parity & Modules:
-  --sglang-model <ornith-35b|35b-a3b|qwen3.8-27b|qwen3.5-27b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: ornith-35b)
+  --sglang-model <ornith-35b|35b-a3b|qwen3.8-27b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: ornith-35b)
   --with-obsidian / --no-obsidian      Toggle Obsidian detection & pacman install (default: with)
   --with-vault / --no-vault            Toggle ~/Vaults/home starter scaffolding (default: with)
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096 & 30000 (default: with)
@@ -994,21 +994,16 @@ EOF
     local active_service="opencode-sglang-ornith-35b.service"
     local qwen27b_quant="fp4"
     local qwen27b_path="Qwen/Qwen3.5-27B-FP4"
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="fp4"
-        qwen27b_path="Qwen/Qwen3.5-27B-FP4"
-    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        primary_model="local-sglang/qwen3.5-27b"
-        active_service="opencode-sglang-qwen27b.service"
-        qwen27b_quant="fp4"
-        qwen27b_path="Qwen/Qwen3.5-27B-FP4"
+        qwen27b_path="Qwen/Qwen3.8-27B-FP4"
     elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        primary_model="local-sglang/qwen3.5-27b"
+        primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="q6_k"
-        qwen27b_path="Qwen/Qwen3.5-27B-Instruct-GGUF/qwen3.5-27b-instruct-q6_k.gguf"
+        qwen27b_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
     elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
         primary_model="local-sglang/qwen3.5-35b-a3b"
         active_service="opencode-sglang-qwen35b.service"
@@ -1021,7 +1016,7 @@ EOF
         "SGLANG_SERVICE=${active_service}"
         "SGLANG_PRIMARY_MODEL=${primary_model}"
         "SGLANG_27B_MODEL_PATH=${qwen27b_path}"
-        "SGLANG_27B_SERVED_MODEL_NAME=qwen3.5-27b"
+        "SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
         "SGLANG_27B_QUANTIZATION=${qwen27b_quant}"
         "SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
         "SGLANG_27B_MEM_FRACTION=0.88"
@@ -1904,21 +1899,15 @@ deploy_opencode_backend_and_units() {
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
 
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         probed_model="qwen3.8-27b"
-        probed_model_path="Qwen/Qwen3.5-27B-FP4"
-        probed_service="opencode-sglang-qwen27b.service"
-        max_context="65536"
-        mem_fraction="0.88"
-    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        probed_model="qwen3.5-27b"
-        probed_model_path="Qwen/Qwen3.5-27B-FP4"
+        probed_model_path="Qwen/Qwen3.8-27B-FP4"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
     elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        probed_model="qwen3.5-27b"
-        probed_model_path="Qwen/Qwen3.5-27B-Instruct-GGUF/qwen3.5-27b-instruct-q6_k.gguf"
+        probed_model="qwen3.8-27b"
+        probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
@@ -2095,10 +2084,8 @@ install_opencode_global() {
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         model_profile_arg=(--model-profile "qwen3.8-27b")
-    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen3.5-27b")
     elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
         model_profile_arg=(--model-profile "qwen3.5-35b-a3b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
@@ -2374,10 +2361,8 @@ install_opencode_local() {
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         model_profile_arg=(--model-profile "qwen3.8-27b")
-    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen3.5-27b")
     elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
         model_profile_arg=(--model-profile "qwen3.5-35b-a3b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then

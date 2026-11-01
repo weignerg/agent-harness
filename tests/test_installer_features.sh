@@ -645,7 +645,7 @@ PROF_OUT="$(USER_HOME="${SANDBOX_PROF}" HOME="${SANDBOX_PROF}" "${INSTALL_SCRIPT
 ENV_FILE="${SANDBOX_PROF}/.config/opencode-backends/env"
 
 if [ -f "$ENV_FILE" ] && \
-   grep -q "SGLANG_PRIMARY_MODEL=local-sglang/qwen3.5-27b" "$ENV_FILE" && \
+   grep -q "SGLANG_PRIMARY_MODEL=local-sglang/qwen3.8-27b" "$ENV_FILE" && \
    grep -q "SGLANG_SERVICE=opencode-sglang-qwen27b.service" "$ENV_FILE" && \
    [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ] && \
    [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen35b.service" ]; then
