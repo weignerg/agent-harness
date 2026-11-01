@@ -26,6 +26,16 @@ BACKEND_DIR="${USER_HOME}/.config/opencode-backends"
 SYSTEMD_USER_DIR="${SYSTEMD_USER_DIR:-${USER_HOME}/.config/systemd/user}"
 SGLANG_STACK_DIR="${USER_HOME}/.local/share/opencode-sglang-stack"
 
+SYSTEMD_UNITS=(
+    "opencode-server.service"
+    "opencode-agent.slice"
+    "opencode-colbert-reindex.service"
+    "opencode-colbert-reindex.timer"
+    "opencode-sglang-ornith-35b.service"
+    "opencode-sglang-qwen27b.service"
+    "opencode-t3-serve.service"
+)
+
 MODE="global"
 TARGET_REPO=""
 DRY_RUN=false
@@ -213,23 +223,48 @@ if [ "$MODE" = "global" ]; then
 
     # Clean harness systemd user units
     if [ -d "${SYSTEMD_USER_DIR}" ]; then
+        for u_name in "${SYSTEMD_UNITS[@]}"; do
+            u="${SYSTEMD_USER_DIR}/${u_name}"
+            if [ -f "$u" ] || [ -L "$u" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+                    systemctl --user stop "$u_name" 2>/dev/null || true
+                    systemctl --user disable "$u_name" 2>/dev/null || true
+                fi
+                rm -f "$u"
+            fi
+        done
         for u in "${SYSTEMD_USER_DIR}"/opencode-*.service "${SYSTEMD_USER_DIR}"/opencode-*.timer "${SYSTEMD_USER_DIR}"/opencode-*.slice; do
-            if [ -f "$u" ]; then
+            if [ -f "$u" ] || [ -L "$u" ]; then
                 unit_name="$(basename "$u")"
-                if command -v systemctl >/dev/null 2>&1; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user stop "$unit_name" 2>/dev/null || true
                     systemctl --user disable "$unit_name" 2>/dev/null || true
                 fi
                 rm -f "$u"
             fi
         done
-        if command -v systemctl >/dev/null 2>&1; then
+        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
             systemctl --user daemon-reload 2>/dev/null || true
         fi
     fi
 
     # Clean symlinks
     [ -L "${GEMINI_CONFIG_DIR}/plugins/agy-harness" ] && rm -f "${GEMINI_CONFIG_DIR}/plugins/agy-harness"
+
+    # Clean AGY global entrypoints/rules that live outside the recorded roots (harness-owned artifacts only)
+    python3 -m harness.installer.config_sync unsync-gemini --gemini-md "${USER_HOME}/.gemini/GEMINI.md" || true
+    if [ -L "${USER_HOME}/.gemini/AGENTS.md" ]; then
+        case "$(readlink "${USER_HOME}/.gemini/AGENTS.md")" in
+            */core/CHARTER.md) rm -f "${USER_HOME}/.gemini/AGENTS.md" ;;
+        esac
+    fi
+    for rule_link in "${GEMINI_CONFIG_DIR}/rules"/*.md; do
+        [ -L "$rule_link" ] || continue
+        case "$(readlink "$rule_link")" in
+            */core/rules/*.md) rm -f "$rule_link" ;;
+        esac
+    done
+    rmdir "${GEMINI_CONFIG_DIR}/rules" 2>/dev/null || true
     [ -L "${AGENTS_HOME_DIR}" ] && rm -f "${AGENTS_HOME_DIR}"
 
     # Handle pre-existing settings and backup restoration/wiping
@@ -286,6 +321,15 @@ else
     if [ -L "${repo_path}/.agents" ]; then
         rm -f "${repo_path}/.agents"
     fi
+
+    # Remove workspace entrypoint symlinks created by the installer (never user-authored files)
+    for entry_link in AGENTS.md GEMINI.md CLAUDE.md; do
+        if [ -L "${repo_path}/${entry_link}" ]; then
+            case "$(readlink "${repo_path}/${entry_link}")" in
+                .agents/AGENTS.md|.agents/GEMINI.md|AGENTS.md) rm -f "${repo_path}/${entry_link}" ;;
+            esac
+        fi
+    done
 
     # Handle pre-existing settings and backup restoration/wiping
     if [ "$WIPE_BACKUPS" = true ]; then

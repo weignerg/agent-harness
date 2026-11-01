@@ -18,6 +18,7 @@ from harness.installer.settings import (
     merge_claude_settings_file,
     merge_json_settings,
 )
+from harness.paths import resolve_true_repo_root
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SCRIPT = REPO_ROOT / "install.sh"
@@ -122,6 +123,8 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((claude_dir / "CLAUDE.md").is_file())
             self.assertTrue((claude_dir / "skills" / "vault-retrieval" / "SKILL.md").is_file())
             self.assertTrue((claude_dir / "tools" / "tdd_pipeline.py").is_file())
+            self.assertTrue((claude_dir / "orchestration" / "supreme-orchestrator.md").is_file())
+            self.assertTrue((claude_dir / "orchestration" / "team-orchestrator.md").is_file())
 
             # Verify settings merge preserved user configuration
             merged_data = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -130,7 +133,9 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(merged_data["teammateMode"], "manual")
             self.assertIn("env", merged_data)
             self.assertEqual(merged_data["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"], "1")
-            self.assertEqual(merged_data["permissions"]["allow"], ["read_file"])
+            self.assertIn("read_file", merged_data["permissions"]["allow"])
+            self.assertIn("Bash(claude --bg *)", merged_data["permissions"]["allow"])
+            self.assertIn("Bash(claude stop *)", merged_data["permissions"]["deny"])
 
             # Manifest recorded
             manifest_path = sandbox / ".orchestration" / "install_manifest.json"
@@ -158,6 +163,9 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((opencode_dir / "rules" / "agent-teams.md").is_file())
             self.assertTrue((opencode_dir / "plugins" / "README.md").is_file())
             self.assertTrue((opencode_dir / "themes" / "blackwell.json").is_file())
+            self.assertTrue((opencode_dir / "orchestration" / "supreme-orchestrator.md").is_file())
+            self.assertTrue((opencode_dir / "orchestration" / "kickoffs" / "README.md").is_file())
+            self.assertTrue((opencode_dir / "orchestration" / "handoffs" / "README.md").is_file())
 
             # Manifest recorded
             manifest_path = sandbox / ".orchestration" / "install_manifest.json"
@@ -217,8 +225,13 @@ class TestUniversalInstaller(unittest.TestCase):
 
             # 2. Tamper with a file
             target_file = sandbox / ".orchestration" / "rules" / "code-quality.md"
-            with open(target_file, "a", encoding="utf-8") as f:
-                f.write("\n# TAMPERED LINE INJECTION\n")
+            if target_file.is_symlink():
+                content = target_file.read_text(encoding="utf-8")
+                target_file.unlink()
+                target_file.write_text(content + "\n# TAMPERED LINE INJECTION\n", encoding="utf-8")
+            else:
+                with open(target_file, "a", encoding="utf-8") as f:
+                    f.write("\n# TAMPERED LINE INJECTION\n")
 
             proc_tampered = self.run_installer("--verify", "--mode", "local", str(sandbox))
             self.assertNotEqual(proc_tampered.returncode, 0, "Verify should fail on tampered file")
@@ -485,6 +498,7 @@ class TestUniversalInstaller(unittest.TestCase):
                 "opencode-colbert-reindex.service",
                 "opencode-colbert-reindex.timer",
                 "opencode-sglang-ornith-35b.service",
+                "opencode-t3-serve.service",
             ]
             for unit in expected_units:
                 unit_path = systemd_user_dir / unit
@@ -498,12 +512,21 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("HF_TOKEN=test_hf_token_sample", env_content)
             self.assertIn("ANTHROPIC_API_KEY=test_ant_key_sample", env_content)
 
-            # Verify opencode.json cloud fallback providers
+            # Verify opencode.json cloud fallback providers and global instructions
             opencode_cfg = sandbox / ".config" / "opencode" / "opencode.json"
             self.assertTrue(opencode_cfg.is_file())
             cfg_data = json.loads(opencode_cfg.read_text(encoding="utf-8"))
             self.assertIn("anthropic", cfg_data.get("provider", {}))
             self.assertIn("google", cfg_data.get("provider", {}))
+            self.assertEqual(
+                cfg_data.get("instructions"),
+                [
+                    str(sandbox / ".config" / "opencode" / "rules" / "*.md"),
+                ],
+            )
+            self.assertTrue((sandbox / ".config" / "opencode" / "orchestration" / "supreme-orchestrator.md").is_file())
+            self.assertTrue((sandbox / ".config" / "opencode" / "orchestration" / "kickoffs" / "README.md").is_file())
+            self.assertTrue((sandbox / ".config" / "opencode" / "orchestration" / "handoffs" / "README.md").is_file())
 
             # Verify manifest tracks deployed systemd user units
             manifest_file = sandbox / ".orchestration" / "install_manifest.json"
@@ -574,6 +597,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.service").is_file())
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.timer").is_file())
             self.assertTrue((systemd_user_dir / "opencode-sglang-ornith-35b.service").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-t3-serve.service").is_file())
 
             # Manifest in local repo tracks them
             manifest_file = repo_dir / ".orchestration" / "install_manifest.json"
@@ -581,6 +605,7 @@ class TestUniversalInstaller(unittest.TestCase):
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             recorded_file_paths = [f["path"] for f in manifest_data.get("files", [])]
             self.assertIn(str((systemd_user_dir / "opencode-server.service").resolve()), recorded_file_paths)
+            self.assertIn(str((systemd_user_dir / "opencode-t3-serve.service").resolve()), recorded_file_paths)
 
             # Verify integrity
             proc_verify = self.run_installer("--verify", "--mode", "local", str(repo_dir), env=env)
@@ -592,6 +617,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(proc_uninst.returncode, 0)
             self.assertFalse((systemd_user_dir / "opencode-server.service").exists())
             self.assertFalse((systemd_user_dir / "opencode-agent.slice").exists())
+            self.assertFalse((systemd_user_dir / "opencode-t3-serve.service").exists())
 
     def test_opencode_gpu_probe_tuning_in_service_unit(self):
         """Test GPU probe detects profile and tunes service unit memory fraction and context length."""
@@ -1112,6 +1138,81 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("OpenCode server (opencode-server.service) status is failed; aborting wait.", proc.stdout)
             self.assertIn("OpenCode server failed healthcheck.", proc.stdout)
             self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
+
+    def test_sglang_venv_agent_harness_pth_linked(self):
+        """Test that SGLang venv site-packages has agent_harness.pth created pointing to REPO_ROOT."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            stack_dir = sandbox / ".local" / "share" / "opencode-sglang-stack"
+            sp_dir = stack_dir / "venv" / "lib" / "python3.12" / "site-packages"
+            sp_dir.mkdir(parents=True)
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+            }
+            proc = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", "--no-backends", env=env)
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            pth_file = sp_dir / "agent_harness.pth"
+            self.assertTrue(pth_file.is_file(), f"Missing agent_harness.pth at {pth_file}")
+            expected_root = resolve_true_repo_root(REPO_ROOT) or REPO_ROOT
+            self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(expected_root))
+
+    def test_t3_code_serve_systemd_unit_definition(self):
+        """Test Issue #15: opencode-t3-serve.service definition and structure."""
+        svc_path = REPO_ROOT / "config" / "systemd" / "opencode-t3-serve.service"
+        self.assertTrue(svc_path.is_file(), f"Missing unit file: {svc_path}")
+        content = svc_path.read_text(encoding="utf-8")
+        self.assertIn("EnvironmentFile=-%h/.config/opencode-backends/env", content)
+        self.assertIn('Environment="HOME=%h"', content)
+        self.assertIn('Environment="CLAUDE_CONFIG_DIR=%h/.claude"', content)
+        self.assertIn('Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"', content)
+        self.assertIn('Environment="T3_SERVE_HOST=0.0.0.0"', content)
+        self.assertIn('Environment="T3_SERVE_PORT=3773"', content)
+        self.assertIn("StartLimitIntervalSec=60", content)
+        self.assertIn("StartLimitBurst=5", content)
+        self.assertIn("t3", content)
+        self.assertIn("serve", content)
+        self.assertIn("3773", content)
+        self.assertIn("WantedBy=default.target", content)
+
+    def test_t3_code_serve_installer_flags_and_deployment(self):
+        """Test Issue #15: install.sh --help documents T3 flags, and deploys opencode-t3-serve.service."""
+        proc_help = self.run_installer("--help")
+        self.assertEqual(proc_help.returncode, 0)
+        self.assertIn("--with-t3", proc_help.stdout)
+        self.assertIn("--no-t3", proc_help.stdout)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+            }
+
+            # Install with --with-t3
+            proc_inst = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", "--with-t3", env=env)
+            self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
+
+            t3_unit = systemd_user_dir / "opencode-t3-serve.service"
+            self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed")
+            self.assertIn("T3_SERVE_PORT=3773", t3_unit.read_text(encoding="utf-8"))
+
+            # Verify manifest tracks it
+            manifest_file = sandbox / ".orchestration" / "install_manifest.json"
+            self.assertTrue(manifest_file.is_file())
+            manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            recorded_files = [f["path"] for f in manifest_data.get("files", [])]
+            self.assertIn(str(t3_unit.resolve()), recorded_files)
+
+            # Uninstall and verify removal
+            proc_uninst = self.run_installer("--uninstall", "--mode", "global", "--non-interactive", env=env)
+            self.assertEqual(proc_uninst.returncode, 0, f"Uninstall failed: {proc_uninst.stderr}\n{proc_uninst.stdout}")
+            self.assertFalse(t3_unit.exists(), "opencode-t3-serve.service should be removed by uninstall")
 
 
 if __name__ == "__main__":

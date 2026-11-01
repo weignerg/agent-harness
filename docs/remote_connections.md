@@ -2,38 +2,41 @@
 
 ## 1. Executive Summary & Overview
 
-The `agent-harness` architecture provides headless, multi-client connectivity to its local inference stack (**SGLang** on port 30000) and orchestrator backend (**OpenCode Server** on port 4096). This architecture enables developers and remote clients to drive autonomous agent workflows from laptops, mobile devices, or remote IDE sessions without consuming GPU VRAM on client machines.
+The `agent-harness` architecture provides headless, multi-client connectivity to its local inference stack (**SGLang** on port 30000), unified web frontend (**T3 Code** on port 3773), and orchestrator backend (**OpenCode Server** on port 4096). This architecture enables developers and remote clients to drive autonomous agent workflows from laptops, mobile devices, or remote IDE sessions without consuming GPU VRAM on client machines.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Client Devices & UIs                     │
-│                                                             │
-│  ┌──────────────────┐   ┌─────────────────┐   ┌──────────┐  │
-│  │ OpenCode Mobile  │   │ Antigravity SSH │   │ Claude   │  │
-│  │   (iOS/Android)  │   │  Remote Tunnel  │   │ Headless │  │
-│  └─────────┬────────┘   └────────┬────────┘   └────┬─────┘  │
-└────────────┼─────────────────────┼─────────────────┼────────┘
-             │ (LAN:4096)          │ (SSH L-Tunnel)  │ (Local/Env)
-             ▼                     ▼                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│               Host Machine (agent-harness)                  │
-│                                                             │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │  UFW Firewall: allow LAN port 4096, 22 (SSH)          │  │
-│  └──────────────────────────┬────────────────────────────┘  │
-│                             ▼                               │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │  OpenCode Server (`opencode-server.service`:4096)     │  │
-│  │  - Basic / Token Auth (`OPENCODE_SERVER_PASSWORD`)    │  │
-│  │  - Context Engine & Agent Execution                   │  │
-│  └──────────────────────────┬────────────────────────────┘  │
-│                             ▼                               │
-│  ┌───────────────────────────────────────────────────────┐  │
-│  │  SGLang Inference Server (`opencode-sglang*.service`) │  │
-│  │  - OpenAI-Compatible API (`127.0.0.1:30000/v1`)       │  │
-│  │  - Native Hardware Acceleration & RadixAttention       │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Client Devices & UIs                           │
+│                                                                         │
+│  ┌──────────────────┐   ┌─────────────────┐   ┌──────────────────────┐  │
+│  │ OpenCode Mobile  │   │ Web / Desktop   │   │ Antigravity SSH      │  │
+│  │   (iOS/Android)  │   │ Browser (T3)    │   │  Remote Tunnel       │  │
+│  └─────────┬────────┘   └────────┬────────┘   └──────────┬───────────┘  │
+└────────────┼─────────────────────┼───────────────────────┼──────────────┘
+             │ (LAN:4096)          │ (LAN/Tailscale:3773)  │ (SSH L-Tunnel)
+             ▼                     ▼                       ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     Host Machine (agent-harness)                        │
+│                                                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  UFW Firewall: allow LAN ports 4096, 4097, 3773, 22 (SSH)         │  │
+│  └──────────────────┬──────────────────────┬─────────────────────────┘  │
+│                     │                      │                            │
+│                     ▼                      ▼                            │
+│  ┌─────────────────────────────┐ ┌───────────────────────────────────┐  │
+│  │ OpenCode Server (4096/4097) │ │ T3 Code Unified Frontend (3773)   │  │
+│  │ - Basic / Token Auth        │ │ - Bridges Claude, OpenCode, AGY   │  │
+│  │ - Context & Agent Exec      │ │ - Worktree & Multi-Runtime Switch │  │
+│  └──────────────┬──────────────┘ └─────────────────┬─────────────────┘  │
+│                 │                                  │                    │
+│                 └─────────────────┬────────────────┘                    │
+│                                   ▼                                     │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │  SGLang Inference Server (`opencode-sglang*.service`)             │  │
+│  │  - OpenAI-Compatible API (`127.0.0.1:30000/v1`)                   │  │
+│  │  - Native Hardware Acceleration & RadixAttention                   │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -184,23 +187,83 @@ set +a
 
 ---
 
-## 6. Default UFW Firewall Configuration
+## 6. T3 Code (`t3 serve`) Unified Multi-Runtime Frontend
+
+### 6.1 Unified Multi-Runtime Architecture
+**T3 Code** provides a web-based and desktop interface (`t3 serve`) operating on port `3773` (`0.0.0.0:3773` or mesh IP). It acts as a single pane of glass uniting all supported agent runtimes:
+- **Claude Code**: Direct visibility into `~/.claude/` configurations, slash commands, and active agent sessions.
+- **OpenCode**: Integration with `~/.config/opencode/`, MCP servers, and local multi-agent teams.
+- **Antigravity (AGY)**: Integration with `~/.gemini/config/plugins/agent-harness` and AGY skill catalogs.
+- **Git Worktree Isolation**: Native browsing and switching between isolated worktrees located in `<repo>/.orchestration/worktrees/` (`feat/issue-<n>-*`, `fix/issue-<n>-*`).
+
+### 6.2 Enabling & Managing the Service
+The T3 Code frontend is packaged as the systemd user service `opencode-t3-serve.service`.
+
+1. **Installer Configuration**:
+   ```bash
+   # Enable T3 Code server during installation
+   ./install.sh --with-t3
+
+   # Skip T3 Code server deployment
+   ./install.sh --no-t3
+   ```
+
+2. **Systemd Daemon Control**:
+   ```bash
+   # Enable and start the service immediately
+   systemctl --user enable --now opencode-t3-serve.service
+
+   # Check status and listening port
+   systemctl --user status opencode-t3-serve.service
+
+   # Stream live logs
+   journalctl --user -u opencode-t3-serve.service -f
+
+   # Stop and disable service
+   systemctl --user disable --now opencode-t3-serve.service
+   ```
+
+3. **Standalone / Ad-Hoc Invocation**:
+   ```bash
+   # Run T3 Code serve in foreground
+   t3 serve --host 0.0.0.0 --port 3773
+   ```
+
+### 6.3 Pairing Desktop, Web & Mobile Clients
+
+1. **Local Area Network (LAN) Web Access**:
+   Navigate to `http://<HOST_LAN_IP>:3773` in any modern web browser (Chrome, Edge, Firefox, Safari).
+
+2. **Tailscale & Mesh VPN Access**:
+   If running Tailscale or WireGuard, access the frontend securely across networks without opening public router ports:
+   `http://<tailscale_node_ip>:3773` or `http://<magicdns_hostname>:3773`
+
+3. **Desktop & Mobile Client Pairing**:
+   - In desktop web browsers, install T3 Code as a Progressive Web App (PWA) for desktop launcher integration.
+   - On mobile browsers (Safari on iOS, Chrome on Android), add to Home Screen for handheld orchestration alongside OpenCode Mobile.
+   - Switch active branches, monitor subagents, and review git diffs within `.orchestration/worktrees/` directly from the UI.
+
+---
+
+## 7. Default UFW Firewall Configuration
 
 The installer automatically enables host firewall rules by default (`WITH_FIREWALL=true`):
 
-### 6.1 Generated Rules
+### 7.1 Generated Rules
 When enabled, `install.sh` stages firewall rules allowing:
 - **SSH (Port 22)**: Allows remote terminal management.
-- **OpenCode Server (Port 4096)**: Allowed from local subnet (e.g. `192.168.0.0/16` or `10.0.0.0/8`).
+- **OpenCode Server (Port 4096 / 4097)**: Allowed from local subnet (e.g. `192.168.0.0/16` or `10.0.0.0/8`).
+- **T3 Code Server (Port 3773)**: Allowed from local subnet and Tailscale mesh for web/mobile UI access.
 - **SGLang Inference (Port 30000)**: Bound to `127.0.0.1` locally, inaccessible from external networks unless explicitly tunneled.
 
-### 6.2 Manual Verification and Auditing
+### 7.2 Manual Verification and Auditing
 ```bash
 # Check UFW status
 sudo ufw status verbose
 
-# Allow OpenCode server from specific subnet
+# Allow OpenCode server and T3 Code frontend from specific subnet
 sudo ufw allow from 192.168.1.0/24 to any port 4096 proto tcp comment 'OpenCode LAN access'
+sudo ufw allow from 192.168.1.0/24 to any port 3773 proto tcp comment 'T3 Code LAN access'
 
 # Reload rules
 sudo ufw reload
@@ -208,12 +271,13 @@ sudo ufw reload
 
 ---
 
-## 7. Troubleshooting & Diagnostics
+## 8. Troubleshooting & Diagnostics
 
 | Symptom | Diagnostic Command | Remediation |
 |---|---|---|
 | OpenCode Server connection refused | `systemctl --user status opencode-server` | Run `systemctl --user start opencode-server` |
+| T3 Code Server connection refused | `systemctl --user status opencode-t3-serve` | Run `systemctl --user start opencode-t3-serve` |
 | HTTP 401 Unauthorized from Mobile | `grep OPENCODE_SERVER ~/.config/opencode-backends/env` | Re-verify password matching `~/.config/opencode-backends/env` |
-| Port 4096 unreachable across LAN | `sudo ufw status` | Allow port 4096 from client subnet in UFW |
+| Port 4096 or 3773 unreachable across LAN | `sudo ufw status` | Allow ports 4096/3773 from client subnet in UFW |
 | SGLang inference backend unhealthy | `curl http://127.0.0.1:30000/v1/models` | Check `systemctl --user status opencode-sglang*.service` |
 | ColBERT reindex timer inactive | `systemctl --user status opencode-colbert-reindex.timer` | Enable timer via `systemctl --user enable --now opencode-colbert-reindex.timer` |

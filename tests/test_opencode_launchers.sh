@@ -60,10 +60,10 @@ else
 fi
 
 # --- Test 3: In-session multi-agent dispatch via opencode.json -----------------
-echo "[Test 3] Verifying native in-session multi-agent model dispatch in templates/opencode/opencode.json..."
+echo "[Test 3] Verifying native in-session multi-agent model dispatch in config/opencode/opencode.json..."
 python3 -c "
 import json
-with open('${REPO_DIR}/templates/opencode/opencode.json') as f:
+with open('${REPO_DIR}/config/opencode/opencode.json') as f:
     cfg = json.load(f)
 assert cfg.get('model') == 'ornith-local/ornith-1.5-35b', 'Default model must be ornith-1.5-35b'
 assert cfg.get('small_model') == 'ornith-local/ornith-1.5-9b', 'Small model must be ornith-1.5-9b'
@@ -86,7 +86,7 @@ if [ -d "${REPO_DIR}/bin" ]; then
         if [ -e "$l" ] && [[ -L "$l" ]]; then fail "symlink in bin/: $l"; fi
     done
 fi
-if grep -q '"blackwell"' "${REPO_DIR}/templates/opencode/opencode.json"; then
+if grep -q '"blackwell"' "${REPO_DIR}/config/opencode/opencode.json"; then
     fail "opencode.json still defines blackwell provider"
 else
     pass "opencode.json provider keys match ornith-local only"
