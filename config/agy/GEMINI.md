@@ -14,7 +14,33 @@ You are an autonomous AI software engineer operating inside the **Antigravity (`
 <!-- HARDWARE_ARCHITECTURE_END -->
 
 ## Antigravity Native Tools
-`view_file`, `replace_file_content`, `write_to_file`, `run_command`, `invoke_subagent`, `send_message`, `manage_subagents`, `manage_task`, `ask_question`. Delegate with `invoke_subagent` (agents are defined in the `agent-harness` plugin).
+The canonical AGY v1.4.12+ native tool declarations are:
+- `read_file`: Read entire file or line range from disk (replaces legacy `view_file`).
+- `edit_file`: Surgically replace exact unique text blocks in a file (replaces legacy `replace_file_content`).
+- `write_file`: Create or overwrite files on disk (replaces legacy `write_to_file`).
+- `run_command`: Execute non-interactive shell commands in the workspace.
+- `invoke_subagent`: Launch asynchronous subagents with designated roles and Gemini 3.8 reasoning tiers.
+- `send_message`: Send messages to active subagents or callers by `conversationId`.
+- `manage_subagents`: List, inspect, or manage subagent session lifecycle (`Action="list"`).
+- `manage_task`: Inspect status, send input, or terminate background processes (`Action="list|status|send_input|kill"`).
+- `ask_question`: Interactive user escalation and sovereign human decision gates.
+- `search_web`: Upstream documentation and web search.
+
+Legacy compatibility aliases (`view_file`, `replace_file_content`, `write_to_file`, `grep_search`, `find_by_name`) are retained for backwards compatibility and mapped transparently.
+
+## Multi-Tier & Background Execution Mechanisms
+Google Antigravity (`agy`) supports two complementary multi-tier execution modes:
+
+### 1. In-Session Asynchronous Multi-Tier Subagent Trees
+- **Subagent Spawning**: Orchestrators launch child subagents using `invoke_subagent` (specifying `TypeName`, `Role`, `Prompt`, and `Model`). Each spawned subagent receives a unique `conversationId`.
+- **Reactive Wakeup**: Sessions do not poll. The harness automatically awakens parent sessions when child subagents send messages or background tasks complete.
+- **Inter-Agent Messaging**: Sessions communicate with child leaves or parents via `send_message` targeting `conversationId`.
+- **Subagent Inspection**: Use `manage_subagents(Action="list")` to inspect live child subagent sessions and status.
+
+### 2. CLI & Background Remote-Control Daemon
+- **CLI Role Launching**: `agy --agent <agent> --effort <low|medium|high>` spawns standalone agent sessions configured with explicit Gemini 3.8 reasoning effort tiers.
+- **Profile Discovery**: `agy agents` lists all installed agent profiles across plugins and local workspaces.
+- **Remote-Control Daemon**: `agy remote-control start|status|stop` manages the background remote-control service for decoupled headless execution, out-of-session telemetry, and external task control.
 
 ## Subagent Model & Effort Policy (Gemini 3.8)
 When spawning subagents via `invoke_subagent`, always enforce the official Google Gemini 3.8 tier mapping:

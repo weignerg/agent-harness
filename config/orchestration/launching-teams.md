@@ -58,6 +58,8 @@ Use it for teams whose work must stay on this computer. If you installed it with
 
 ## 4. Launch
 
+### 4.1 OpenCode / SGLang Launch
+
 The first prompt must start with `Role: Team Orchestrator.`, because that routes the session to its role. It then points at the kickoff by absolute path. Keep `'` and `$` out of names and prompts so the quoting stays safe.
 
 | Method | Command | Notes |
@@ -67,6 +69,38 @@ The first prompt must start with `Role: Team Orchestrator.`, because that routes
 | Subagent delegation via task tool | `task(agent: "team-orchestrator", prompt: "<first prompt>")` | Runs directly within the OpenCode session using local SGLang Ornith-35B on port 30000. |
 | Claude Code background session (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) | `claude --bg -n "<type>/issue-<n>-<desc>" --agent team-orchestrator --add-dir "<worktree_path>" -p "<kickoff_prompt>"` | Runs in an isolated background session named after the issue branch. Gives `team-orchestrator` a fresh top-level subagent nesting budget to coordinate `architect`, `worker`, `tester`, `reviewer`, `scout`, and `grunt`. |
 | Headless remote server | Connect via `http://127.0.0.1:4096` or OpenCode Mobile | For remote sessions and mobile monitoring. |
+
+### 4.2 Google Antigravity (`agy`) Multi-Tier Launch & Subagent Hierarchy
+
+In Google Antigravity (`agy`), multi-tier orchestration operates natively via in-session asynchronous subagents and background daemon management:
+
+1. **Supreme Orchestrator to Team Orchestrator Delegation**:
+   - `supreme-orchestrator` (Gemini 3.8 High, `Model: "pro"`) triages requirements and delegates each approved GitHub issue to a dedicated `team-orchestrator` using `invoke_subagent`:
+     ```python
+     invoke_subagent(
+         TypeName="team-orchestrator",
+         Role="Team Orchestrator",
+         Prompt="Role: Team Orchestrator. Implement Issue #<n> in isolated worktree...",
+         Model="pro"  # Gemini 3.8 High (gemini-3.8-flash-high)
+     )
+     ```
+   - AGY automatically returns a unique `conversationId` and establishes asynchronous reactive wakeup; `supreme-orchestrator` does not poll.
+
+2. **Team Orchestrator Leaf Subagent Spawning**:
+   - `team-orchestrator` manages the issue's lifecycle and isolated worktree (`.orchestration/worktrees/<branch>`). It is the **only** agent permitted to spawn leaf subagents:
+     - `architect` (`Model: "pro"`, Gemini 3.8 High): Read-only architectural planning, discovery, and dependency mapping.
+     - `worker` (`Model: "flash"`, Gemini 3.8 Medium): Implementation, refactoring, test authoring, and Conventional Commits.
+     - `tester` (`Model: "flash"`, Gemini 3.8 Medium): Two-stage TDD pipeline execution, bug fixing, and behavior verification.
+     - `reviewer` (`Model: "flash"`, Gemini 3.8 Medium): Adversarial code reviews, 4-tier audits, and Second-Pass Scope Gate enforcement.
+     - `scout` (`Model: "flash_lite"`, Gemini 3.8 Low): Silent read-only search leaf (grep, glob, file discovery); reports only to its direct caller.
+     - `grunt` (`Model: "flash_lite"`, Gemini 3.8 Low): Silent atomic edit/check leaf; reports only to its direct caller.
+   - In Google Antigravity (`agy`), all subagents return results to their caller using `send_message(Recipient="<callerId>", Message="...")`. Silent leaves (`scout`, `grunt`) include `send_message` strictly to report back to their direct calling agent, and omit subagent-spawning tools (`invoke_subagent`, `manage_subagents`).
+
+3. **Visibility & Background Management**:
+   - **In-Session Inspection**: Run `manage_subagents(Action="list")` to inspect live child subagents, conversation IDs, and status.
+   - **Background Tasks**: Inspect background commands via `manage_task(Action="list")` and check logs via `manage_task(Action="status", TaskId="...")`.
+   - **Remote-Control Daemon**: `agy remote-control start|status|stop` manages the background remote-control daemon for detached workloads, out-of-session telemetry, and external task control.
+   - **CLI Launch**: Standalone role sessions can also be launched directly via `agy --agent <agent> --effort <low|medium|high>`.
 
 ## 5. Start table for the user
 
@@ -84,15 +118,17 @@ When a team restarts after writing an end-of-day handoff, append this to its fir
 
 ## 6. Verify every launch
 
-| Check | Command |
-|---|---|
-| Listed and live (OpenCode) | OpenCode session list or `ps aux | grep opencode` |
-| Listed and live (Claude Code) | `claude agents` or `claude agents --all --json` |
-| Claude Code session logs | `claude logs "<type>/issue-<n>-<desc>"` |
-| Claude Code interactive attach | `claude attach "<type>/issue-<n>-<desc>"` |
-| SGLang endpoint | `curl http://127.0.0.1:30000/v1/models` |
-| Tab is in the user's window | The parent of the tab's shell is the user's konsole pid |
-| Two-way messaging | Task confirmation or READY reply to "Supreme Orchestrator" |
+| Check | Command | Notes |
+|---|---|---|
+| Listed and live (OpenCode) | OpenCode session list or `ps aux | grep opencode` | OpenCode runtime |
+| Listed and live (Claude Code) | `claude agents` or `claude agents --all --json` | Claude Code background sessions |
+| Claude Code session logs | `claude logs "<type>/issue-<n>-<desc>"` | Background session log stream |
+| Claude Code interactive attach | `claude attach "<type>/issue-<n>-<desc>"` | Interactive attach |
+| SGLang endpoint | `curl http://127.0.0.1:30000/v1/models` | Local inference engine |
+| AGY Subagent Hierarchy | `manage_subagents(Action="list")` | In-session subagent status |
+| AGY Background Daemon | `agy remote-control status` | Remote-control daemon status |
+| Tab is in the user's window | The parent of the tab's shell is the user's konsole pid | Desktop konsole sessions |
+| Two-way messaging | Task confirmation, READY reply, or `send_message` response | Inter-agent coordination |
 
 **Orchestrator Non-Termination Invariant**: Never kill, stop, or remove a running orchestrator session (`claude stop`, `claude kill`, `claude rm` are strictly denied by permission policy). Await its completion report or session handoff.
 

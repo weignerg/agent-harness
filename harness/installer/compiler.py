@@ -139,7 +139,22 @@ def compile_agy_frontmatter(role_name: str, meta: Dict[str, Any], tier_models: D
     agy_id = tier_models.get(tier, {}).get("agy_model_id", "gemini-3.8-flash-medium")
     desc = meta.get("description", "").replace('"', '\\"')
     is_primary = (meta.get("mode") == "primary")
-    agy_tools = meta.get("agy_tools", ["view_file", "run_command"])
+    readonly = meta.get("readonly", False)
+    agy_tools = list(meta.get("agy_tools", ["read_file", "view_file", "grep_search", "find_by_name", "run_command", "send_message"]))
+
+    # Enforce deterministic invariant filtering:
+    # 1. Read-only roles must not have mutating tools
+    mutating_tools = {"edit_file", "write_file", "replace_file_content", "write_to_file"}
+    if readonly:
+        agy_tools = [t for t in agy_tools if t not in mutating_tools]
+
+    # 2. Leaf and utility roles must not have subagent-spawning tools, and must have send_message
+    leaf_utility_roles = ("scout", "grunt", "compaction", "summary")
+    spawning_tools = {"invoke_subagent", "manage_subagents"}
+    if role_name in leaf_utility_roles:
+        agy_tools = [t for t in agy_tools if t not in spawning_tools]
+        if "send_message" not in agy_tools:
+            agy_tools.append("send_message")
 
     tools_yaml = "\n".join(f"  - {t}" for t in agy_tools)
 

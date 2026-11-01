@@ -17,7 +17,6 @@ from harness.installer.manifest import (
 from harness.installer.settings import (
     merge_claude_settings_file,
     merge_json_settings,
-)
 from harness.paths import resolve_true_repo_root
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

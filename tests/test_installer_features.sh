@@ -50,7 +50,7 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" 2>/dev/null || true
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -646,6 +646,7 @@ else
     fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
 fi
 
+<<<<<<< HEAD
 # --- Test 28: Verify Claude Code Background Session & Agent Teams Integration (Issue #12) ---
 echo "[Test 28] Verifying Claude Code background session dispatch and agent-teams configuration..."
 CLAUDE_CORE_JSON="${REPO_DIR}/config/claude/settings/core.json"
@@ -756,6 +757,83 @@ for ca in ('Bash(git push*)', 'Bash(git merge*)', 'Bash(gh pr create*)', 'Bash(g
     pass "Runtime bash gates, outward-facing ask rules, and per-role fan-out allow-lists verified"
 else
     fail "Runtime bash gates or per-role fan-out validation failed"
+fi
+
+# --- Test 30: Verifying AGY Agent Native Tool Names, Hierarchy & GEMINI.md ---
+echo "[Test 30] Verifying AGY agent tool compilation and GEMINI.md documentation (Issue #14)..."
+SANDBOX_AGY="$(mktemp -d /tmp/installer-test-agy-XXXXXX)"
+
+python3 -m harness.installer.compiler \
+    --core-dir "${REPO_DIR}/core" \
+    --runtime agy \
+    --output-dir "${SANDBOX_AGY}/agents"
+
+AGY_TOOLS_OK=true
+
+# Check all 8 canonical roles have read_file
+for role in supreme-orchestrator team-orchestrator architect worker tester reviewer scout grunt; do
+    if ! grep -q -- "- read_file" "${SANDBOX_AGY}/agents/${role}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing read_file in ${role}.md"
+    fi
+done
+
+# Check edit_file and write_file only in worker, tester, grunt
+for rw_role in worker tester grunt; do
+    if ! grep -q -- "- edit_file" "${SANDBOX_AGY}/agents/${rw_role}.md" || \
+       ! grep -q -- "- write_file" "${SANDBOX_AGY}/agents/${rw_role}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing edit_file or write_file in ${rw_role}.md"
+    fi
+done
+
+for ro_role in supreme-orchestrator team-orchestrator architect reviewer scout; do
+    if grep -q -- "- edit_file" "${SANDBOX_AGY}/agents/${ro_role}.md" || \
+       grep -q -- "- write_file" "${SANDBOX_AGY}/agents/${ro_role}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Unexpected edit_file or write_file in ${ro_role}.md"
+    fi
+done
+
+# Check invoke_subagent and send_message in orchestrators/callers
+for caller in supreme-orchestrator team-orchestrator architect worker tester reviewer; do
+    if ! grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${caller}.md" || \
+       ! grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${caller}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing invoke_subagent or send_message in ${caller}.md"
+    fi
+done
+
+# Check that leaves include send_message and NEVER include invoke_subagent or manage_subagents
+for leaf in scout grunt; do
+    if ! grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${leaf}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing send_message in leaf ${leaf}.md"
+    fi
+    if grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${leaf}.md" || \
+       grep -q -- "- manage_subagents" "${SANDBOX_AGY}/agents/${leaf}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Unexpected invoke_subagent or manage_subagents in leaf ${leaf}.md"
+    fi
+done
+
+if [ "$AGY_TOOLS_OK" = true ]; then
+    pass "Compiled AGY agents contain read_file, proper edit/write permissions, and strict subagent nesting"
+else
+    fail "Compiled AGY agent tool declarations or nesting boundaries violated"
+fi
+
+# Verify GEMINI.md documentation
+GEMINI_DOC="${REPO_DIR}/config/agy/GEMINI.md"
+if grep -q "read_file" "$GEMINI_DOC" && \
+   grep -q "edit_file" "$GEMINI_DOC" && \
+   grep -q "write_file" "$GEMINI_DOC" && \
+   grep -q "invoke_subagent" "$GEMINI_DOC" && \
+   grep -q "manage_subagents" "$GEMINI_DOC" && \
+   grep -q "agy remote-control" "$GEMINI_DOC"; then
+    pass "config/agy/GEMINI.md accurately documents native tools, subagents, and remote-control daemon"
+else
+    fail "config/agy/GEMINI.md missing required tool or mechanism documentation"
 fi
 
 echo "================================================================================"
