@@ -32,6 +32,20 @@ The T3 Code unified frontend server listening on port `3773` is set up and enabl
 ./install.sh --no-t3
 ```
 
+#### Pairing Token & Authentication (`t3 pair`)
+T3 Code requires a pairing token to connect your browser, desktop, or mobile client to `t3-serve.service` (port `3773`).
+- By default, pairing tokens expire after **5 minutes** (`--ttl 5m`).
+- At the end of `./install.sh`, a fresh pairing token and Pairing URL are minted and displayed automatically.
+- Whenever your token expires or when pairing a new device, run:
+  ```bash
+  # Mint a new 5-minute pairing token, QR code, and Pairing URL:
+  t3 pair
+
+  # Or mint a longer-lived 1-hour pairing token:
+  t3 pair --ttl 1h
+  ```
+- Open the printed `Pairing URL: http://<host>:3773/pair#token=<TOKEN>` in your browser, or paste the `Token` into the T3 Code prompt.
+
 ### Fast Config-Only Resync (~5 Seconds)
 Quickly recompiles and synchronizes agent charters, tools, permissions, and FastMCP configs across all 3 runtimes without restarting SGLang or re-running warmup:
 ```bash
@@ -160,8 +174,20 @@ T3 Code provides a single web-based interface and REST/WebSocket API to manage C
   ```bash
   t3 serve --host 0.0.0.0 --port 3773
   ```
+- **Mint Pairing Token (`t3 pair`)**:
+  ```bash
+  # Mint new 5-minute pairing token, QR code, and Pairing URL:
+  t3 pair
+
+  # Or mint a longer-lived 1-hour pairing token:
+  t3 pair --ttl 1h
+  ```
 - **Access Web Cockpit**:
-  Open `http://127.0.0.1:3773` (or `http://<lan_or_tailscale_ip>:3773`) in any modern browser or mobile client.
+  Open `http://127.0.0.1:3773` (or `http://<lan_or_tailscale_ip>:3773`) in any modern browser or mobile client and authenticate using your pairing token or follow the `Pairing URL`.
+- **View Initial Service Token**:
+  ```bash
+  journalctl --user -u t3-serve.service -n 30 --no-pager
+  ```
 
 ---
 

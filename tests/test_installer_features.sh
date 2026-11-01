@@ -574,6 +574,13 @@ for arg in "\$@"; do
             printf "OpenCode Server\\n"
         fi
         exit 0
+    elif echo "\$arg" | grep -q "3773"; then
+        if echo "\$*" | grep -q "%{http_code}"; then
+            printf "T3 Code Server\\n200"
+        else
+            printf "T3 Code Server\\n"
+        fi
+        exit 0
     fi
 done
 exit 1
@@ -614,6 +621,13 @@ for arg in "$@"; do
             printf "OpenCode Server\n200"
         else
             printf "OpenCode Server\n"
+        fi
+        exit 0
+    elif echo "$arg" | grep -q "3773"; then
+        if echo "$*" | grep -q "%{http_code}"; then
+            printf "T3 Code Server\n200"
+        else
+            printf "T3 Code Server\n"
         fi
         exit 0
     fi
@@ -953,7 +967,8 @@ EOF
 chmod 0755 "${MOCK_T3_BIN}/systemctl"
 
 # When t3 binary is not in PATH, logs informational message without failing
-HC_NO_T3_OUT="$(PATH="${MOCK_T3_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_T3}" HOME="${SANDBOX_HC_T3}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --skip-warmup --non-interactive 2>&1 || true)"
+CLEAN_T3_PATH="$(echo "$PATH" | tr ':' '\n' | grep -v '\.local/bin' | grep -v '\.bun/bin' | tr '\n' ':' | sed 's/:$//')"
+HC_NO_T3_OUT="$(PATH="${MOCK_T3_BIN}:${CLEAN_T3_PATH}" USER_HOME="${SANDBOX_HC_T3}" HOME="${SANDBOX_HC_T3}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --skip-warmup --non-interactive 2>&1 || true)"
 if echo "$HC_NO_T3_OUT" | grep -q "T3 Code binary (t3) not found in PATH; t3-serve.service deployed and ready once t3 is installed" && \
    echo "$HC_NO_T3_OUT" | grep -q "All backend service healthchecks passed!"; then
     pass "Healthcheck logs info message and passes when t3 binary is not in PATH"
@@ -961,9 +976,16 @@ else
     fail "Healthcheck failed when t3 binary was absent"
 fi
 
-# When mock t3 binary is in PATH, polls port 3773 and confirms active
+# When mock t3 binary is in PATH, polls port 3773, confirms active, and mints pairing token in summary
 cat << 'EOF' > "${MOCK_T3_BIN}/t3"
 #!/bin/sh
+if [ "$1" = "pair" ]; then
+    echo "Pairing with mock-station (http://127.0.0.1:3773)."
+    echo "Pairing URL: http://127.0.0.1:3773/pair#token=MOCKTOKEN123"
+    echo "Token: MOCKTOKEN123"
+    echo "Expires: 2026-11-01T18:00:00Z"
+    exit 0
+fi
 exit 0
 EOF
 chmod 0755 "${MOCK_T3_BIN}/t3"
@@ -975,6 +997,14 @@ if echo "$HC_WITH_T3_OUT" | grep -q "Checking T3 Code unified server (port 3773)
     pass "Healthcheck actively verifies T3 Code server on port 3773 when t3 binary is installed"
 else
     fail "Healthcheck failed to actively verify T3 Code server when t3 binary was present"
+fi
+
+if echo "$HC_WITH_T3_OUT" | grep -q "Token: MOCKTOKEN123" && \
+   echo "$HC_WITH_T3_OUT" | grep -q "t3 pair" && \
+   echo "$HC_WITH_T3_OUT" | grep -q "t3 pair --ttl 1h"; then
+    pass "Installer summary successfully minted and displayed T3 pairing token and renewal instructions"
+else
+    fail "Installer summary failed to display minted T3 pairing token or renewal instructions"
 fi
 
 # 31e: Uninstall cleanly removes t3-serve.service

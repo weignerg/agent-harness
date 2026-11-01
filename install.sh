@@ -1300,6 +1300,17 @@ print_completion_summary() {
     local t3_svc_status="⚪ installed"
     local svc_name="${PROBED_SERVICE_NAME:-opencode-sglang-ornith-35b.service}"
 
+    local t3_bin=""
+    for p in "${USER_HOME}/.bun/bin/t3" "${USER_HOME}/.local/bin/t3" /usr/local/bin/t3 /usr/bin/t3; do
+        if [ -x "$p" ]; then
+            t3_bin="$p"
+            break
+        fi
+    done
+    if [ -z "$t3_bin" ]; then
+        t3_bin="$(command -v t3 2>/dev/null || true)"
+    fi
+
     if command -v systemctl >/dev/null 2>&1; then
         if systemctl --user is-active --quiet opencode-server.service 2>/dev/null; then
             server_svc_status="🟢 running"
@@ -1374,6 +1385,7 @@ print_completion_summary() {
     echo "   Claude Code  : claude"
     echo "   Antigravity  : agy"
     echo "   T3 Code      : t3 serve --host 0.0.0.0 --port 3773"
+    echo "   T3 Pair      : t3 pair   (or 't3 pair --ttl 1h' when token expires)"
     echo "   Obsidian     : obsidian ~/Vaults/home"
     echo "   ColBERT      : ~/.local/share/opencode-sglang-stack/reindex_vault.sh (or '/reindex' in OpenCode)"
 
@@ -1386,6 +1398,26 @@ print_completion_summary() {
         echo "   SGLang Inference Server  : http://127.0.0.1:30000/v1 [${sglang_svc_status}]"
         echo "   Antigravity Remote       : agy remote-control start"
         echo "   Claude Code Server       : claude server"
+    fi
+
+    if [ "$ENABLE_T3_SERVE" != false ]; then
+        echo ""
+        echo "🔑 T3 Code Pairing & Remote Access (Port 3773):"
+        local pair_output=""
+        if [ "$DRY_RUN" != true ] && [ -n "$t3_bin" ] && [ -x "$t3_bin" ]; then
+            if command -v timeout >/dev/null 2>&1; then
+                pair_output="$(timeout 5 "$t3_bin" pair 2>/dev/null || true)"
+            else
+                pair_output="$("$t3_bin" pair 2>/dev/null || true)"
+            fi
+        fi
+        if echo "$pair_output" | grep -q "Token:"; then
+            echo "$pair_output"
+            echo ""
+        fi
+        echo "   Mint new 5m token & QR : t3 pair"
+        echo "   Mint 1-hour token      : t3 pair --ttl 1h"
+        echo "   Service logs           : journalctl --user -u t3-serve.service -n 30 --no-pager"
     fi
 
     local next_cmd="opencode"
