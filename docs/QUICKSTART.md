@@ -22,10 +22,14 @@ Configures SGLang for Qwen 3.8 27B Dense (`qwen3.8-27b`, HuggingFace model path 
 ./install.sh --sglang-model 27b-q6
 ```
 
-### Install with T3 Code (`t3 serve`) Unified Web UI Server
-Enables the T3 Code unified frontend server listening on port `3773`:
+### T3 Code (`t3 serve`) Unified Web UI Server
+The T3 Code unified frontend server listening on port `3773` is set up and enabled by default on standard installs (and honors `--no-t3` / `--without-t3` to disable):
 ```bash
-./install.sh --with-t3
+# Standard installation automatically sets up and enables t3 serve:
+./install.sh
+
+# Or disable T3 Code serve:
+./install.sh --no-t3
 ```
 
 ### Fast Config-Only Resync (~5 Seconds)

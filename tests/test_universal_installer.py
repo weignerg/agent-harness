@@ -1179,7 +1179,7 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn("WantedBy=default.target", content)
 
     def test_t3_code_serve_installer_flags_and_deployment(self):
-        """Test Issue #15: install.sh --help documents T3 flags, and deploys opencode-t3-serve.service."""
+        """Test Issue #15 & #24: install.sh --help documents T3 flags, and automatically deploys opencode-t3-serve.service by default."""
         proc_help = self.run_installer("--help")
         self.assertEqual(proc_help.returncode, 0)
         self.assertIn("--with-t3", proc_help.stdout)
@@ -1194,13 +1194,21 @@ class TestUniversalInstaller(unittest.TestCase):
                 "SYSTEMD_USER_DIR": str(systemd_user_dir),
             }
 
-            # Install with --with-t3
-            proc_inst = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", "--with-t3", env=env)
+            # Standard install by default (without explicit --with-t3) automatically provisions T3 serve
+            proc_inst = self.run_installer("--target", "opencode", "--mode", "global", "--non-interactive", env=env)
             self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
 
             t3_unit = systemd_user_dir / "opencode-t3-serve.service"
-            self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed")
+            self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed by default")
             self.assertIn("T3_SERVE_PORT=3773", t3_unit.read_text(encoding="utf-8"))
+
+            env_file = sandbox / ".config" / "opencode-backends" / "env"
+            self.assertTrue(env_file.is_file(), f"Expected {env_file} to exist")
+            env_content = env_file.read_text(encoding="utf-8")
+            self.assertIn("T3_SERVE_PORT=3773", env_content)
+            self.assertIn("T3_SERVE_HOST=0.0.0.0", env_content)
+            self.assertIn("OPENCODE_SERVER_PORT=4096", env_content)
+            self.assertIn("OPENCODE_SERVER_HOST=0.0.0.0", env_content)
 
             # Verify manifest tracks it
             manifest_file = sandbox / ".orchestration" / "install_manifest.json"
