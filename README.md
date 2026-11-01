@@ -9,10 +9,52 @@
 [![Service](https://img.shields.io/badge/systemd-user_units-lightgrey.svg)](config/systemd)
 
 ### 📖 Documentation & Deep Dives
+- ⚡ [TL;DR Quickstart & Multi-Runtime Usage Guide](docs/QUICKSTART.md) (`docs/QUICKSTART.md`) — 60-second install, runtime cheatsheet (OpenCode, Claude Code, AGY, T3 Code), SGLang model switching, and agent permission matrix.
 - 📡 [Multi-Platform Remote Connections](docs/remote_connections.md) (`docs/remote_connections.md`) — Headless OpenCode server, Mobile pairing, `agy remote-control start`, and `claude server`.
 - 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
 - ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
 - 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
+
+---
+
+## ⚡ TL;DR Quickstart
+
+> **Looking for the complete copy-paste guide?** See the full [**TL;DR Quickstart & Multi-Runtime Usage Guide**](docs/QUICKSTART.md).
+
+### 1. Install & Model Selection
+```bash
+# Default install (Ornith 1.5 35B MoE + 9B fast leaf across OpenCode, Claude, AGY):
+./install.sh
+
+# Or install with Qwen 3.8 27B Dense (100% VRAM NVFP4 + NEXTN Speculative Decoding, nvidia/Qwen3.8-27B-NVFP4):
+./install.sh --sglang-model qwen3.8-27b
+
+# Install with T3 Code (t3 serve) web UI server on port 3773:
+./install.sh --with-t3
+
+# Fast config-only resync (~5 seconds, no model reload):
+./install.sh --target all --global --no-backends --no-firewall --no-obsidian --no-t3 --skip-warmup --no-healthcheck -y
+```
+
+### 2. Launch Surfaces
+```bash
+# A. OpenCode (Terminal TUI connected to local SGLang port 30000):
+opencode
+
+# B. Claude Code (Primary orchestrator + background agent teams):
+claude --agent supreme-orchestrator
+claude --bg -n "feat/issue-42" --agent team-orchestrator --add-dir "/path/to/worktree" -p "Execute issue"
+
+# C. Google Antigravity (Interactive or explicit reasoning tier):
+agy
+agy --agent supreme-orchestrator --effort high
+agy remote-control start
+
+# D. T3 Code (Unified web cockpit on port 3773):
+systemctl --user enable --now t3-serve.service
+t3 pair                     # Mint new 5m pairing token & URL (or 't3 pair --ttl 1h')
+# Open http://127.0.0.1:3773 in your browser (or follow printed Pairing URL)
+```
 
 ---
 

@@ -89,6 +89,63 @@ if ! grep -q 'OnBootSec=2min' "$TIMER_FILE" || ! grep -q 'OnUnitActiveSec=5min' 
 fi
 echo "✅ Passed: opencode-colbert-reindex.timer configured with OnBootSec=2min, OnUnitActiveSec=5min, RandomizedDelaySec=15."
 
+# 7. Check Qwen 3.8 27B service model repo ID and CLI flags (Issue #20)
+echo "[CHECK 7] Verifying opencode-sglang-qwen27b.service model repo ID and quantization flags (Issue #20)..."
+QWEN27B_FILE="${CONFIG_DIR}/opencode-sglang-qwen27b.service"
+if grep -q "Qwen/Qwen3.8-27B-FP4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains invalid repo ID Qwen/Qwen3.8-27B-FP4"
+    exit 1
+fi
+if ! grep -q "SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
+    exit 1
+fi
+if grep -q "SGLANG_27B_QUANTIZATION=fp4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains invalid quantization fp4"
+    exit 1
+fi
+if ! grep -q "SGLANG_27B_QUANTIZATION=modelopt" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_QUANTIZATION=modelopt"
+    exit 1
+fi
+if grep -q -- "--cuda-graph-max-bs " "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains ambiguous flag --cuda-graph-max-bs"
+    exit 1
+fi
+echo "✅ Passed: opencode-sglang-qwen27b.service correctly specifies nvidia/Qwen3.8-27B-NVFP4, modelopt, and valid SGLang flags."
+
+# 8. Check Qwen 3.8 27B fast startup and CUDA graph settings (Issue #23)
+echo "[CHECK 8] Verifying opencode-sglang-qwen27b.service fast startup and CUDA graph optimizations (Issue #23)..."
+if ! grep -q -- "--disable-prefill-cuda-graph" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing --disable-prefill-cuda-graph"
+    exit 1
+fi
+if grep -q -- "^ *--enable-torch-compile" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service hardcodes --enable-torch-compile in ExecStart"
+    exit 1
+fi
+if ! grep -q "SGLANG_27B_KV_CACHE_DTYPE=nvfp4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_KV_CACHE_DTYPE=nvfp4"
+    exit 1
+fi
+if grep -q -- "--mem-fraction-static [0-9.]*0.88" "$QWEN27B_FILE" || grep -q "0.880.88" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains corrupted mem-fraction-static"
+    exit 1
+fi
+if grep -q '\${SGLANG_27B_TORCH_COMPILE}' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service uses braced \${SGLANG_27B_TORCH_COMPILE} instead of unbraced \$SGLANG_27B_TORCH_COMPILE"
+    exit 1
+fi
+if grep -q '\${SGLANG_27B_SPECULATIVE_ARGS}' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service uses braced \${SGLANG_27B_SPECULATIVE_ARGS} instead of unbraced \$SGLANG_27B_SPECULATIVE_ARGS"
+    exit 1
+fi
+if ! grep -q '\$SGLANG_27B_TORCH_COMPILE' "$QWEN27B_FILE" || ! grep -q '\$SGLANG_27B_SPECULATIVE_ARGS' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing unbraced \$SGLANG_27B_TORCH_COMPILE or \$SGLANG_27B_SPECULATIVE_ARGS"
+    exit 1
+fi
+echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
+
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
 echo "================================================================================"

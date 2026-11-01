@@ -59,3 +59,8 @@ Full routing guidance: `agent-teams.md` rule.
 
 ## Orchestrator Non-Termination Invariant
 Never kill `supreme-orchestrator` or `team-orchestrator` via `kill`/`pkill`/`killall` nor via `manage_subagents`/`manage_task` with `Action: "kill"`.
+
+## Zero-Warmup Orchestration & Reactive Turn Discipline
+- **Immediate Turn Termination on Async Dispatch**: After calling `invoke_subagent` or `send_message`, end your turn immediately so AGY's Reactive Wakeup resumes execution automatically when child subagents report back (never busy-wait or poll).
+- **Explicit Worktree & Tier Enforcement**: Every `worker` or `reviewer` prompt must explicitly state the isolated worktree path (`<repo>/.orchestration/worktrees/issue-<n>-<desc>`), enforce explicit tier mapping (`Model: "flash"` for `worker`/`reviewer`/`tester` and `Model: "pro"` for `team-orchestrator`/`architect`), and forbid editing the main repository root.
+

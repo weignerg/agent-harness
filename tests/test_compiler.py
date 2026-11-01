@@ -666,7 +666,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("Qwen 3.8 27B", qwen38_27b.get("name", ""))
         self.assertGreaterEqual(qwen38_27b.get("context", 0), 131072)
         self.assertGreaterEqual(qwen38_27b.get("output", 0), 32768)
-        self.assertEqual(qwen38_27b.get("modalities"), ["text", "image"])
+        self.assertEqual(qwen38_27b.get("modalities"), {"input": ["text", "image"], "output": ["text"]})
         self.assertIn("high", qwen38_27b.get("variants", {}))
 
     def test_core_manifest_profiles_and_baseline_default(self) -> None:
@@ -696,18 +696,86 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         content = self.qwen27b_service_path.read_text(encoding="utf-8")
 
         # 100% VRAM residency / quantization flags
-        self.assertIn("fp8_e4m3", content, "KV-cache dtype must be fp8_e4m3")
+        self.assertTrue(
+            "nvfp4" in content or "fp8_e4m3" in content,
+            "KV-cache dtype must be nvfp4 or fp8_e4m3",
+        )
         self.assertIn("--kv-cache-dtype", content, "Service must specify --kv-cache-dtype")
         self.assertIn("flashinfer", content, "Attention backend must be flashinfer")
+        self.assertIn("--disable-prefill-cuda-graph", content, "Service must specify --disable-prefill-cuda-graph")
+        self.assertNotIn("\n  --enable-torch-compile", content, "Service must not hardcode --enable-torch-compile in default ExecStart")
         self.assertIn("--tool-call-parser qwen3_coder", content, "Tool-call parser must be qwen3_coder")
         self.assertIn("--reasoning-parser qwen3", content, "Reasoning parser must be qwen3")
         self.assertIn("--port 30000", content, "Port must be 30000")
         self.assertIn("--host 127.0.0.1", content, "Host must be 127.0.0.1")
         self.assertIn("SGLANG_SERVICE=opencode-sglang-qwen27b.service", content)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", content, "Service must specify nvidia/Qwen3.8-27B-NVFP4")
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", content, "Service must not reference non-existent Qwen/Qwen3.8-27B-FP4")
+        self.assertIn("SGLANG_27B_QUANTIZATION=modelopt", content, "Service must specify modelopt quantization")
+        self.assertNotIn("SGLANG_27B_QUANTIZATION=fp4", content, "Service must not use invalid fp4 quantization")
+        self.assertIn("--cuda-graph-max-bs-decode", content, "Service must use unambiguous --cuda-graph-max-bs-decode")
+        self.assertNotIn("--cuda-graph-max-bs ", content, "Service must not use ambiguous --cuda-graph-max-bs")
         self.assertTrue(
             "--speculative-algorithm" in content or "SGLANG_27B_SPECULATIVE" in content,
             "Service unit must configure speculative decoding",
         )
+
+    def test_regression_issue23_sglang_warmup_and_sed_fix(self) -> None:
+        """Verify Issue #23: SGLang warmup disables CUDA graph, unbraced optional systemd args, and service optimizations."""
+        service_content = self.qwen27b_service_path.read_text(encoding="utf-8")
+        self.assertIn("--disable-prefill-cuda-graph", service_content)
+        self.assertNotIn("\n  --enable-torch-compile", service_content)
+        self.assertIn("SGLANG_27B_KV_CACHE_DTYPE=nvfp4", service_content)
+        self.assertNotIn("0.880.88", service_content)
+        self.assertIn("$SGLANG_27B_TORCH_COMPILE", service_content)
+        self.assertIn("$SGLANG_27B_SPECULATIVE_ARGS", service_content)
+        self.assertNotIn("${SGLANG_27B_TORCH_COMPILE}", service_content)
+        self.assertNotIn("${SGLANG_27B_SPECULATIVE_ARGS}", service_content)
+
+        install_sh_content = self.install_sh_path.read_text(encoding="utf-8")
+        self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
+        self.assertIn("SGLANG_WARMUP_TIMEOUT:-300", install_sh_content, "warmup timeout must default to 300s")
+        self.assertIn("SGLANG_HEALTHCHECK_RETRIES:-240", install_sh_content, "max_sglang_wait must default to 240s")
+        self.assertIn("opencode-sglang-ornith-35b.service 2>/dev/null || true", install_sh_content)
+        self.assertIn("opencode-sglang-qwen27b.service 2>/dev/null || true", install_sh_content)
+
+        # Verify sed tuning idempotency and absence of 0.880.88 corruption
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_svc = Path(tmp_dir) / "opencode-sglang-qwen27b.service"
+            test_svc.write_text(service_content, encoding="utf-8")
+            # Run bash sed script matching install.sh
+            bash_cmd = f"""
+            mem_fraction="0.88"
+            max_context="65536"
+            dest_dir="{tmp_dir}"
+            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
+                sed -i "s|Environment=\\"SGLANG_27B_MEM_FRACTION=[0-9.]*\\"|Environment=\\"SGLANG_27B_MEM_FRACTION=${{mem_fraction}}\\"|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            fi
+            if grep -q '\\${{SGLANG_27B_MEM_FRACTION}}' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
+                sed -i "s|--mem-fraction-static [0-9.]*\\${{SGLANG_27B_MEM_FRACTION}}|--mem-fraction-static \\${{SGLANG_27B_MEM_FRACTION}}|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            fi
+            """
+            res = subprocess.run(["bash", "-c", bash_cmd], check=True, capture_output=True)
+            res_content = test_svc.read_text(encoding="utf-8")
+            self.assertIn("--mem-fraction-static ${SGLANG_27B_MEM_FRACTION}", res_content)
+            self.assertNotIn("--mem-fraction-static 0.88${SGLANG_27B_MEM_FRACTION}", res_content)
+            self.assertNotIn("0.880.88", res_content)
+
+    def test_regression_issue20_nvidia_qwen27b_nvfp4_repo_id(self) -> None:
+        """Verify Issue #20: Qwen/Qwen3.8-27B-FP4 is never emitted in templates, services, or installer."""
+        service_content = self.qwen27b_service_path.read_text(encoding="utf-8")
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", service_content)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", service_content)
+
+        install_sh_content = self.install_sh_path.read_text(encoding="utf-8")
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", install_sh_content)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", install_sh_content)
+
+        models_catalog_path = REPO_ROOT / "config" / "models" / "models_catalog.json"
+        if models_catalog_path.exists():
+            cat_content = models_catalog_path.read_text(encoding="utf-8")
+            self.assertNotIn("Qwen/Qwen3.8-27B-FP4", cat_content)
+            self.assertIn("nvidia/Qwen3.8-27B-NVFP4", cat_content)
 
     def test_compiler_frontmatter_model_profile_resolution(self) -> None:
         """Verify compile_opencode_frontmatter preserves baseline default and respects overrides."""
@@ -779,6 +847,54 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("qwen3.8-27b", res.stdout)
         self.assertIn("27b-nvfp4", res.stdout)
         self.assertIn("27b-q6", res.stdout)
+
+    def test_quickstart_documentation_and_readme_link(self) -> None:
+        """Verify docs/QUICKSTART.md exists, is linked from README.md, and covers multi-runtime surfaces (Issue #19)."""
+        quickstart_path = REPO_ROOT / "docs" / "QUICKSTART.md"
+        readme_path = REPO_ROOT / "README.md"
+
+        self.assertTrue(quickstart_path.is_file(), "docs/QUICKSTART.md must exist")
+        self.assertTrue(readme_path.is_file(), "README.md must exist")
+
+        readme_text = readme_path.read_text(encoding="utf-8")
+        self.assertIn("docs/QUICKSTART.md", readme_text, "README.md must link to docs/QUICKSTART.md")
+        self.assertIn("## ⚡ TL;DR Quickstart", readme_text, "README.md must have TL;DR Quickstart section")
+
+        qs_text = quickstart_path.read_text(encoding="utf-8")
+        self.assertIn("install.sh --sglang-model", qs_text)
+        self.assertIn("claude --bg -n", qs_text)
+        self.assertIn("agy remote-control", qs_text)
+        self.assertIn("t3-serve.service", qs_text)
+        self.assertIn("t3 pair", qs_text)
+        self.assertIn("t3 pair", readme_text)
+        self.assertIn("opencode-sglang-qwen27b.service", qs_text)
+        self.assertIn("qwen3.8-27b", qs_text)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", qs_text)
+        self.assertNotIn("qwen3.5", qs_text)
+
+    def test_zero_warmup_session_context_and_drive_to_completion_invariants(self) -> None:
+        """Verify core/CHARTER.md has Zero-Warmup Session Context and core/rules/agent-teams.md has Drive-to-Completion (Issue #25)."""
+        charter_text = (CORE_DIR / "CHARTER.md").read_text(encoding="utf-8")
+        self.assertIn("## ⚡ Zero-Warmup Session Context & Host Ground Truth", charter_text)
+        self.assertIn("Zero-Warmup Session Context", charter_text)
+        self.assertIn("RTX 5090", charter_text)
+        self.assertIn("ornith-ai/Ornith-1.5-35B-A3B-NVFP4", charter_text)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", charter_text)
+        self.assertIn("http://127.0.0.1:30000/v1", charter_text)
+        self.assertIn("t3-serve.service", charter_text)
+        self.assertIn("t3 pair", charter_text)
+        self.assertNotIn("/home/" + "wei" + "gnerg", charter_text)
+        self.assertNotIn("/WH" + "NAS", charter_text)
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", charter_text)
+
+        agent_teams_text = (CORE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
+        self.assertIn("Drive-to-Completion", agent_teams_text)
+        self.assertIn("Autonomous \"Drive-to-Completion\" Execution Mode", agent_teams_text)
+        self.assertIn("Two-Round Adversarial Review Gate", agent_teams_text)
+
+        gemini_text = (CONFIG_DIR / "agy" / "GEMINI.md").read_text(encoding="utf-8")
+        self.assertIn("## Zero-Warmup Orchestration & Reactive Turn Discipline", gemini_text)
+        self.assertIn("Immediate Turn Termination on Async Dispatch", gemini_text)
 
 
 if __name__ == "__main__":
