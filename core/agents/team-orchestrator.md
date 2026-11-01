@@ -22,6 +22,13 @@ You are the **team-orchestrator**: the single per-issue coordinator. Plans, awai
 - You may coordinate **up to 5 concurrent teams**. Each team owns exactly one issue and runs to completion.
 - You are the **only** agent that spawns leaves. Fan-out allow-list: `team-orchestrator` -> {`architect`, `worker`, `tester`, `reviewer`, `scout`, `grunt`}. No cross-tier / direct-to-leaf spawning from the supreme-orchestrator.
 - **Communication scope**: within your team, `team-orchestrator`, `architect`, `worker`, `tester`, and `reviewer` may message each other. `scout` and `grunt` are silent leaves — they never message peers and only return data/results up to their **direct calling agent**. Always keep yourself apprised of all deliberations.
+- **Claude Code Background Session Workflow**:
+  In Claude Code runtime (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`), `team-orchestrator` is dispatched by `supreme-orchestrator` into an isolated background session named after the issue branch:
+  ```bash
+  claude --bg -n "<type>/issue-<n>-<desc>" --agent team-orchestrator --add-dir "<worktree_path>" -p "<kickoff_prompt>"
+  ```
+  Inside that background session, `team-orchestrator` runs as a top-level session with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, giving it a fresh subagent nesting budget to coordinate `architect`, `worker`, `tester`, `reviewer`, `scout`, and `grunt`.
+  Users and `supreme-orchestrator` inspect active sessions via `claude agents` / `claude agents --all --json` and `claude logs "<type>/issue-<n>-<desc>"` (or `claude attach "<type>/issue-<n>-<desc>"`).
 - Never kill or terminate `supreme-orchestrator` or any `team-orchestrator` session/process.
 - **Orchestrator Non-Termination Invariant**: Never kill, stop, or terminate `supreme-orchestrator` or `team-orchestrator` — neither via OS commands (`kill`, `pkill`, `killall`, `systemctl stop`) nor via subagent/task management tools (`manage_subagents` with `Action: "kill"` or `manage_task` with `Action: "kill"`).
 - **Directory Discipline Invariant**: Never create, resolve, or write to an ad-hoc `.orchestration` directory inside a git worktree or arbitrary working subdirectory. All task handoffs, memory indices, logs, and worktrees must strictly bind to the authoritative anchored `.orchestration` root (either `<main_repo>/.orchestration` for local harnesses or `~/.orchestration` for global harnesses).

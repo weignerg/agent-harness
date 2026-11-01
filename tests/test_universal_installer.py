@@ -132,7 +132,9 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(merged_data["teammateMode"], "manual")
             self.assertIn("env", merged_data)
             self.assertEqual(merged_data["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"], "1")
-            self.assertEqual(merged_data["permissions"]["allow"], ["read_file"])
+            self.assertIn("read_file", merged_data["permissions"]["allow"])
+            self.assertIn("Bash(claude --bg *)", merged_data["permissions"]["allow"])
+            self.assertIn("Bash(claude stop *)", merged_data["permissions"]["deny"])
 
             # Manifest recorded
             manifest_path = sandbox / ".orchestration" / "install_manifest.json"
@@ -1149,8 +1151,20 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
 
             pth_file = sp_dir / "agent_harness.pth"
-            self.assertTrue(pth_file.is_file(), f"Missing agent_harness.pth at {pth_file}")
-            self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(REPO_ROOT))
+            expected_roots = {str(REPO_ROOT)}
+            try:
+                proc_git = subprocess.run(
+                    ["git", "rev-parse", "--git-common-dir"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc_git.returncode == 0 and proc_git.stdout.strip():
+                    expected_roots.add(str(Path(proc_git.stdout.strip()).parent.resolve()))
+            except Exception:
+                pass
+            self.assertIn(pth_file.read_text(encoding="utf-8").strip(), expected_roots)
 
 
 if __name__ == "__main__":
