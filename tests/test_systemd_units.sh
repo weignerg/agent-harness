@@ -114,6 +114,26 @@ if grep -q -- "--cuda-graph-max-bs " "$QWEN27B_FILE"; then
 fi
 echo "✅ Passed: opencode-sglang-qwen27b.service correctly specifies nvidia/Qwen3.8-27B-NVFP4, modelopt, and valid SGLang flags."
 
+# 8. Check Qwen 3.8 27B fast startup and CUDA graph settings (Issue #23)
+echo "[CHECK 8] Verifying opencode-sglang-qwen27b.service fast startup and CUDA graph optimizations (Issue #23)..."
+if ! grep -q -- "--disable-prefill-cuda-graph" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing --disable-prefill-cuda-graph"
+    exit 1
+fi
+if grep -q -- "^ *--enable-torch-compile" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service hardcodes --enable-torch-compile in ExecStart"
+    exit 1
+fi
+if ! grep -q "SGLANG_27B_KV_CACHE_DTYPE=nvfp4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_KV_CACHE_DTYPE=nvfp4"
+    exit 1
+fi
+if grep -q -- "--mem-fraction-static [0-9.]*0.88" "$QWEN27B_FILE" || grep -q "0.880.88" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains corrupted mem-fraction-static"
+    exit 1
+fi
+echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, and uncorrupted mem-fraction."
+
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
 echo "================================================================================"

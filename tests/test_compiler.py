@@ -696,9 +696,14 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         content = self.qwen27b_service_path.read_text(encoding="utf-8")
 
         # 100% VRAM residency / quantization flags
-        self.assertIn("fp8_e4m3", content, "KV-cache dtype must be fp8_e4m3")
+        self.assertTrue(
+            "nvfp4" in content or "fp8_e4m3" in content,
+            "KV-cache dtype must be nvfp4 or fp8_e4m3",
+        )
         self.assertIn("--kv-cache-dtype", content, "Service must specify --kv-cache-dtype")
         self.assertIn("flashinfer", content, "Attention backend must be flashinfer")
+        self.assertIn("--disable-prefill-cuda-graph", content, "Service must specify --disable-prefill-cuda-graph")
+        self.assertNotIn("\n  --enable-torch-compile", content, "Service must not hardcode --enable-torch-compile in default ExecStart")
         self.assertIn("--tool-call-parser qwen3_coder", content, "Tool-call parser must be qwen3_coder")
         self.assertIn("--reasoning-parser qwen3", content, "Reasoning parser must be qwen3")
         self.assertIn("--port 30000", content, "Port must be 30000")
@@ -714,6 +719,43 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
             "--speculative-algorithm" in content or "SGLANG_27B_SPECULATIVE" in content,
             "Service unit must configure speculative decoding",
         )
+
+    def test_regression_issue23_sglang_warmup_and_sed_fix(self) -> None:
+        """Verify Issue #23: SGLang warmup disables CUDA graph, no sed corruption of mem-fraction, and service optimizations."""
+        service_content = self.qwen27b_service_path.read_text(encoding="utf-8")
+        self.assertIn("--disable-prefill-cuda-graph", service_content)
+        self.assertNotIn("\n  --enable-torch-compile", service_content)
+        self.assertIn("SGLANG_27B_KV_CACHE_DTYPE=nvfp4", service_content)
+        self.assertNotIn("0.880.88", service_content)
+
+        install_sh_content = self.install_sh_path.read_text(encoding="utf-8")
+        self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
+        self.assertIn("SGLANG_WARMUP_TIMEOUT:-300", install_sh_content, "warmup timeout must default to 300s")
+        self.assertIn("SGLANG_HEALTHCHECK_RETRIES:-240", install_sh_content, "max_sglang_wait must default to 240s")
+        self.assertIn("opencode-sglang-ornith-35b.service 2>/dev/null || true", install_sh_content)
+        self.assertIn("opencode-sglang-qwen27b.service 2>/dev/null || true", install_sh_content)
+
+        # Verify sed tuning idempotency and absence of 0.880.88 corruption
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            test_svc = Path(tmp_dir) / "opencode-sglang-qwen27b.service"
+            test_svc.write_text(service_content, encoding="utf-8")
+            # Run bash sed script matching install.sh
+            bash_cmd = f"""
+            mem_fraction="0.88"
+            max_context="65536"
+            dest_dir="{tmp_dir}"
+            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
+                sed -i "s|Environment=\\"SGLANG_27B_MEM_FRACTION=[0-9.]*\\"|Environment=\\"SGLANG_27B_MEM_FRACTION=${{mem_fraction}}\\"|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            fi
+            if grep -q '\\${{SGLANG_27B_MEM_FRACTION}}' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
+                sed -i "s|--mem-fraction-static [0-9.]*\\${{SGLANG_27B_MEM_FRACTION}}|--mem-fraction-static \\${{SGLANG_27B_MEM_FRACTION}}|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            fi
+            """
+            res = subprocess.run(["bash", "-c", bash_cmd], check=True, capture_output=True)
+            res_content = test_svc.read_text(encoding="utf-8")
+            self.assertIn("--mem-fraction-static ${SGLANG_27B_MEM_FRACTION}", res_content)
+            self.assertNotIn("--mem-fraction-static 0.88${SGLANG_27B_MEM_FRACTION}", res_content)
+            self.assertNotIn("0.880.88", res_content)
 
     def test_regression_issue20_nvidia_qwen27b_nvfp4_repo_id(self) -> None:
         """Verify Issue #20: Qwen/Qwen3.8-27B-FP4 is never emitted in templates, services, or installer."""
