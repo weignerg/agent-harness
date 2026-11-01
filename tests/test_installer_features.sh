@@ -647,9 +647,6 @@ else
     fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
 fi
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 # --- Test 28: Verify Claude Code Background Session & Agent Teams Integration (Issue #12) ---
 echo "[Test 28] Verifying Claude Code background session dispatch and agent-teams configuration..."
 CLAUDE_CORE_JSON="${REPO_DIR}/config/claude/settings/core.json"
