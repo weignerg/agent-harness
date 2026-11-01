@@ -1314,10 +1314,11 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ornith-1.5-35b", sglang_models)
             self.assertIn("ornith-1.5-9b", sglang_models)
 
-            # Assert [SGLang :30000] display names
-            self.assertIn("[SGLang :30000]", sglang_models["qwen3.8-27b"]["name"])
-            self.assertIn("[SGLang :30000]", sglang_models["ornith-1.5-35b"]["name"])
-            self.assertIn("[SGLang :30000]", sglang_models["ornith-1.5-9b"]["name"])
+            # Assert clean, concise display names without prefix or parenthetical bloat
+            self.assertEqual(sglang_models["qwen3.8-27b"]["name"], "Qwen 3.8 27B")
+            self.assertEqual(sglang_models["ornith-1.5-35b"]["name"], "Ornith 1.5 35B-A3B")
+            self.assertEqual(sglang_models["ornith-1.5-9b"]["name"], "Ornith 1.5 9B")
+            self.assertNotIn("[SGLang", sglang_models["qwen3.8-27b"]["name"])
 
             # Assert primary model and role models updated to local-sglang/qwen3.8-27b
             self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")

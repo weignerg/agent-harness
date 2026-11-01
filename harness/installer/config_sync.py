@@ -255,8 +255,21 @@ def sync_opencode_json(
                 dst_models[m_id].update(copy.deepcopy(m_cfg))
 
     for fb_key in ("anthropic", "google"):
-        if fb_key in tpl_providers and fb_key not in providers:
-            providers[fb_key] = copy.deepcopy(tpl_providers[fb_key])
+        if fb_key in tpl_providers:
+            if fb_key not in providers:
+                providers[fb_key] = copy.deepcopy(tpl_providers[fb_key])
+            else:
+                tpl_fb = tpl_providers[fb_key]
+                dst_fb = providers[fb_key]
+                if "name" in tpl_fb:
+                    dst_fb["name"] = tpl_fb["name"]
+                if "models" in tpl_fb:
+                    dst_fb_models = dst_fb.setdefault("models", {})
+                    for m_id, m_cfg in tpl_fb["models"].items():
+                        if m_id in dst_fb_models and isinstance(dst_fb_models[m_id], dict) and isinstance(m_cfg, dict):
+                            dst_fb_models[m_id]["name"] = m_cfg.get("name", dst_fb_models[m_id].get("name", ""))
+                        elif m_id not in dst_fb_models:
+                            dst_fb_models[m_id] = copy.deepcopy(m_cfg)
 
     # 2. Instructions: strictly rule globs only (AGENTS.md is auto-discovered natively by OpenCode)
     data["instructions"] = [f"{oc_p}/rules/*.md"]
