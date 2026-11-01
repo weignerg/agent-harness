@@ -35,6 +35,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}"
 
 resolve_canonical_repo_dir() {
+    if [ -n "${AGENT_HARNESS_CANONICAL_ROOT:-}" ]; then
+        printf '%s' "${AGENT_HARNESS_CANONICAL_ROOT}"
+        return 0
+    fi
     local canonical_repo="$SCRIPT_DIR"
     if git -C "$SCRIPT_DIR" rev-parse --git-common-dir >/dev/null 2>&1; then
         local common_git
@@ -1025,12 +1029,12 @@ EOF
     local primary_model="ornith-local/ornith-1.5-35b"
     local active_service="opencode-sglang-ornith-35b.service"
     local qwen27b_quant="fp4"
-    local qwen27b_path="Qwen/Qwen3.8-27B-FP4"
+    local qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
     if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="fp4"
-        qwen27b_path="Qwen/Qwen3.8-27B-FP4"
+        qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
     elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
         primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
@@ -1648,19 +1652,6 @@ verify_backend_healthchecks() {
     local server_elapsed=0
 
     while [ "$server_elapsed" -lt "$max_server_wait" ]; do
-        local server_out=""
-        server_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:4096" 2>/dev/null || true)"
-        local server_code="${server_out##*$'\n'}"
-        local server_resp="${server_out%$'\n'*}"
-
-        if [ "$server_code" = "200" ] || [ "$server_code" = "401" ] || \
-           curl -s -f -m 2 "http://127.0.0.1:4096" >/dev/null 2>&1 || \
-           echo "$server_resp" | grep -qi "opencode" || \
-           (echo > /dev/tcp/127.0.0.1/4096) 2>/dev/null; then
-            server_ok=true
-            break
-        fi
-
         local server_status=""
         if command -v systemctl >/dev/null 2>&1; then
             server_status="$(systemctl --user is-active opencode-server.service 2>/dev/null || true)"
@@ -1671,6 +1662,18 @@ verify_backend_healthchecks() {
             break
         elif [ "$server_status" = "active" ] || [ "$server_status" = "activating" ]; then
             echo "  [$(date +%T)] ⏳ OpenCode server starting up (elapsed: ${server_elapsed}s / max: ${max_server_wait}s)..."
+        fi
+
+        local server_out=""
+        server_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:4096" 2>/dev/null || true)"
+        local server_code="${server_out##*$'\n'}"
+        local server_resp="${server_out%$'\n'*}"
+
+        if [ "$server_code" = "200" ] || [ "$server_code" = "401" ] || \
+           curl -s -f -m 2 "http://127.0.0.1:4096" >/dev/null 2>&1 || \
+           echo "$server_resp" | grep -qi "opencode"; then
+            server_ok=true
+            break
         fi
 
         sleep 2
@@ -1940,7 +1943,7 @@ deploy_opencode_backend_and_units() {
 
     if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         probed_model="qwen3.8-27b"
-        probed_model_path="Qwen/Qwen3.8-27B-FP4"
+        probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
