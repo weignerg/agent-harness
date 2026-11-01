@@ -6,7 +6,7 @@ After=network.target
 Type=exec
 EnvironmentFile=-%h/.config/opencode-backends/env
 Environment="SGLANG_SERVICE=opencode-sglang-qwen27b.service"
-Environment="SGLANG_27B_MODEL_PATH=Qwen/Qwen3.8-27B-FP4"
+Environment="SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
 Environment="SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
 Environment="SGLANG_27B_QUANTIZATION=fp4"
 Environment="SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"

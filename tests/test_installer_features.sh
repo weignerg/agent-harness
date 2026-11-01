@@ -13,6 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}"
+export AGENT_HARNESS_CANONICAL_ROOT="${REPO_DIR}"
 
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -898,6 +899,27 @@ if [ -f "$ENV_FILE" ] && \
     pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units"
 else
     fail "Installer failed to provision Qwen 3.8 27B profile configuration"
+fi
+
+# --- Test 33: TL;DR Quickstart & Multi-Runtime Usage Guide (Issue #19) ------
+echo "[Test 33] Verifying docs/QUICKSTART.md and README.md integration..."
+QS_FILE="${REPO_DIR}/docs/QUICKSTART.md"
+README_FILE="${REPO_DIR}/README.md"
+
+if [ -f "$QS_FILE" ] && [ -f "$README_FILE" ] && \
+   grep -q "docs/QUICKSTART.md" "$README_FILE" && \
+   grep -q "## ⚡ TL;DR Quickstart" "$README_FILE" && \
+   grep -q "install.sh --sglang-model" "$QS_FILE" && \
+   grep -q "claude --bg -n" "$QS_FILE" && \
+   grep -q "agy remote-control" "$QS_FILE" && \
+   grep -q "opencode-t3-serve.service" "$QS_FILE" && \
+   grep -q "opencode-sglang-qwen27b.service" "$QS_FILE" && \
+   grep -q "qwen3.8-27b" "$QS_FILE" && \
+   grep -q "nvidia/Qwen3.8-27B-NVFP4" "$QS_FILE" && \
+   ! grep -q "qwen3.5" "$QS_FILE"; then
+    pass "docs/QUICKSTART.md exists, linked from README.md, and documents all 4 surfaces and model switching"
+else
+    fail "docs/QUICKSTART.md missing required sections, README link, or multi-runtime documentation"
 fi
 
 echo "================================================================================"
