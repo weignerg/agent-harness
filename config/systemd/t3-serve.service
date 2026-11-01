@@ -10,6 +10,8 @@ EnvironmentFile=-%h/.config/opencode-backends/env
 Environment="HOME=%h"
 Environment="CLAUDE_CONFIG_DIR=%h/.claude"
 Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"
+Environment="GEMINI_HOME=%h/.gemini"
+Environment="GEMINI_CONFIG_DIR=%h/.gemini/config"
 Environment="T3_SERVE_HOST=0.0.0.0"
 Environment="T3_SERVE_PORT=3773"
 WorkingDirectory=%h

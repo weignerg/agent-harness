@@ -1192,6 +1192,8 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn('Environment="HOME=%h"', content)
         self.assertIn('Environment="CLAUDE_CONFIG_DIR=%h/.claude"', content)
         self.assertIn('Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"', content)
+        self.assertIn('Environment="GEMINI_HOME=%h/.gemini"', content)
+        self.assertIn('Environment="GEMINI_CONFIG_DIR=%h/.gemini/config"', content)
         self.assertIn('Environment="T3_SERVE_HOST=0.0.0.0"', content)
         self.assertIn('Environment="T3_SERVE_PORT=3773"', content)
         self.assertIn('WorkingDirectory=%h', content)
@@ -1362,6 +1364,45 @@ class TestUniversalInstaller(unittest.TestCase):
                 opencode_dir=opencode_dir,
             )
             self.assertEqual(synced_default["model"], "ornith-local/ornith-1.5-35b")
+
+    def test_issue37_t3_antigravity_provider_sync_and_workspace_entrypoints(self):
+        """Test Issue #37: T3 Code Antigravity provider sync and workspace instruction entrypoints."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            mock_repo = Path(tmp_dir) / "project_repo"
+            mock_repo.mkdir()
+
+            # Pre-seed T3 Code provider directory in sandbox
+            prov_dir = sandbox / ".t3" / "userdata" / "providers" / "antigravity" / "ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32"
+            prov_dir.mkdir(parents=True)
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+                "OPENCODE_SERVER_PASSWORD": "",
+            }
+
+            # Run global install for agy
+            proc_global = self.run_installer("--target", "agy", "--mode", "global", "--non-interactive", env=env)
+            self.assertEqual(proc_global.returncode, 0, f"Installer failed: {proc_global.stderr}\n{proc_global.stdout}")
+
+            # Verify T3 Antigravity provider sandbox is synced
+            self.assertTrue((prov_dir / "GEMINI.md").is_symlink())
+            self.assertTrue((prov_dir / "AGENTS.md").is_symlink())
+            self.assertTrue((prov_dir / "config" / "rules").is_symlink())
+            self.assertTrue((prov_dir / "config" / "plugins").is_symlink())
+            self.assertTrue((prov_dir / "config" / "mcp_config.json").is_symlink())
+            self.assertTrue((prov_dir / "config" / "skills").is_symlink())
+
+            # Run local install into mock_repo
+            proc_local = self.run_installer("--target", "all", "--mode", "local", str(mock_repo), "--non-interactive", env=env)
+            self.assertEqual(proc_local.returncode, 0, f"Local install failed: {proc_local.stderr}\n{proc_local.stdout}")
+
+            # Verify workspace entrypoints exist
+            self.assertTrue((mock_repo / "AGENTS.md").is_symlink())
+            self.assertTrue((mock_repo / "GEMINI.md").is_symlink())
+            self.assertTrue((mock_repo / "CLAUDE.md").is_symlink())
 
 
 if __name__ == "__main__":
