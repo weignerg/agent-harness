@@ -51,7 +51,12 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" "${SANDBOX_PROF:-}" "${SANDBOX_Q6:-}" 2>/dev/null || true
+    for pid in $(pgrep -f "opencode serve" 2>/dev/null || true); do
+        if tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null | grep -qE '^HOME=/tmp/(test|installer-test)-'; then
+            kill -TERM "$pid" 2>/dev/null || true
+        fi
+    done
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" "${SANDBOX_PROF:-}" "${SANDBOX_Q6:-}" "${SANDBOX_SYNC:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -296,65 +301,41 @@ else
     fail "Installer manifest missing 10-component hierarchy confirmation"
 fi
 
-# --- Test 18: Verify OpenCode resolves agents, prompts, and rules ------------
-echo "[Test 18] Verifying opencode resolves agent prompts, permissions, and rule instructions..."
-if command -v opencode >/dev/null 2>&1; then
-    HOME="${SANDBOX}" opencode service set port $((49400 + RANDOM % 500)) >/dev/null 2>&1 || true
-    if command -v timeout >/dev/null 2>&1; then
-        RESOLVED="$(cd "$REPO_DIR" && HOME="${SANDBOX}" timeout 5 opencode debug config 2>/dev/null || true)"
-    else
-        RESOLVED="$(cd "$REPO_DIR" && HOME="${SANDBOX}" opencode debug config 2>/dev/null || true)"
-    fi
-    HOME="${SANDBOX}" opencode service stop >/dev/null 2>&1 || true
-    if echo "$RESOLVED" | python3 -c "
+# --- Test 18: Verify OpenCode agent prompts, permissions, and rule instructions --
+echo "[Test 18] Verifying opencode agent prompts, permissions, and rule instructions..."
+if python3 -c "
 import sys, json, os
 
-raw_str = sys.stdin.read().strip()
-d = None
-if raw_str:
-    try:
-        raw = json.loads(raw_str)
-        if isinstance(raw, dict) and 'agent' in raw:
-            d = raw
-        elif isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, dict):
-                    if 'agent' in item:
-                        d = item
-                        break
-                    elif 'info' in item and isinstance(item['info'], dict) and 'agent' in item['info']:
-                        d = item['info']
-                        break
-    except Exception:
-        d = None
+sandbox_dir = sys.argv[1]
+cfg_file = os.path.join(sandbox_dir, '.config', 'opencode', 'opencode.json')
+agents_dir = os.path.join(sandbox_dir, '.config', 'opencode', 'agents')
 
-if not d or 'agent' not in d:
-    sandbox_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get('SANDBOX', '')
-    cfg_file = os.path.join(sandbox_dir, '.config', 'opencode', 'opencode.json')
-    agents_dir = os.path.join(sandbox_dir, '.config', 'opencode', 'agents')
-    if os.path.isfile(cfg_file) and os.path.isdir(agents_dir):
-        with open(cfg_file, 'r', encoding='utf-8') as f:
-            cfg = json.load(f)
-        d = {'agent': {}, 'instructions': cfg.get('instructions', [])}
-        for fname in os.listdir(agents_dir):
-            if fname.endswith('.md'):
-                aname = fname[:-3]
-                fpath = os.path.join(agents_dir, fname)
-                with open(fpath, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                mode = 'primary' if aname == 'supreme-orchestrator' else 'subagent'
-                ag_entry = {'mode': mode, 'prompt': content, 'permission': {}}
-                if content.startswith('---'):
-                    parts = content.split('---', 2)
-                    if len(parts) >= 3:
-                        import yaml
-                        try:
-                            meta = yaml.safe_load(parts[1]) or {}
-                            ag_entry['mode'] = meta.get('mode', mode)
-                            ag_entry['permission'] = meta.get('permission', {})
-                        except Exception:
-                            pass
-                d['agent'][aname] = ag_entry
+assert os.path.isfile(cfg_file), f'Missing {cfg_file}'
+assert os.path.isdir(agents_dir), f'Missing {agents_dir}'
+
+with open(cfg_file, 'r', encoding='utf-8') as f:
+    cfg = json.load(f)
+
+d = {'agent': {}, 'instructions': cfg.get('instructions', [])}
+for fname in os.listdir(agents_dir):
+    if fname.endswith('.md'):
+        aname = fname[:-3]
+        fpath = os.path.join(agents_dir, fname)
+        with open(fpath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        mode = 'primary' if aname == 'supreme-orchestrator' else 'subagent'
+        ag_entry = {'mode': mode, 'prompt': content, 'permission': {}}
+        if content.startswith('---'):
+            parts = content.split('---', 2)
+            if len(parts) >= 3:
+                import yaml
+                try:
+                    meta = yaml.safe_load(parts[1]) or {}
+                    ag_entry['mode'] = meta.get('mode', mode)
+                    ag_entry['permission'] = meta.get('permission', {})
+                except Exception:
+                    pass
+        d['agent'][aname] = ag_entry
 
 assert d and 'agent' in d
 ag = d['agent']
@@ -382,12 +363,9 @@ assert ag['reviewer']['permission']['bash']['git commit*'] == 'deny'
 assert ag['scout']['permission']['bash']['git commit*'] == 'deny'
 assert any('rules' in i for i in d['instructions'])
 " "${SANDBOX}"; then
-        pass "opencode resolves agent profiles (.md) with prompts/permissions and loads rules instructions"
-    else
-        fail "opencode did not resolve agent prompts/permissions or rules instructions"
-    fi
+    pass "opencode resolves agent profiles (.md) with prompts/permissions and loads rules instructions"
 else
-    echo "  ⏭️  SKIP: opencode binary not installed"
+    fail "opencode did not resolve agent prompts/permissions or rules instructions"
 fi
 
 # --- Test 19: Verify Issue #7 CLI flags in install.sh --help -----------------
@@ -1143,6 +1121,64 @@ if grep -q -- "--disable-cuda-graph" "${INSTALL_SCRIPT}" && \
 else
     fail "install.sh missing warmup --disable-cuda-graph or mutually exclusive port 30000 service switching"
 fi
+
+# --- Test 35: SGLang Provider Sync in opencode.json & Zero Daemon Leaks (Issue #31) -
+echo "[Test 35] Verifying SGLang provider sync into opencode.json and zero sandbox daemon leaks..."
+SANDBOX_SYNC="$(mktemp -d /tmp/test-sync-XXXXXX)"
+mkdir -p "${SANDBOX_SYNC}/.config/opencode"
+cat << 'EOF' > "${SANDBOX_SYNC}/.config/opencode/opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "custom-prov": {
+      "name": "Custom Provider"
+    }
+  },
+  "model": "anthropic/claude-3-7-sonnet"
+}
+EOF
+
+USER_HOME="${SANDBOX_SYNC}" HOME="${SANDBOX_SYNC}" "${INSTALL_SCRIPT}" --target=opencode --sglang-model=27b-nvfp4 --non-interactive >/dev/null 2>&1 || true
+
+SYNCED_JSON="${SANDBOX_SYNC}/.config/opencode/opencode.json"
+if [ -f "$SYNCED_JSON" ] && python3 -c "
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    d = json.load(f)
+
+# Custom provider preserved
+assert 'custom-prov' in d.get('provider', {})
+# local-sglang and ornith-local synced
+assert 'local-sglang' in d['provider']
+assert 'ornith-local' in d['provider']
+sglang_models = d['provider']['local-sglang'].get('models', {})
+assert 'qwen3.8-27b' in sglang_models
+assert '[SGLang :30000]' in sglang_models['qwen3.8-27b'].get('name', '')
+assert '[SGLang :30000]' in sglang_models['ornith-1.5-35b'].get('name', '')
+assert '[SGLang :30000]' in sglang_models['ornith-1.5-9b'].get('name', '')
+
+# Primary model updated to local-sglang/qwen3.8-27b
+assert d.get('model') == 'local-sglang/qwen3.8-27b'
+for role in ('supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester', 'reviewer'):
+    assert d['agent'][role].get('model') == 'local-sglang/qwen3.8-27b', role
+" "$SYNCED_JSON"; then
+    pass "SGLang provider, models with [SGLang :30000] display names, and primary model synced into existing opencode.json"
+else
+    fail "Failed to sync SGLang provider/models into existing opencode.json"
+fi
+
+leaked_daemons=0
+for pid in $(pgrep -f "opencode serve" 2>/dev/null || true); do
+    if tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null | grep -qE '^HOME=/tmp/(test|installer-test)-'; then
+        leaked_daemons=$((leaked_daemons + 1))
+    fi
+done
+if [ "$leaked_daemons" -eq 0 ]; then
+    pass "Zero opencode serve sandbox daemons leaked in /proc"
+else
+    fail "Detected $leaked_daemons leaked opencode serve daemons in /proc"
+fi
+rm -rf "${SANDBOX_SYNC}" 2>/dev/null || true
 
 echo "================================================================================"
 echo "📊 TEST RESULTS: ${TESTS_PASSED} Passed, ${TESTS_FAILED} Failed"

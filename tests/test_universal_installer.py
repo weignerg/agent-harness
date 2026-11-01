@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -1261,6 +1262,90 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("t3 pair --ttl 1h", readme_doc)
             self.assertIn("t3 pair", remote_doc)
             self.assertIn("t3 pair --ttl 1h", remote_doc)
+
+    def test_issue31_opencode_json_sglang_sync_and_model_selection(self):
+        """Test Issue #31: sync_opencode_json syncs SGLang providers/models and updates active model."""
+        from harness.installer.config_sync import sync_opencode_json
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home"
+            sandbox.mkdir()
+            opencode_dir = sandbox / ".config" / "opencode"
+            opencode_dir.mkdir(parents=True)
+            opencode_json = opencode_dir / "opencode.json"
+
+            # Create an outdated opencode.json missing local-sglang and qwen3.8-27b
+            initial_data = {
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "custom-provider": {
+                        "name": "Custom Provider",
+                        "options": {"apiKey": "custom-key"}
+                    },
+                    "ornith-local": {
+                        "name": "Legacy Ornith",
+                        "models": {
+                            "legacy-model": {"name": "Legacy Model"}
+                        }
+                    }
+                },
+                "model": "anthropic/claude-3-7-sonnet"
+            }
+            opencode_json.write_text(json.dumps(initial_data, indent=2), encoding="utf-8")
+
+            # 1. Sync with sglang_model="27b-nvfp4"
+            synced = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=REPO_ROOT,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+                sglang_model="27b-nvfp4",
+            )
+
+            # Assert custom provider and models are preserved
+            self.assertIn("custom-provider", synced["provider"])
+            self.assertIn("legacy-model", synced["provider"]["ornith-local"]["models"])
+
+            # Assert local-sglang and ornith-local were synced
+            self.assertIn("local-sglang", synced["provider"])
+            sglang_models = synced["provider"]["local-sglang"]["models"]
+            self.assertIn("qwen3.8-27b", sglang_models)
+            self.assertIn("ornith-1.5-35b", sglang_models)
+            self.assertIn("ornith-1.5-9b", sglang_models)
+
+            # Assert [SGLang :30000] display names
+            self.assertIn("[SGLang :30000]", sglang_models["qwen3.8-27b"]["name"])
+            self.assertIn("[SGLang :30000]", sglang_models["ornith-1.5-35b"]["name"])
+            self.assertIn("[SGLang :30000]", sglang_models["ornith-1.5-9b"]["name"])
+
+            # Assert primary model and role models updated to local-sglang/qwen3.8-27b
+            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
+            for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
+                self.assertEqual(synced["agent"][role]["model"], "local-sglang/qwen3.8-27b")
+
+            # 2. Sync again with sglang_model="ornith-35b"
+            synced_ornith = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=REPO_ROOT,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+                sglang_model="ornith-35b",
+            )
+            self.assertEqual(synced_ornith["model"], "ornith-local/ornith-1.5-35b")
+            for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
+                self.assertEqual(synced_ornith["agent"][role]["model"], "ornith-local/ornith-1.5-35b")
+
+            # 3. Sync without specifying sglang_model (preserving active model)
+            synced_default = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=REPO_ROOT,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+            )
+            self.assertEqual(synced_default["model"], "ornith-local/ornith-1.5-35b")
 
 
 if __name__ == "__main__":

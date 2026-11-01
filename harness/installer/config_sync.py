@@ -8,6 +8,7 @@ Ensures deterministic, schema-accurate configuration for:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -197,6 +198,7 @@ def sync_opencode_json(
     orch_dir: Union[str, Path],
     opencode_dir: Union[str, Path],
     vault_path: Optional[Union[str, Path]] = None,
+    sglang_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Configure ~/.config/opencode/opencode.json with exact schema and zero double-ingestion."""
     op_path = Path(opencode_json_path).expanduser().resolve()
@@ -217,18 +219,90 @@ def sync_opencode_json(
     if not isinstance(data, dict):
         data = {}
 
-    # 1. Instructions: strictly rule globs only (AGENTS.md is auto-discovered natively by OpenCode)
+    # Load canonical template from config/opencode/opencode.json if available
+    template_cfg: Dict[str, Any] = {}
+    tpl_file = repo_p / "config" / "opencode" / "opencode.json"
+    if tpl_file.is_file():
+        try:
+            with open(tpl_file, "r", encoding="utf-8") as f:
+                template_cfg = json.load(f)
+        except Exception:
+            template_cfg = {}
+
+    if "$schema" in template_cfg and "$schema" not in data:
+        data["$schema"] = template_cfg["$schema"]
+
+    # 1. Sync SGLang and fallback providers from canonical template
+    providers = data.setdefault("provider", {})
+    tpl_providers = template_cfg.get("provider", {})
+
+    for prov_key in ("local-sglang", "ornith-local"):
+        tpl_prov = tpl_providers.get(prov_key, {})
+        dst_prov = providers.setdefault(prov_key, {})
+        if "name" in tpl_prov:
+            dst_prov["name"] = tpl_prov["name"]
+        if "npm" in tpl_prov:
+            dst_prov["npm"] = tpl_prov["npm"]
+        if "options" in tpl_prov:
+            dst_prov["options"] = copy.deepcopy(tpl_prov["options"])
+
+        dst_models = dst_prov.setdefault("models", {})
+        tpl_models = tpl_prov.get("models", {})
+        for m_id, m_cfg in tpl_models.items():
+            if m_id not in dst_models:
+                dst_models[m_id] = copy.deepcopy(m_cfg)
+            elif isinstance(dst_models[m_id], dict) and isinstance(m_cfg, dict):
+                dst_models[m_id].update(copy.deepcopy(m_cfg))
+
+    for fb_key in ("anthropic", "google"):
+        if fb_key in tpl_providers and fb_key not in providers:
+            providers[fb_key] = copy.deepcopy(tpl_providers[fb_key])
+
+    # 2. Instructions: strictly rule globs only (AGENTS.md is auto-discovered natively by OpenCode)
     data["instructions"] = [f"{oc_p}/rules/*.md"]
     data["default_agent"] = "supreme-orchestrator"
 
-    # 1b. opencode.json is schema-strict (additionalProperties: false): top-level temperature/top_p/
+    # 2b. opencode.json is schema-strict (additionalProperties: false): top-level temperature/top_p/
     # presence_penalty are NOT valid and are silently dropped by OpenCode. Remove them and apply the
     # sampling profile through the valid per-agent `temperature`/`top_p` keys instead.
     for stale_key in ("temperature", "top_p", "presence_penalty"):
         data.pop(stale_key, None)
 
-    # 2. System agent routing (compaction, summary, title) to avoid subagent collisions
+    # 2c. Defaults for permissions, subagent_depth, small_model
+    if "permission" in template_cfg and "permission" not in data:
+        data["permission"] = copy.deepcopy(template_cfg["permission"])
+    data.setdefault("subagent_depth", 3)
+    data.setdefault("small_model", "ornith-local/ornith-1.5-9b")
+
+    # 3. Model selection and agent routing
+    primary_model: Optional[str] = None
+    if sglang_model and sglang_model.strip():
+        sm = sglang_model.lower().strip()
+        if sm in ("qwen3.8-27b", "27b-nvfp4", "27b-q6", "qwen27b"):
+            primary_model = "local-sglang/qwen3.8-27b"
+        elif sm in ("ornith-35b", "ornith-1.5-35b"):
+            primary_model = "ornith-local/ornith-1.5-35b"
+        else:
+            primary_model = "ornith-local/ornith-1.5-35b"
+
     agent_routing = data.setdefault("agent", {})
+    tpl_agents = template_cfg.get("agent", {})
+    for role, role_def in tpl_agents.items():
+        if role not in agent_routing:
+            agent_routing[role] = copy.deepcopy(role_def)
+
+    if primary_model:
+        data["model"] = primary_model
+        for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
+            role_cfg = agent_routing.setdefault(role, {})
+            role_cfg["model"] = primary_model
+    else:
+        data.setdefault("model", "ornith-local/ornith-1.5-35b")
+        for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
+            role_cfg = agent_routing.setdefault(role, {})
+            role_cfg.setdefault("model", data["model"])
+
+    # System agent routing (compaction, summary, title) to avoid subagent collisions
     agent_routing["compaction"] = {"model": "ornith-local/ornith-1.5-9b"}
     agent_routing["summary"] = {"model": "ornith-local/ornith-1.5-9b"}
     agent_routing["title"] = {"model": "ornith-local/ornith-1.5-9b"}
@@ -237,7 +311,7 @@ def sync_opencode_json(
         role_cfg.setdefault("temperature", 0.6)
         role_cfg.setdefault("top_p", 0.95)
 
-    # 3. Exact OpenCode MCP schema: "mcp", "type": "local", "command": [list], "environment": {dict}
+    # 4. Exact OpenCode MCP schema: "mcp", "type": "local", "command": [list], "environment": {dict}
     mcp = data.setdefault("mcp", {})
     mcp["vault-memory"] = {
         "type": "local",
@@ -452,6 +526,7 @@ def main() -> None:
     p_oc.add_argument("--orch-dir", required=True, help="Orchestration directory")
     p_oc.add_argument("--opencode-dir", required=True, help="OpenCode home/target directory")
     p_oc.add_argument("--vault-path", default=None, help="Obsidian vault path")
+    p_oc.add_argument("--sglang-model", default=None, help="Selected SGLang model profile (e.g. 27b-nvfp4, ornith-35b)")
 
     # sync-claude
     p_cl = subparsers.add_parser("sync-claude", help="Update ~/.claude.json mcpServers")
@@ -494,6 +569,7 @@ def main() -> None:
             args.orch_dir,
             args.opencode_dir,
             args.vault_path,
+            getattr(args, "sglang_model", None),
         )
         print(f"  ✅ Configured OpenCode JSON -> {args.opencode_json}")
     elif args.subcommand == "sync-claude":

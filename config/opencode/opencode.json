@@ -10,7 +10,7 @@
       },
       "models": {
         "ornith-1.5-35b": {
-          "name": "Ornith 1.5 35B-A3B MoE (Workhorse Model)",
+          "name": "[SGLang :30000] Ornith 1.5 35B-A3B MoE (Workhorse Model)",
           "context": 262144,
           "output": 32768,
           "modalities": {
@@ -24,7 +24,7 @@
           }
         },
         "ornith-1.5-9b": {
-          "name": "Ornith 1.5 9B (Fast Model)",
+          "name": "[SGLang :30000] Ornith 1.5 9B (Fast Model)",
           "context": 262144,
           "output": 32768,
           "modalities": {
@@ -38,7 +38,7 @@
           }
         },
         "qwen3.8-27b": {
-          "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)",
+          "name": "[SGLang :30000] Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)",
           "context": 131072,
           "output": 32768,
           "modalities": {
@@ -76,13 +76,13 @@
       },
       "models": {
         "ornith-1.5-35b": {
-          "name": "Ornith 1.5 35B-A3B MoE (Workhorse Model)"
+          "name": "[SGLang :30000] Ornith 1.5 35B-A3B MoE (Workhorse Model)"
         },
         "ornith-1.5-9b": {
-          "name": "Ornith 1.5 9B (Fast Model)"
+          "name": "[SGLang :30000] Ornith 1.5 9B (Fast Model)"
         },
         "qwen3.8-27b": {
-          "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)"
+          "name": "[SGLang :30000] Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)"
         }
       }
     },
