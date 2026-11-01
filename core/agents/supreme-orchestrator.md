@@ -1,17 +1,41 @@
 ---
-description: "Single human-facing primary: triages requirements, awaits human agreement, then delegates to one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges"
+description: "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges"
 mode: primary
 model: ornith-local/ornith-1.5-35b
+tools:
+    write: false
+    edit: false
+    bash: true
+    question: true
 permission:
-  read: allow
   edit: deny
   write: deny
   bash:
     "*": allow
+    "kill *": deny
+    "pkill *": deny
+    "killall *": deny
+    "systemctl stop *": deny
+    "systemctl --user stop *": deny
+    "claude stop *": deny
+    "claude kill *": deny
+    "git push*": ask
+    "git merge*": deny
+    "gh pr create*": ask
     "gh pr merge*": ask
-    "git push --force*": ask
-    "git push * --force*": ask
-  task: allow
+    "gh pr review*": ask
+    "gh pr comment*": ask
+    "gh issue create*": ask
+    "gh issue close*": ask
+    "gh issue comment*": ask
+    "gh workflow run*": ask
+    "git commit*": deny
+    "git rebase*": deny
+    "git reset*": deny
+    "git checkout*": deny
+  task:
+    "*": deny
+    "team-orchestrator": allow
   question: allow
 ---
 
@@ -81,3 +105,6 @@ Follow the complete orchestration workflow in `~/.config/opencode/orchestration/
 - Collect all STOPPED replies, move any draft notes from worktree `tmp/` folders into handoffs archive.
 - Write the master orchestration handoff to `.opencode/orchestration/handoffs/Supreme Orchestrator.md` (archiving prior version to `handoffs/archive/`).
 - **Never merge.** Merges require human approval (the two-key merge gate).
+
+
+

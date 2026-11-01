@@ -84,7 +84,26 @@
   "subagent_depth": 3,
   "small_model": "ornith-local/ornith-1.5-9b",
   "permission": {
-    "bash": "allow",
+    "bash": {
+      "*": "allow",
+      "kill *": "deny",
+      "pkill *": "deny",
+      "killall *": "deny",
+      "systemctl stop *": "deny",
+      "systemctl --user stop *": "deny",
+      "claude stop *": "deny",
+      "claude kill *": "deny",
+      "git push*": "ask",
+      "git merge*": "ask",
+      "gh pr create*": "ask",
+      "gh pr merge*": "ask",
+      "gh pr review*": "ask",
+      "gh pr comment*": "ask",
+      "gh issue create*": "ask",
+      "gh issue close*": "ask",
+      "gh issue comment*": "ask",
+      "gh workflow run*": "ask"
+    },
     "read": "allow",
     "edit": "allow",
     "write": "allow",
@@ -96,6 +115,17 @@
       "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
       "tools": {
         "question": true
+      },
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git reset*": "deny",
+          "git checkout*": "deny"
+        }
       }
     },
     "team-orchestrator": {
@@ -103,11 +133,30 @@
       "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges",
       "tools": {
         "question": true
+      },
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny"
+        }
       }
     },
     "architect": {
       "model": "ornith-local/ornith-1.5-35b",
-      "description": "Subsystem design, codebase surveys, high-context refactor blueprints, and dependency topology; calls scout for searches"
+      "description": "Subsystem design, codebase surveys, high-context refactor blueprints, and dependency topology; calls scout for searches",
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git reset*": "deny",
+          "git checkout*": "deny"
+        }
+      }
     },
     "worker": {
       "model": "ornith-local/ornith-1.5-35b",
@@ -119,11 +168,34 @@
     },
     "reviewer": {
       "model": "ornith-local/ornith-1.5-35b",
-      "description": "Adversarial code reviewer and security gatekeeper; calls scout only for searches"
+      "description": "Adversarial code reviewer and security gatekeeper; calls scout only for searches",
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git reset*": "deny",
+          "git checkout*": "deny"
+        }
+      }
     },
     "scout": {
       "model": "ornith-local/ornith-1.5-9b",
-      "description": "Read-only 9B search subagent: grep, file discovery, large-scale context consolidation"
+      "description": "Read-only 9B search subagent: grep, file discovery, large-scale context consolidation",
+      "permission": {
+        "edit": "deny",
+        "write": "deny",
+        "task": "deny",
+        "bash": {
+          "git commit*": "deny",
+          "git merge*": "deny",
+          "git rebase*": "deny",
+          "git reset*": "deny",
+          "git checkout*": "deny"
+        }
+      }
     },
     "grunt": {
       "model": "ornith-local/ornith-1.5-9b",
