@@ -50,7 +50,7 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" 2>/dev/null || true
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" "${SANDBOX_PROF:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -59,8 +59,9 @@ echo "[Test 1] Testing install.sh CLI help and flag parsing..."
 HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
 if echo "$HELP_OUT" | grep -q -- "--dry-run" && \
    echo "$HELP_OUT" | grep -q -- "--reinstall" && \
-   echo "$HELP_OUT" | grep -q -- "--non-interactive"; then
-    pass "install.sh document flags: --dry-run, --reinstall, --non-interactive"
+   echo "$HELP_OUT" | grep -q -- "--non-interactive" && \
+   echo "$HELP_OUT" | grep -q -- "--sglang-model"; then
+    pass "install.sh document flags: --dry-run, --reinstall, --non-interactive, --sglang-model"
 else
     fail "install.sh --help missing expected flags"
 fi
@@ -315,6 +316,15 @@ for n in ('scout', 'grunt'):
     assert 'Requests for' in ag[n]['prompt'], n
 for n in ('supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester'):
     assert n in ag and ag[n].get('prompt'), n
+assert ag['supreme-orchestrator']['permission']['task']['team-orchestrator'] == 'allow'
+assert ag['supreme-orchestrator']['permission']['task']['*'] == 'deny'
+assert ag['team-orchestrator']['permission']['task']['worker'] == 'allow'
+assert ag['architect']['permission']['task']['scout'] == 'allow'
+assert ag['reviewer']['permission']['task']['scout'] == 'allow'
+assert ag['worker']['permission']['task']['grunt'] == 'allow' and ag['worker']['permission']['task']['scout'] == 'allow'
+assert ag['architect']['permission']['bash']['git commit*'] == 'deny'
+assert ag['reviewer']['permission']['bash']['git commit*'] == 'deny'
+assert ag['scout']['permission']['bash']['git commit*'] == 'deny'
 assert any('rules' in i for i in d['instructions'])
 "; then
         pass "opencode resolves agent profiles (.md) with prompts/permissions and loads rules instructions"
@@ -635,6 +645,259 @@ if echo "$HC_FAIL_OUT" | grep -q "SGLang service (opencode-sglang-ornith-35b.ser
     pass "SGLang healthcheck aborted immediately upon failed unit state without waiting full timeout"
 else
     fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
+fi
+
+# --- Test 28: Verify Claude Code Background Session & Agent Teams Integration (Issue #12) ---
+echo "[Test 28] Verifying Claude Code background session dispatch and agent-teams configuration..."
+CLAUDE_CORE_JSON="${REPO_DIR}/config/claude/settings/core.json"
+MANIFEST_JSON="${REPO_DIR}/core/manifest.json"
+SUPREME_MD="${REPO_DIR}/core/agents/supreme-orchestrator.md"
+LAUNCH_MD="${REPO_DIR}/config/orchestration/launching-teams.md"
+
+if [ -f "${CLAUDE_CORE_JSON}" ] && \
+   grep -q '"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude --bg \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude agents\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude logs \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude stop \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude stop\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude kill \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude kill\*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude rm \*)' "${CLAUDE_CORE_JSON}" && \
+   grep -q '"Bash(claude rm\*)' "${CLAUDE_CORE_JSON}"; then
+    pass "config/claude/settings/core.json specifies CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS and background allow/deny permissions"
+else
+    fail "config/claude/settings/core.json missing required agent teams env or allow/deny permissions"
+fi
+
+if [ -f "${MANIFEST_JSON}" ] && \
+   $PY_BIN -c "
+import json
+with open('${MANIFEST_JSON}') as f:
+    m = json.load(f)
+roles = m['roles']
+for r in ['supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester', 'reviewer']:
+    assert 'Task' in roles[r]['claude_tools'], f'Role {r} missing Task'
+for r in ['scout', 'grunt']:
+    assert 'Task' not in roles[r]['claude_tools'], f'Role {r} must not have Task'
+"; then
+    pass "core/manifest.json grants Task to orchestrators/subagents and omits Task from scout and grunt"
+else
+    fail "core/manifest.json Task permissions validation failed"
+fi
+
+if grep -q "claude --bg -n" "${SUPREME_MD}" && \
+   grep -q "claude --bg -n" "${LAUNCH_MD}" && \
+   grep -q "claude agents" "${LAUNCH_MD}" && \
+   grep -q "claude logs" "${LAUNCH_MD}"; then
+    pass "Documentation in supreme-orchestrator.md and launching-teams.md details claude --bg -n workflow"
+else
+    fail "Documentation missing claude --bg -n background session dispatch details"
+fi
+
+SANDBOX_CLAUDE="$(mktemp -d /tmp/installer-test-claude-XXXXXX)"
+$PY_BIN -m harness.installer.compiler --core-dir "${REPO_DIR}/core" --runtime claude --output-dir "${SANDBOX_CLAUDE}/agents" >/dev/null 2>&1
+if grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/architect.md" && \
+   grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/worker.md" && \
+   grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/tester.md" && \
+   grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/reviewer.md" && \
+   ! grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/scout.md" && \
+   ! grep -q "tools:.*Task" "${SANDBOX_CLAUDE}/agents/grunt.md"; then
+    pass "Compiled Claude agents enforce Task tool permissions for agent teams"
+else
+    fail "Compiled Claude agents failed Task tool permission verification"
+fi
+
+# --- Test 29: Verify Issue #13 Runtime Bash Gates & Task Fan-Out Permissions ---
+echo "[Test 29] Verifying Issue #13 runtime bash gates & subagent task fan-out..."
+if "${PY_BIN}" -c "
+import json
+from pathlib import Path
+
+repo = Path('${REPO_DIR}')
+opencode_cfg = json.loads((repo / 'config/opencode/opencode.json').read_text(encoding='utf-8'))
+claude_cfg = json.loads((repo / 'config/claude/settings/core.json').read_text(encoding='utf-8'))
+manifest = json.loads((repo / 'core/manifest.json').read_text(encoding='utf-8'))
+
+# 1. Manifest allowed_subagents
+roles = manifest['roles']
+assert roles['supreme-orchestrator']['allowed_subagents'] == ['team-orchestrator']
+assert roles['team-orchestrator']['allowed_subagents'] == ['architect', 'worker', 'tester', 'reviewer', 'scout', 'grunt']
+assert roles['architect']['allowed_subagents'] == ['scout']
+assert roles['reviewer']['allowed_subagents'] == ['scout']
+assert roles['worker']['allowed_subagents'] == ['grunt', 'scout']
+assert roles['tester']['allowed_subagents'] == ['grunt', 'scout']
+assert roles['scout']['allowed_subagents'] == []
+assert roles['grunt']['allowed_subagents'] == []
+
+# 2. opencode.json permissions
+bash_perm = opencode_cfg['permission']['bash']
+for pkill in ('kill *', 'pkill *', 'killall *', 'systemctl stop *', 'systemctl --user stop *', 'claude stop *', 'claude kill *'):
+    assert bash_perm[pkill] == 'deny', pkill
+for ask_cmd in ('git push*', 'git merge*', 'gh pr create*', 'gh pr merge*', 'gh issue close*'):
+    assert bash_perm[ask_cmd] == 'ask', ask_cmd
+
+for ro in ('supreme-orchestrator', 'architect', 'reviewer', 'scout'):
+    ro_bash = opencode_cfg['agent'][ro]['permission']['bash']
+    assert ro_bash['git commit*'] == 'deny', ro
+    assert ro_bash['git merge*'] == 'deny', ro
+
+to_bash = opencode_cfg['agent']['team-orchestrator']['permission']['bash']
+assert to_bash['git commit*'] == 'deny'
+assert to_bash['git merge*'] == 'deny'
+
+# 3. claude settings
+claude_deny = claude_cfg['permissions']['deny']
+claude_ask = claude_cfg['permissions']['ask']
+for cd in ('Bash(kill *)', 'Bash(kill*)', 'Bash(pkill *)', 'Bash(pkill*)', 'Bash(systemctl stop *)', 'Bash(claude stop*)'):
+    assert cd in claude_deny, cd
+for ca in ('Bash(git push*)', 'Bash(git merge*)', 'Bash(gh pr create*)', 'Bash(gh pr merge*)', 'Bash(gh issue close*)'):
+    assert ca in claude_ask, ca
+"; then
+    pass "Runtime bash gates, outward-facing ask rules, and per-role fan-out allow-lists verified"
+else
+    fail "Runtime bash gates or per-role fan-out validation failed"
+fi
+
+# --- Test 30: Verifying AGY Agent Native Tool Names, Hierarchy & GEMINI.md ---
+echo "[Test 30] Verifying AGY agent tool compilation and GEMINI.md documentation (Issue #14)..."
+SANDBOX_AGY="$(mktemp -d /tmp/installer-test-agy-XXXXXX)"
+
+python3 -m harness.installer.compiler \
+    --core-dir "${REPO_DIR}/core" \
+    --runtime agy \
+    --output-dir "${SANDBOX_AGY}/agents"
+
+AGY_TOOLS_OK=true
+
+# Check all 8 canonical roles have read_file
+for role in supreme-orchestrator team-orchestrator architect worker tester reviewer scout grunt; do
+    if ! grep -q -- "- read_file" "${SANDBOX_AGY}/agents/${role}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing read_file in ${role}.md"
+    fi
+done
+
+# Check edit_file and write_file only in worker, tester, grunt
+for rw_role in worker tester grunt; do
+    if ! grep -q -- "- edit_file" "${SANDBOX_AGY}/agents/${rw_role}.md" || \
+       ! grep -q -- "- write_file" "${SANDBOX_AGY}/agents/${rw_role}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing edit_file or write_file in ${rw_role}.md"
+    fi
+done
+
+for ro_role in supreme-orchestrator team-orchestrator architect reviewer scout; do
+    if grep -q -- "- edit_file" "${SANDBOX_AGY}/agents/${ro_role}.md" || \
+       grep -q -- "- write_file" "${SANDBOX_AGY}/agents/${ro_role}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Unexpected edit_file or write_file in ${ro_role}.md"
+    fi
+done
+
+# Check invoke_subagent and send_message in orchestrators/callers
+for caller in supreme-orchestrator team-orchestrator architect worker tester reviewer; do
+    if ! grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${caller}.md" || \
+       ! grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${caller}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing invoke_subagent or send_message in ${caller}.md"
+    fi
+done
+
+# Check that leaves include send_message and NEVER include invoke_subagent or manage_subagents
+for leaf in scout grunt; do
+    if ! grep -q -- "- send_message" "${SANDBOX_AGY}/agents/${leaf}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Missing send_message in leaf ${leaf}.md"
+    fi
+    if grep -q -- "- invoke_subagent" "${SANDBOX_AGY}/agents/${leaf}.md" || \
+       grep -q -- "- manage_subagents" "${SANDBOX_AGY}/agents/${leaf}.md"; then
+        AGY_TOOLS_OK=false
+        echo "Unexpected invoke_subagent or manage_subagents in leaf ${leaf}.md"
+    fi
+done
+
+if [ "$AGY_TOOLS_OK" = true ]; then
+    pass "Compiled AGY agents contain read_file, proper edit/write permissions, and strict subagent nesting"
+else
+    fail "Compiled AGY agent tool declarations or nesting boundaries violated"
+fi
+
+# Verify GEMINI.md documentation
+GEMINI_DOC="${REPO_DIR}/config/agy/GEMINI.md"
+if grep -q "read_file" "$GEMINI_DOC" && \
+   grep -q "edit_file" "$GEMINI_DOC" && \
+   grep -q "write_file" "$GEMINI_DOC" && \
+   grep -q "invoke_subagent" "$GEMINI_DOC" && \
+   grep -q "manage_subagents" "$GEMINI_DOC" && \
+   grep -q "agy remote-control" "$GEMINI_DOC"; then
+    pass "config/agy/GEMINI.md accurately documents native tools, subagents, and remote-control daemon"
+else
+    fail "config/agy/GEMINI.md missing required tool or mechanism documentation"
+fi
+
+# --- Test 31: Verifying T3 Code (t3 serve) systemd unit and installer flags ---
+echo "[Test 31] Verifying T3 Code (t3 serve) systemd unit and installer integration (Issue #15)..."
+T3_UNIT_SRC="${REPO_DIR}/config/systemd/opencode-t3-serve.service"
+if [ -f "$T3_UNIT_SRC" ] && \
+   grep -q '^EnvironmentFile=-%h/\.config/opencode-backends/env' "$T3_UNIT_SRC" && \
+   grep -q 'Environment="T3_SERVE_PORT=3773"' "$T3_UNIT_SRC" && \
+   grep -q 't3' "$T3_UNIT_SRC" && \
+   grep -q 'serve' "$T3_UNIT_SRC" && \
+   grep -q '3773' "$T3_UNIT_SRC"; then
+    pass "opencode-t3-serve.service exists with valid t3 serve port 3773 and EnvironmentFile configuration"
+else
+    fail "opencode-t3-serve.service missing expected t3 serve configuration"
+fi
+
+HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
+if echo "$HELP_OUT" | grep -q -- "--with-t3" && echo "$HELP_OUT" | grep -q -- "--no-t3"; then
+    pass "install.sh --help documents --with-t3 and --no-t3"
+else
+    fail "install.sh --help missing --with-t3 or --no-t3"
+fi
+
+SANDBOX_T3="$(mktemp -d /tmp/test-installer-t3-XXXXXX)"
+mkdir -p "${SANDBOX_T3}/.config/opencode-backends"
+cat << 'EOF' > "${SANDBOX_T3}/.config/opencode-backends/env"
+HF_TOKEN=hf_mock_secret_token_123456
+OPENCODE_SERVER_USERNAME=testuser
+OPENCODE_SERVER_PASSWORD=secret_server_password_987
+OPENCODE_SERVER_PORT=4096
+OPENCODE_SERVER_HOST=0.0.0.0
+EOF
+chmod 600 "${SANDBOX_T3}/.config/opencode-backends/env"
+
+USER_HOME="${SANDBOX_T3}" HOME="${SANDBOX_T3}" "${INSTALL_SCRIPT}" --target=opencode --with-t3 --non-interactive >/dev/null 2>&1 || true
+
+DEPLOYED_T3="${SANDBOX_T3}/.config/systemd/user/opencode-t3-serve.service"
+if [ -f "$DEPLOYED_T3" ]; then
+    pass "install.sh deploys opencode-t3-serve.service into \${HOME}/.config/systemd/user/"
+else
+    fail "opencode-t3-serve.service not deployed into systemd user directory"
+fi
+
+USER_HOME="${SANDBOX_T3}" HOME="${SANDBOX_T3}" "${REPO_DIR}/uninstall.sh" --global --yes >/dev/null 2>&1 || true
+
+if [ ! -f "$DEPLOYED_T3" ]; then
+    pass "uninstall.sh cleanly removed opencode-t3-serve.service"
+else
+    fail "uninstall.sh failed to remove opencode-t3-serve.service"
+fi
+
+# --- Test 32: SGLang Selectable Model Profiles (Qwen 3.8 27B) -----------
+echo "[Test 32] Verifying SGLang selectable model profiles and backend setup..."
+SANDBOX_PROF="$(mktemp -d /tmp/installer-test-prof-XXXXXX)"
+PROF_OUT="$(USER_HOME="${SANDBOX_PROF}" HOME="${SANDBOX_PROF}" "${INSTALL_SCRIPT}" --target=opencode --sglang-model=27b-nvfp4 --non-interactive 2>&1 || true)"
+ENV_FILE="${SANDBOX_PROF}/.config/opencode-backends/env"
+
+if [ -f "$ENV_FILE" ] && \
+   grep -q "SGLANG_PRIMARY_MODEL=local-sglang/qwen3.8-27b" "$ENV_FILE" && \
+   grep -q "SGLANG_SERVICE=opencode-sglang-qwen27b.service" "$ENV_FILE" && \
+   [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ]; then
+    pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units"
+else
+    fail "Installer failed to provision Qwen 3.8 27B profile configuration"
 fi
 
 echo "================================================================================"

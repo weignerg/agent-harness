@@ -1,1 +1,44 @@
-{"teammateMode":"in-process","env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}}
+{
+  "teammateMode": "in-process",
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(claude --bg *)",
+      "Bash(claude --background *)",
+      "Bash(claude agents*)",
+      "Bash(claude logs *)"
+    ],
+    "deny": [
+      "Bash(kill *)",
+      "Bash(kill*)",
+      "Bash(pkill *)",
+      "Bash(pkill*)",
+      "Bash(killall *)",
+      "Bash(killall*)",
+      "Bash(systemctl stop *)",
+      "Bash(systemctl stop*)",
+      "Bash(systemctl --user stop *)",
+      "Bash(systemctl --user stop*)",
+      "Bash(claude stop *)",
+      "Bash(claude stop*)",
+      "Bash(claude kill *)",
+      "Bash(claude kill*)",
+      "Bash(claude rm *)",
+      "Bash(claude rm*)"
+    ],
+    "ask": [
+      "Bash(git push*)",
+      "Bash(git merge*)",
+      "Bash(gh pr create*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh pr review*)",
+      "Bash(gh pr comment*)",
+      "Bash(gh issue create*)",
+      "Bash(gh issue close*)",
+      "Bash(gh issue comment*)",
+      "Bash(gh workflow run*)"
+    ]
+  }
+}

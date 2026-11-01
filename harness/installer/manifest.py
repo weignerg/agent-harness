@@ -12,6 +12,16 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+SYSTEMD_UNITS: List[str] = [
+    "opencode-server.service",
+    "opencode-agent.slice",
+    "opencode-colbert-reindex.service",
+    "opencode-colbert-reindex.timer",
+    "opencode-sglang-ornith-35b.service",
+    "opencode-sglang-qwen27b.service",
+    "opencode-t3-serve.service",
+]
+
 
 def compute_sha256(filepath: Union[str, Path]) -> str:
     """Compute the SHA-256 hex digest of a file."""
@@ -338,7 +348,7 @@ class ManifestEngine:
             current_hash = compute_sha256(p)
             if current_hash == f_entry["sha256"] or force:
                 if not dry_run:
-                    if p.suffix in (".service", ".timer", ".slice") or p.name.startswith("opencode-"):
+                    if p.name in SYSTEMD_UNITS or p.suffix in (".service", ".timer", ".slice") or p.name.startswith("opencode-"):
                         if p.resolve().parent == (Path.home() / ".config" / "systemd" / "user").resolve():
                             try:
                                 subprocess.run(["systemctl", "--user", "stop", p.name], capture_output=True, check=False)
@@ -387,7 +397,7 @@ class ManifestEngine:
                     wiped_backups.append(ew)
 
         # 5. Reload systemd daemon if units were removed
-        if not dry_run and any(Path(f).suffix in (".service", ".timer", ".slice") for f in removed_files):
+        if not dry_run and any(Path(f).name in SYSTEMD_UNITS or Path(f).suffix in (".service", ".timer", ".slice") for f in removed_files):
             try:
                 subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, check=False)
             except Exception:

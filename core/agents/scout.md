@@ -2,11 +2,36 @@
 description: "Read-only 9B search subagent: grep, file discovery, large-scale context consolidation"
 mode: subagent
 model: ornith-local/ornith-1.5-9b
+tools:
+    write: false
+    edit: false
+    bash: true
 permission:
-  read: allow
   edit: deny
   write: deny
-  bash: allow
+  bash:
+    "*": allow
+    "kill *": deny
+    "pkill *": deny
+    "killall *": deny
+    "systemctl stop *": deny
+    "systemctl --user stop *": deny
+    "claude stop *": deny
+    "claude kill *": deny
+    "git push*": ask
+    "git merge*": deny
+    "gh pr create*": ask
+    "gh pr merge*": ask
+    "gh pr review*": ask
+    "gh pr comment*": ask
+    "gh issue create*": ask
+    "gh issue close*": ask
+    "gh issue comment*": ask
+    "gh workflow run*": ask
+    "git commit*": deny
+    "git rebase*": deny
+    "git reset*": deny
+    "git checkout*": deny
   task: deny
 ---
 
@@ -23,3 +48,6 @@ Reporting: you cannot call other agents. End every reply with:
 ## Evidence (commands run and their outcomes)
 ## Requests for team-orchestrator (or none)
 ## Blockers / questions for the human (or none)
+
+
+

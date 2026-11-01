@@ -20,6 +20,19 @@
       "agy_model_id": "gemini-3.8-flash-low"
     }
   },
+  "model_profiles": {
+    "ornith-1.5-35b": {
+      "heavy": "ornith-local/ornith-1.5-35b",
+      "workhorse": "ornith-local/ornith-1.5-35b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    },
+    "qwen3.8-27b": {
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    }
+  },
+  "default_model_profile": "ornith-1.5-35b",
   "roles": {
     "supreme-orchestrator": {
       "tier": "heavy",
@@ -34,13 +47,19 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message",
         "manage_subagents",
         "manage_task",
         "ask_question"
+      ],
+      "allowed_subagents": [
+        "team-orchestrator"
       ]
     },
     "team-orchestrator": {
@@ -56,13 +75,24 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message",
         "manage_subagents",
         "manage_task",
         "ask_question"
+      ],
+      "allowed_subagents": [
+        "architect",
+        "worker",
+        "tester",
+        "reviewer",
+        "scout",
+        "grunt"
       ]
     },
     "architect": {
@@ -75,12 +105,19 @@
         "edit": false,
         "bash": true
       },
-      "claude_tools": "Read, Grep, Glob, Bash",
+      "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
-        "send_message"
+        "send_message",
+        "search_web"
+      ],
+      "allowed_subagents": [
+        "scout"
       ]
     },
     "worker": {
@@ -93,14 +130,23 @@
         "edit": true,
         "bash": true
       },
-      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
+        "edit_file",
+        "write_file",
         "view_file",
         "replace_file_content",
         "write_to_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message"
+      ],
+      "allowed_subagents": [
+        "grunt",
+        "scout"
       ]
     },
     "tester": {
@@ -113,14 +159,23 @@
         "edit": true,
         "bash": true
       },
-      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
+      "claude_tools": "Read, Edit, Write, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
+        "edit_file",
+        "write_file",
         "view_file",
         "replace_file_content",
         "write_to_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
         "send_message"
+      ],
+      "allowed_subagents": [
+        "grunt",
+        "scout"
       ]
     },
     "reviewer": {
@@ -133,12 +188,19 @@
         "edit": false,
         "bash": true
       },
-      "claude_tools": "Read, Grep, Glob, Bash",
+      "claude_tools": "Read, Grep, Glob, Bash, Task",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "invoke_subagent",
-        "send_message"
+        "send_message",
+        "search_web"
+      ],
+      "allowed_subagents": [
+        "scout"
       ]
     },
     "scout": {
@@ -153,10 +215,14 @@
       },
       "claude_tools": "Read, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
         "view_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     },
     "grunt": {
       "tier": "fast",
@@ -170,12 +236,18 @@
       },
       "claude_tools": "Read, Edit, Write, Grep, Glob, Bash",
       "agy_tools": [
+        "read_file",
+        "edit_file",
+        "write_file",
         "view_file",
         "replace_file_content",
         "write_to_file",
+        "grep_search",
+        "find_by_name",
         "run_command",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     },
     "compaction": {
       "tier": "fast",
@@ -190,9 +262,11 @@
       },
       "claude_tools": "Read",
       "agy_tools": [
+        "read_file",
         "view_file",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     },
     "summary": {
       "tier": "fast",
@@ -207,9 +281,11 @@
       },
       "claude_tools": "Read",
       "agy_tools": [
+        "read_file",
         "view_file",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     }
   }
 }
