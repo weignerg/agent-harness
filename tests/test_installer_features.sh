@@ -1153,16 +1153,17 @@ assert 'local-sglang' in d['provider']
 assert 'ornith-local' in d['provider']
 sglang_models = d['provider']['local-sglang'].get('models', {})
 assert 'qwen3.8-27b' in sglang_models
-assert '[SGLang :30000]' in sglang_models['qwen3.8-27b'].get('name', '')
-assert '[SGLang :30000]' in sglang_models['ornith-1.5-35b'].get('name', '')
-assert '[SGLang :30000]' in sglang_models['ornith-1.5-9b'].get('name', '')
+assert sglang_models['qwen3.8-27b'].get('name') == 'Qwen 3.8 27B'
+assert sglang_models['ornith-1.5-35b'].get('name') == 'Ornith 1.5 35B-A3B'
+assert sglang_models['ornith-1.5-9b'].get('name') == 'Ornith 1.5 9B'
+assert '[SGLang' not in sglang_models['qwen3.8-27b'].get('name', '')
 
 # Primary model updated to local-sglang/qwen3.8-27b
 assert d.get('model') == 'local-sglang/qwen3.8-27b'
 for role in ('supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester', 'reviewer'):
     assert d['agent'][role].get('model') == 'local-sglang/qwen3.8-27b', role
 " "$SYNCED_JSON"; then
-    pass "SGLang provider, models with [SGLang :30000] display names, and primary model synced into existing opencode.json"
+    pass "SGLang provider, concise model names, and primary model synced into existing opencode.json"
 else
     fail "Failed to sync SGLang provider/models into existing opencode.json"
 fi
