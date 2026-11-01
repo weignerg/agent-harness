@@ -2,15 +2,31 @@
 description: "9B leaf subagent: atomic simple edits, localized checks, small searches"
 mode: subagent
 model: ornith-local/ornith-1.5-9b
+tools:
+    write: true
+    edit: true
+    bash: true
 permission:
-  read: allow
   edit: allow
   write: allow
   bash:
     "*": allow
+    "kill *": deny
+    "pkill *": deny
+    "killall *": deny
+    "systemctl stop *": deny
+    "systemctl --user stop *": deny
+    "claude stop *": deny
+    "claude kill *": deny
+    "git push*": ask
+    "gh pr create*": ask
     "gh pr merge*": ask
-    "git push --force*": ask
-    "git push * --force*": ask
+    "gh pr review*": ask
+    "gh pr comment*": ask
+    "gh issue create*": ask
+    "gh issue close*": ask
+    "gh issue comment*": ask
+    "gh workflow run*": ask
   task: deny
 ---
 
@@ -34,3 +50,4 @@ Reporting: you cannot call other agents. End every reply with:
 ## Evidence (commands run and their outcomes)
 ## Requests for team-orchestrator (or none)
 ## Blockers / questions for the human (or none)
+

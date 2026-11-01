@@ -615,7 +615,8 @@ install_agy_global() {
     local orch_dest="${USER_HOME}/.orchestration"
     local agents_link="${USER_HOME}/.agents"
     local canonical_repo="$(resolve_canonical_repo_dir)"
-    local core_dir="${canonical_repo}/core"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
     local py_bin="python3"
     if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
         py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
@@ -776,7 +777,8 @@ install_claude_global() {
     local claude_json="${USER_HOME}/.claude.json"
     local claude_cfg="${SCRIPT_DIR}/config/claude"
     local canonical_repo="$(resolve_canonical_repo_dir)"
-    local core_dir="${canonical_repo}/core"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
     local orch_dest="${USER_HOME}/.orchestration"
     local py_bin="python3"
     if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
@@ -1951,7 +1953,8 @@ install_opencode_global() {
     local backend_env_dir="${BACKEND_DIR}"
     local systemd_dest="${SYSTEMD_USER_DIR}"
     local canonical_repo="$(resolve_canonical_repo_dir)"
-    local core_dir="${canonical_repo}/core"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
     local orch_dest="${USER_HOME}/.orchestration"
     local py_bin="python3"
     if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
@@ -2065,7 +2068,8 @@ install_agy_local() {
     local dest_orch="${repo_path}/.orchestration"
     local dest_agents="${repo_path}/.agents"
     local canonical_repo="$(resolve_canonical_repo_dir)"
-    local core_dir="${canonical_repo}/core"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
 
     echo "================================================================================"
     echo "🚀 INSTALLING AGY HARNESS (LOCAL REPOSITORY MODE)"
@@ -2167,7 +2171,8 @@ install_claude_local() {
     local dest_claude="${repo_path}/.claude"
     local claude_cfg="${SCRIPT_DIR}/config/claude"
     local canonical_repo="$(resolve_canonical_repo_dir)"
-    local core_dir="${canonical_repo}/core"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
 
     echo "================================================================================"
     echo "🚀 INSTALLING CLAUDE CODE HARNESS (LOCAL REPOSITORY MODE)"
@@ -2237,7 +2242,8 @@ install_opencode_local() {
     local repo_path="$TARGET_REPO"
     local dest_opencode="${repo_path}/.opencode"
     local canonical_repo="$(resolve_canonical_repo_dir)"
-    local core_dir="${canonical_repo}/core"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
     local py_bin="python3"
     if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
         py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"

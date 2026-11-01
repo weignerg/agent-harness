@@ -315,6 +315,15 @@ for n in ('scout', 'grunt'):
     assert 'Requests for' in ag[n]['prompt'], n
 for n in ('supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester'):
     assert n in ag and ag[n].get('prompt'), n
+assert ag['supreme-orchestrator']['permission']['task']['team-orchestrator'] == 'allow'
+assert ag['supreme-orchestrator']['permission']['task']['*'] == 'deny'
+assert ag['team-orchestrator']['permission']['task']['worker'] == 'allow'
+assert ag['architect']['permission']['task']['scout'] == 'allow'
+assert ag['reviewer']['permission']['task']['scout'] == 'allow'
+assert ag['worker']['permission']['task']['grunt'] == 'allow' and ag['worker']['permission']['task']['scout'] == 'allow'
+assert ag['architect']['permission']['bash']['git commit*'] == 'deny'
+assert ag['reviewer']['permission']['bash']['git commit*'] == 'deny'
+assert ag['scout']['permission']['bash']['git commit*'] == 'deny'
 assert any('rules' in i for i in d['instructions'])
 "; then
         pass "opencode resolves agent profiles (.md) with prompts/permissions and loads rules instructions"
@@ -635,6 +644,52 @@ if echo "$HC_FAIL_OUT" | grep -q "SGLang service (opencode-sglang-ornith-35b.ser
     pass "SGLang healthcheck aborted immediately upon failed unit state without waiting full timeout"
 else
     fail "SGLang healthcheck early failure detection failed or took too long ($FAIL_DURATION s)"
+fi
+
+# --- Test 28: Verify Issue #13 Runtime Bash Gates & Task Fan-Out Permissions -
+echo "[Test 28] Verifying Issue #13 runtime bash gates & subagent task fan-out..."
+if "${PY_BIN}" -c "
+import json
+from pathlib import Path
+
+repo = Path('${REPO_DIR}')
+opencode_cfg = json.loads((repo / 'config/opencode/opencode.json').read_text(encoding='utf-8'))
+claude_cfg = json.loads((repo / 'config/claude/settings/core.json').read_text(encoding='utf-8'))
+manifest = json.loads((repo / 'core/manifest.json').read_text(encoding='utf-8'))
+
+# 1. Manifest allowed_subagents
+roles = manifest['roles']
+assert roles['supreme-orchestrator']['allowed_subagents'] == ['team-orchestrator']
+assert roles['team-orchestrator']['allowed_subagents'] == ['architect', 'worker', 'tester', 'reviewer', 'scout', 'grunt']
+assert roles['architect']['allowed_subagents'] == ['scout']
+assert roles['reviewer']['allowed_subagents'] == ['scout']
+assert roles['worker']['allowed_subagents'] == ['grunt', 'scout']
+assert roles['tester']['allowed_subagents'] == ['grunt', 'scout']
+assert roles['scout']['allowed_subagents'] == []
+assert roles['grunt']['allowed_subagents'] == []
+
+# 2. opencode.json permissions
+bash_perm = opencode_cfg['permission']['bash']
+for pkill in ('kill *', 'pkill *', 'killall *', 'systemctl stop *', 'systemctl --user stop *', 'claude stop *', 'claude kill *'):
+    assert bash_perm[pkill] == 'deny', pkill
+for ask_cmd in ('git push*', 'gh pr create*', 'gh pr merge*', 'gh issue close*'):
+    assert bash_perm[ask_cmd] == 'ask', ask_cmd
+
+for ro in ('architect', 'reviewer', 'scout'):
+    ro_bash = opencode_cfg['agent'][ro]['permission']['bash']
+    assert ro_bash['git commit*'] == 'deny', ro
+
+# 3. claude settings
+claude_deny = claude_cfg['permissions']['deny']
+claude_ask = claude_cfg['permissions']['ask']
+for cd in ('Bash(kill *)', 'Bash(pkill *)', 'Bash(killall *)', 'Bash(systemctl stop *)', 'Bash(systemctl --user stop *)'):
+    assert cd in claude_deny, cd
+for ca in ('Bash(git push *)', 'Bash(gh pr create *)', 'Bash(gh pr merge *)', 'Bash(gh issue close *)'):
+    assert ca in claude_ask, ca
+"; then
+    pass "Runtime bash gates, outward-facing ask rules, and per-role fan-out allow-lists verified"
+else
+    fail "Runtime bash gates or per-role fan-out validation failed"
 fi
 
 echo "================================================================================"

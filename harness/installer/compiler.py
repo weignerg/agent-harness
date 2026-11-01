@@ -21,14 +21,24 @@ def extract_body(agent_file: Path) -> str:
     return content.lstrip()
 
 
-def compile_opencode_frontmatter(role_name: str, meta: Dict[str, Any], tier_models: Dict[str, Any]) -> str:
+def _build_opencode_frontmatter(
+    role_name: str,
+    meta: Dict[str, Any],
+    tier_models: Optional[Dict[str, Any]] = None,
+) -> str:
+    tier_models = tier_models or {}
     tier = meta.get("tier", "workhorse")
     model = tier_models.get(tier, {}).get("opencode", "ornith-local/ornith-1.5-35b")
     mode = meta.get("mode", "subagent")
     desc = meta.get("description", "").replace('"', '\\"')
     tools = meta.get("tools", {})
     readonly = meta.get("readonly", False)
-    task_perm = "deny" if role_name in ("scout", "grunt") else "allow"
+    allowed_subagents = meta.get("allowed_subagents")
+    if allowed_subagents is None:
+        if role_name in ("scout", "grunt"):
+            allowed_subagents = []
+        else:
+            allowed_subagents = []
 
     tools_yaml = []
     for k, v in tools.items():
@@ -47,15 +57,48 @@ def compile_opencode_frontmatter(role_name: str, meta: Dict[str, Any], tier_mode
         f"  write: {'deny' if readonly else 'allow'}",
         "  bash:",
         '    "*": allow',
+        '    "kill *": deny',
+        '    "pkill *": deny',
+        '    "killall *": deny',
+        '    "systemctl stop *": deny',
+        '    "systemctl --user stop *": deny',
+        '    "claude stop *": deny',
+        '    "claude kill *": deny',
+        '    "git push*": ask',
+        '    "gh pr create*": ask',
         '    "gh pr merge*": ask',
-        '    "git push --force*": ask',
-        '    "git push * --force*": ask',
-        f"  task: {task_perm}",
+        '    "gh pr review*": ask',
+        '    "gh pr comment*": ask',
+        '    "gh issue create*": ask',
+        '    "gh issue close*": ask',
+        '    "gh issue comment*": ask',
+        '    "gh workflow run*": ask',
     ]
+
+    if role_name in ("architect", "reviewer", "scout"):
+        lines.extend([
+            '    "git commit*": deny',
+            '    "git merge*": deny',
+            '    "git rebase*": deny',
+            '    "git reset*": deny',
+            '    "git checkout*": deny',
+        ])
+
+    if not allowed_subagents:
+        lines.append("  task: deny")
+    else:
+        lines.append("  task:")
+        lines.append('    "*": deny')
+        for sub in allowed_subagents:
+            lines.append(f'    "{sub}": allow')
+
     if tools.get("question"):
         lines.append("  question: allow")
     lines.append("---")
     return "\n".join(lines)
+
+
+compile_opencode_frontmatter = _build_opencode_frontmatter
 
 
 def compile_claude_frontmatter(role_name: str, meta: Dict[str, Any], tier_models: Dict[str, Any]) -> str:

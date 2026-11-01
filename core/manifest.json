@@ -41,6 +41,9 @@
         "manage_subagents",
         "manage_task",
         "ask_question"
+      ],
+      "allowed_subagents": [
+        "team-orchestrator"
       ]
     },
     "team-orchestrator": {
@@ -63,6 +66,14 @@
         "manage_subagents",
         "manage_task",
         "ask_question"
+      ],
+      "allowed_subagents": [
+        "architect",
+        "worker",
+        "tester",
+        "reviewer",
+        "scout",
+        "grunt"
       ]
     },
     "architect": {
@@ -81,6 +92,9 @@
         "run_command",
         "invoke_subagent",
         "send_message"
+      ],
+      "allowed_subagents": [
+        "scout"
       ]
     },
     "worker": {
@@ -101,6 +115,10 @@
         "run_command",
         "invoke_subagent",
         "send_message"
+      ],
+      "allowed_subagents": [
+        "grunt",
+        "scout"
       ]
     },
     "tester": {
@@ -121,6 +139,10 @@
         "run_command",
         "invoke_subagent",
         "send_message"
+      ],
+      "allowed_subagents": [
+        "grunt",
+        "scout"
       ]
     },
     "reviewer": {
@@ -139,6 +161,9 @@
         "run_command",
         "invoke_subagent",
         "send_message"
+      ],
+      "allowed_subagents": [
+        "scout"
       ]
     },
     "scout": {
@@ -156,7 +181,8 @@
         "view_file",
         "run_command",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     },
     "grunt": {
       "tier": "fast",
@@ -175,7 +201,8 @@
         "write_to_file",
         "run_command",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     },
     "compaction": {
       "tier": "fast",
@@ -192,7 +219,8 @@
       "agy_tools": [
         "view_file",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     },
     "summary": {
       "tier": "fast",
@@ -209,7 +237,8 @@
       "agy_tools": [
         "view_file",
         "send_message"
-      ]
+      ],
+      "allowed_subagents": []
     }
   }
 }

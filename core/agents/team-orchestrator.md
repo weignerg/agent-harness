@@ -2,16 +2,40 @@
 description: "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges"
 mode: subagent
 model: ornith-local/ornith-1.5-35b
+tools:
+    write: false
+    edit: false
+    bash: true
+    question: true
 permission:
-  read: allow
   edit: deny
   write: deny
   bash:
     "*": allow
+    "kill *": deny
+    "pkill *": deny
+    "killall *": deny
+    "systemctl stop *": deny
+    "systemctl --user stop *": deny
+    "claude stop *": deny
+    "claude kill *": deny
+    "git push*": ask
+    "gh pr create*": ask
     "gh pr merge*": ask
-    "git push --force*": ask
-    "git push * --force*": ask
-  task: allow
+    "gh pr review*": ask
+    "gh pr comment*": ask
+    "gh issue create*": ask
+    "gh issue close*": ask
+    "gh issue comment*": ask
+    "gh workflow run*": ask
+  task:
+    "*": deny
+    "architect": allow
+    "worker": allow
+    "tester": allow
+    "reviewer": allow
+    "scout": allow
+    "grunt": allow
   question: allow
 ---
 
@@ -62,3 +86,4 @@ Follow `.opencode/orchestration/team-orchestrator.md` (or `~/.config/opencode/or
 - **Kickoff Intake**: Read kickoff from `.opencode/orchestration/kickoffs/<Branch_Name>.md` (or `~/.config/opencode/orchestration/kickoffs/`). First response is blueprint only; run no mutations; `/rename {Branch_Name}`; send `STARTED` to `supreme-orchestrator`.
 - **End of Day**: On `END OF DAY` from `supreme-orchestrator`, finish current phase without starting new ones; save any worktree `tmp/` notes; write task handoff to `.opencode/orchestration/handoffs/<session_name_with_underscores>.md` (or `.opencode/handoffs/{session-description}-dd-mm-yyyy-handoff.md`); reply with `STOPPED: <handoff_path> — <state>`.
 - **Completion / Final Report**: When work is completed, report back to `supreme-orchestrator` via `task` / message ending with `Result`, `Evidence`, `Requests for supreme-orchestrator`, and `Blockers`.
+

@@ -1,17 +1,36 @@
 ---
-description: Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout
+description: "Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout"
 mode: subagent
 model: ornith-local/ornith-1.5-35b
+tools:
+    write: true
+    edit: true
+    bash: true
 permission:
-  read: allow
   edit: allow
   write: allow
   bash:
     "*": allow
+    "kill *": deny
+    "pkill *": deny
+    "killall *": deny
+    "systemctl stop *": deny
+    "systemctl --user stop *": deny
+    "claude stop *": deny
+    "claude kill *": deny
+    "git push*": ask
+    "gh pr create*": ask
     "gh pr merge*": ask
-    "git push --force*": ask
-    "git push * --force*": ask
-  task: allow
+    "gh pr review*": ask
+    "gh pr comment*": ask
+    "gh issue create*": ask
+    "gh issue close*": ask
+    "gh issue comment*": ask
+    "gh workflow run*": ask
+  task:
+    "*": deny
+    "grunt": allow
+    "scout": allow
 ---
 
 You are the tester subagent. You own verification: run the test pipeline, reproduce failures, fix them, and confirm real behavior. You may delegate atomic edits and read-only searches to `grunt`/`scout` via the `task` tool.
@@ -31,3 +50,4 @@ Reporting: you cannot call agents other than `grunt`/`scout`. End every reply wi
 ## Evidence (commands run and their outcomes)
 ## Requests for team-orchestrator (e.g., `reviewer`, `worker`) or none
 ## Blockers / questions for the human (or none)
+

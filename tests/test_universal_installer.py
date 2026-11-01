@@ -18,6 +18,7 @@ from harness.installer.settings import (
     merge_claude_settings_file,
     merge_json_settings,
 )
+from harness.paths import resolve_true_repo_root
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SCRIPT = REPO_ROOT / "install.sh"
@@ -1150,7 +1151,8 @@ class TestUniversalInstaller(unittest.TestCase):
 
             pth_file = sp_dir / "agent_harness.pth"
             self.assertTrue(pth_file.is_file(), f"Missing agent_harness.pth at {pth_file}")
-            self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(REPO_ROOT))
+            expected_root = resolve_true_repo_root(REPO_ROOT) or REPO_ROOT
+            self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(expected_root))
 
 
 if __name__ == "__main__":

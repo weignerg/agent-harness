@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import subprocess
@@ -74,7 +75,7 @@ class DynamicToolRegistry:
     async def call_tool_async(self, name: str, kwargs: Dict[str, Any]) -> Any:
         if name in self.core_tools:
             func = self.core_tools[name]
-            if asyncio.iscoroutinefunction(func):
+            if inspect.iscoroutinefunction(func):
                 return await func(**kwargs)
             else:
                 return await asyncio.to_thread(func, **kwargs)
