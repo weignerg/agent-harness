@@ -2461,8 +2461,12 @@ install_opencode_global() {
         --sglang-model "${SGLANG_MODEL:-}"
 
     if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
-        if command -v opencode >/dev/null 2>&1; then
-            opencode reload >/dev/null 2>&1 || true
+        if command -v opencode >/dev/null 2>&1 && pgrep -u "$(id -u)" -f "opencode serve --service" >/dev/null 2>&1; then
+            if command -v timeout >/dev/null 2>&1; then
+                timeout 3 opencode reload >/dev/null 2>&1 || true
+            else
+                opencode reload >/dev/null 2>&1 || true
+            fi
         fi
     fi
 

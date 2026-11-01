@@ -52,7 +52,7 @@ chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
     for pid in $(pgrep -f "opencode serve" 2>/dev/null || true); do
-        if tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null | grep -q '^HOME=/tmp/test-'; then
+        if tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null | grep -qE '^HOME=/tmp/(test|installer-test)-'; then
             kill -TERM "$pid" 2>/dev/null || true
         fi
     done
@@ -1124,7 +1124,7 @@ fi
 
 # --- Test 35: SGLang Provider Sync in opencode.json & Zero Daemon Leaks (Issue #31) -
 echo "[Test 35] Verifying SGLang provider sync into opencode.json and zero sandbox daemon leaks..."
-SANDBOX_SYNC="$(mktemp -d /tmp/installer-test-sync-XXXXXX)"
+SANDBOX_SYNC="$(mktemp -d /tmp/test-sync-XXXXXX)"
 mkdir -p "${SANDBOX_SYNC}/.config/opencode"
 cat << 'EOF' > "${SANDBOX_SYNC}/.config/opencode/opencode.json"
 {
@@ -1169,7 +1169,7 @@ fi
 
 leaked_daemons=0
 for pid in $(pgrep -f "opencode serve" 2>/dev/null || true); do
-    if tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null | grep -q '^HOME=/tmp/test-'; then
+    if tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null | grep -qE '^HOME=/tmp/(test|installer-test)-'; then
         leaked_daemons=$((leaked_daemons + 1))
     fi
 done
