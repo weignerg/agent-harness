@@ -627,14 +627,13 @@ class TestAgyCompilerFrontmatter(unittest.TestCase):
 
 
 class TestModelCompilerAndProfiles(unittest.TestCase):
-    """Test suite for SGLang Qwen 3.8/3.5 27B and Ornith 35B selectable profiles, compiler, and configurations."""
+    """Test suite for SGLang Qwen 3.8 27B and Ornith 35B selectable profiles, compiler, and configurations."""
 
     def setUp(self) -> None:
         self.core_dir = REPO_ROOT / "core"
         self.opencode_json_path = REPO_ROOT / "config" / "opencode" / "opencode.json"
         self.manifest_path = self.core_dir / "manifest.json"
         self.qwen27b_service_path = REPO_ROOT / "config" / "systemd" / "opencode-sglang-qwen27b.service"
-        self.qwen35b_service_path = REPO_ROOT / "config" / "systemd" / "opencode-sglang-qwen35b.service"
         self.install_sh_path = REPO_ROOT / "install.sh"
 
         with open(self.manifest_path, "r", encoding="utf-8") as f:
@@ -656,14 +655,11 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("ornith-1.5-35b", ornith_models)
         self.assertIn("ornith-1.5-9b", ornith_models)
         self.assertIn("qwen3.8-27b", ornith_models)
-        self.assertIn("qwen3.5-27b", ornith_models)
 
         # local-sglang provider models
         sglang_prov = providers["local-sglang"]
         sglang_models = sglang_prov.get("models", {})
         self.assertIn("qwen3.8-27b", sglang_models)
-        self.assertIn("qwen3.5-27b", sglang_models)
-        self.assertIn("qwen3.5-35b-a3b", sglang_models)
         self.assertIn("ornith-1.5-35b", sglang_models)
 
         qwen38_27b = sglang_models["qwen3.8-27b"]
@@ -679,8 +675,6 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         profiles = self.manifest["model_profiles"]
         self.assertIn("ornith-1.5-35b", profiles)
         self.assertIn("qwen3.8-27b", profiles)
-        self.assertIn("qwen3.5-27b", profiles)
-        self.assertIn("qwen3.5-35b-a3b", profiles)
 
         # Default profile must remain the baseline ornith-1.5-35b
         self.assertEqual(self.manifest.get("default_model_profile"), "ornith-1.5-35b")
@@ -715,10 +709,6 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
             "Service unit must configure speculative decoding",
         )
 
-    def test_qwen35b_service_symlink_or_unit_exists(self) -> None:
-        """Verify opencode-sglang-qwen35b.service exists."""
-        self.assertTrue(self.qwen35b_service_path.exists(), "opencode-sglang-qwen35b.service must exist")
-
     def test_compiler_frontmatter_model_profile_resolution(self) -> None:
         """Verify compile_opencode_frontmatter preserves baseline default and respects overrides."""
         tier_models = self.manifest["model_tiers"]
@@ -736,15 +726,6 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
             primary_model="local-sglang/qwen3.8-27b",
         )
         self.assertIn("local-sglang/qwen3.8-27b", fm_worker_qwen38)
-
-        # Explicit primary_model override (qwen3.5-27b)
-        fm_worker_qwen35 = compile_opencode_frontmatter(
-            "worker",
-            roles["worker"],
-            tier_models,
-            primary_model="local-sglang/qwen3.5-27b",
-        )
-        self.assertIn("local-sglang/qwen3.5-27b", fm_worker_qwen35)
 
         # Leaf roles remain fast model (ornith-local/ornith-1.5-9b) regardless of primary override
         fm_grunt = compile_opencode_frontmatter(
@@ -772,12 +753,6 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
             worker_q38 = (out_qwen38 / "worker.md").read_text(encoding="utf-8")
             self.assertIn("model: local-sglang/qwen3.8-27b", worker_q38)
 
-            # 3. model_profile="qwen3.5-27b"
-            out_qwen35 = base_dir / "agents_qwen35"
-            compile_agents(core_dir=self.core_dir, target_runtime="opencode", output_dir=out_qwen35, model_profile="qwen3.5-27b")
-            worker_q35 = (out_qwen35 / "worker.md").read_text(encoding="utf-8")
-            self.assertIn("model: local-sglang/qwen3.8-27b", worker_q35)
-
             # 4. model_profile="27b-nvfp4"
             out_nvfp4 = base_dir / "agents_nvfp4"
             compile_agents(core_dir=self.core_dir, target_runtime="opencode", output_dir=out_nvfp4, model_profile="27b-nvfp4")
@@ -803,7 +778,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("ornith-35b", res.stdout)
         self.assertIn("qwen3.8-27b", res.stdout)
         self.assertIn("27b-nvfp4", res.stdout)
-        self.assertIn("35b-a3b", res.stdout)
+        self.assertIn("27b-q6", res.stdout)
 
 
 if __name__ == "__main__":

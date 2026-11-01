@@ -18,7 +18,6 @@ SYSTEMD_UNITS: List[str] = [
     "opencode-colbert-reindex.service",
     "opencode-colbert-reindex.timer",
     "opencode-sglang-ornith-35b.service",
-    "opencode-sglang-qwen35b.service",
     "opencode-sglang-qwen27b.service",
     "opencode-t3-serve.service",
 ]

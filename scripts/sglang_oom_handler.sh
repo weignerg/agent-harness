@@ -31,7 +31,7 @@ detect_service() {
             echo "opencode-sglang-qwen27b.service"
             return
         elif [[ "$env_primary" == *"35b"* ]]; then
-            echo "opencode-sglang-qwen35b.service"
+            echo "opencode-sglang-ornith-35b.service"
             return
         fi
     fi

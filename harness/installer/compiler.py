@@ -202,12 +202,8 @@ def compile_agents(
     if not effective_model and effective_profile:
         if effective_profile in profiles:
             effective_model = profiles[effective_profile].get("workhorse")
-        elif effective_profile in ("qwen3.8-27b", "qwen3.5-27b", "27b-nvfp4", "27b-q6"):
+        elif effective_profile in ("qwen3.8-27b", "27b-nvfp4", "27b-q6"):
             effective_model = "local-sglang/qwen3.8-27b"
-        elif effective_profile == "qwen3.5-27b":
-            effective_model = "local-sglang/qwen3.5-27b"
-        elif effective_profile in ("qwen3.5-35b-a3b", "35b-a3b"):
-            effective_model = "local-sglang/qwen3.5-35b-a3b"
         elif effective_profile in ("ornith-1.5-35b", "ornith-35b"):
             effective_model = "ornith-local/ornith-1.5-35b"
 
@@ -252,8 +248,8 @@ def main():
     parser.add_argument("--core-dir", default=None, help="Path to core/ directory")
     parser.add_argument("--runtime", required=True, choices=["opencode", "claude", "agy", "gemini", "antigravity"], help="Target runtime")
     parser.add_argument("--output-dir", required=True, help="Destination directory for compiled agents")
-    parser.add_argument("--model-profile", default=None, help="Model profile override (e.g. qwen3.5-27b, qwen3.5-35b-a3b)")
-    parser.add_argument("--primary-model", default=None, help="Primary model override (e.g. local-sglang/qwen3.5-27b)")
+    parser.add_argument("--model-profile", default=None, help="Model profile override (e.g. qwen3.8-27b, ornith-1.5-35b)")
+    parser.add_argument("--primary-model", default=None, help="Primary model override (e.g. local-sglang/qwen3.8-27b)")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent.parent

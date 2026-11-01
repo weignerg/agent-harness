@@ -49,75 +49,6 @@
               "thinkingBudget": 4096
             }
           }
-        },
-        "qwen3.5-27b": {
-          "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)",
-          "context": 131072,
-          "output": 32768,
-          "modalities": [
-            "text",
-            "image"
-          ],
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        },
-        "qwen3.5-35b-a3b": {
-          "name": "Qwen 3.5 35B-A3B MoE (Workhorse Model)",
-          "context": 131072,
-          "output": 32768,
-          "modalities": [
-            "text",
-            "image"
-          ],
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        },
-        "qwen3.5-9b": {
-          "name": "Qwen 3.5 9B (Fast Model)",
-          "context": 131072,
-          "output": 32768,
-          "modalities": [
-            "text",
-            "image"
-          ],
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
         }
       }
     },
@@ -136,9 +67,6 @@
           "name": "Ornith 1.5 9B (Fast Model)"
         },
         "qwen3.8-27b": {
-          "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)"
-        },
-        "qwen3.5-27b": {
           "name": "Qwen 3.8 27B Dense (NVFP4/Q6 Speculative Decoding)"
         }
       }
@@ -251,6 +179,10 @@
           "git rebase*": "deny",
           "git reset*": "deny",
           "git checkout*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "team-orchestrator": "allow"
         }
       }
     },
@@ -266,6 +198,15 @@
         "bash": {
           "git commit*": "deny",
           "git merge*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "architect": "allow",
+          "worker": "allow",
+          "tester": "allow",
+          "reviewer": "allow",
+          "scout": "allow",
+          "grunt": "allow"
         }
       }
     },
@@ -281,16 +222,34 @@
           "git rebase*": "deny",
           "git reset*": "deny",
           "git checkout*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "scout": "allow"
         }
       }
     },
     "worker": {
       "model": "ornith-local/ornith-1.5-35b",
-      "description": "Implementation, refactoring, test authoring, and commits; calls grunt and scout"
+      "description": "Implementation, refactoring, test authoring, and commits; calls grunt and scout",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "grunt": "allow",
+          "scout": "allow"
+        }
+      }
     },
     "tester": {
       "model": "ornith-local/ornith-1.5-35b",
-      "description": "Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout"
+      "description": "Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout",
+      "permission": {
+        "task": {
+          "*": "deny",
+          "grunt": "allow",
+          "scout": "allow"
+        }
+      }
     },
     "reviewer": {
       "model": "ornith-local/ornith-1.5-35b",
@@ -304,6 +263,10 @@
           "git rebase*": "deny",
           "git reset*": "deny",
           "git checkout*": "deny"
+        },
+        "task": {
+          "*": "deny",
+          "scout": "allow"
         }
       }
     },
@@ -325,7 +288,10 @@
     },
     "grunt": {
       "model": "ornith-local/ornith-1.5-9b",
-      "description": "9B leaf subagent: atomic simple edits, localized checks, small searches"
+      "description": "9B leaf subagent: atomic simple edits, localized checks, small searches",
+      "permission": {
+        "task": "deny"
+      }
     },
     "summary": {
       "model": "ornith-local/ornith-1.5-9b",
