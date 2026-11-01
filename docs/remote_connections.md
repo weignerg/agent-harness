@@ -204,6 +204,9 @@ The T3 Code frontend is packaged as the systemd user service `t3-serve.service`.
    # Enable T3 Code server during installation (default: with)
    ./install.sh --with-t3
 
+   # Configure custom working directory for t3-serve.service (default: %h)
+   ./install.sh --t3-workdir /path/to/project
+
    # Skip T3 Code server deployment
    ./install.sh --no-t3
    ```

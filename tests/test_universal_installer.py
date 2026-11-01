@@ -741,6 +741,7 @@ class TestUniversalInstaller(unittest.TestCase):
             env = {
                 "USER_HOME": str(sandbox),
                 "HOME": str(sandbox),
+                "OPENCODE_SERVER_PASSWORD": "",
             }
 
             proc = self.run_installer(
@@ -1193,6 +1194,7 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn('Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"', content)
         self.assertIn('Environment="T3_SERVE_HOST=0.0.0.0"', content)
         self.assertIn('Environment="T3_SERVE_PORT=3773"', content)
+        self.assertIn('WorkingDirectory=%h', content)
         self.assertIn("ExecCondition=", content)
         self.assertIn("StartLimitIntervalSec=60", content)
         self.assertIn("StartLimitBurst=5", content)
@@ -1210,6 +1212,7 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertEqual(proc_help.returncode, 0)
         self.assertIn("--with-t3", proc_help.stdout)
         self.assertIn("--no-t3", proc_help.stdout)
+        self.assertIn("--t3-workdir", proc_help.stdout)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             sandbox = Path(tmp_dir) / "user_home"
@@ -1227,6 +1230,18 @@ class TestUniversalInstaller(unittest.TestCase):
             t3_unit = systemd_user_dir / "t3-serve.service"
             self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed by default")
             self.assertIn("T3_SERVE_PORT=3773", t3_unit.read_text(encoding="utf-8"))
+            self.assertIn("WorkingDirectory=%h", t3_unit.read_text(encoding="utf-8"))
+
+            # Install with custom --t3-workdir
+            custom_workspace = sandbox / "custom_workspace"
+            custom_workspace.mkdir()
+            proc_custom = self.run_installer(
+                "--target", "opencode", "--mode", "global", "--non-interactive",
+                "--t3-workdir", str(custom_workspace),
+                env=env,
+            )
+            self.assertEqual(proc_custom.returncode, 0, f"Custom workdir installer failed: {proc_custom.stderr}\n{proc_custom.stdout}")
+            self.assertIn(f"WorkingDirectory={custom_workspace}", t3_unit.read_text(encoding="utf-8"))
 
             env_file = sandbox / ".config" / "opencode-backends" / "env"
             self.assertTrue(env_file.is_file(), f"Expected {env_file} to exist")
