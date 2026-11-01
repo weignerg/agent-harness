@@ -77,6 +77,7 @@ WITH_HEALTHCHECK="${WITH_HEALTHCHECK:-true}"
 EXPLICIT_HEALTHCHECK=false
 NO_BACKUP=false
 WIPE_BACKUPS=false
+SGLANG_MODEL="${SGLANG_MODEL:-35b-a3b}"
 
 PROBED_MODEL_NAME=""
 PROBED_MODEL_PATH=""
@@ -105,6 +106,7 @@ Actions:
   --uninstall                          Safely roll back installed files using install manifest
 
 Parity & Modules:
+  --sglang-model <35b-a3b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: 35b-a3b)
   --with-obsidian / --no-obsidian      Toggle Obsidian detection & pacman install (default: with)
   --with-vault / --no-vault            Toggle ~/Vaults/home starter scaffolding (default: with)
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096 & 30000 (default: with)
@@ -218,6 +220,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --override-gpu=*)
             OVERRIDE_GPU="${1#*=}"
+            shift
+            ;;
+        --sglang-model)
+            SGLANG_MODEL="$2"
+            shift 2
+            ;;
+        --sglang-model=*)
+            SGLANG_MODEL="${1#*=}"
             shift
             ;;
         --systemd|--with-systemd)
@@ -979,6 +989,52 @@ EOF
         fi
         chmod 0600 "$env_file"
     fi
+
+    local primary_model="local-sglang/qwen3.5-35b-a3b"
+    local active_service="opencode-sglang-ornith-35b.service"
+    local qwen27b_quant="fp4"
+    local qwen27b_path="Qwen/Qwen3.5-27B-FP4"
+    if [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        primary_model="local-sglang/qwen3.5-27b"
+        active_service="opencode-sglang-qwen27b.service"
+        qwen27b_quant="fp4"
+        qwen27b_path="Qwen/Qwen3.5-27B-FP4"
+    elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        primary_model="local-sglang/qwen3.5-27b"
+        active_service="opencode-sglang-qwen27b.service"
+        qwen27b_quant="q6_k"
+        qwen27b_path="Qwen/Qwen3.5-27B-Instruct-GGUF/qwen3.5-27b-instruct-q6_k.gguf"
+    elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
+        primary_model="local-sglang/qwen3.5-35b-a3b"
+        active_service="opencode-sglang-ornith-35b.service"
+    fi
+
+    local sglang_vars=(
+        "SGLANG_SERVICE=${active_service}"
+        "SGLANG_PRIMARY_MODEL=${primary_model}"
+        "SGLANG_27B_MODEL_PATH=${qwen27b_path}"
+        "SGLANG_27B_SERVED_MODEL_NAME=qwen3.5-27b"
+        "SGLANG_27B_QUANTIZATION=${qwen27b_quant}"
+        "SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
+        "SGLANG_27B_MEM_FRACTION=0.88"
+        "SGLANG_27B_CONTEXT_LENGTH=65536"
+        "SGLANG_27B_CHUNKED_PREFILL=8192"
+        "SGLANG_27B_ATTENTION_BACKEND=flashinfer"
+        "SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
+        "SGLANG_27B_SPECULATIVE_ALGO=NEXTN"
+        "SGLANG_27B_SPECULATIVE_ARGS=\"--speculative-algorithm NEXTN --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4\""
+    )
+
+    for kv in "${sglang_vars[@]}"; do
+        var_name="${kv%%=*}"
+        val="${kv#*=}"
+        if grep -sq "^${var_name}=" "$env_file"; then
+            sed -i "s|^${var_name}=.*|${var_name}=${val}|" "$env_file"
+        else
+            printf '%s=%s\n' "$var_name" "$val" >> "$env_file"
+        fi
+    done
+    chmod 0600 "$env_file"
 
     local canonical_repo="$(resolve_canonical_repo_dir)"
     for venv_candidate in "${STACK_DIR}/venv" "${backend_env_dir}/venv"; do
@@ -1840,6 +1896,20 @@ deploy_opencode_backend_and_units() {
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
 
+    if [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        probed_model="qwen3.5-27b"
+        probed_model_path="Qwen/Qwen3.5-27B-FP4"
+        probed_service="opencode-sglang-qwen27b.service"
+        max_context="65536"
+        mem_fraction="0.88"
+    elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        probed_model="qwen3.5-27b"
+        probed_model_path="Qwen/Qwen3.5-27B-Instruct-GGUF/qwen3.5-27b-instruct-q6_k.gguf"
+        probed_service="opencode-sglang-qwen27b.service"
+        max_context="65536"
+        mem_fraction="0.88"
+    fi
+
     PROBED_MODEL_NAME="$probed_model"
     PROBED_MODEL_PATH="$probed_model_path"
     PROBED_SERVICE_NAME="$probed_service"
@@ -1908,14 +1978,16 @@ with open(path, 'w') as f:
         "opencode-colbert-reindex.service"
         "opencode-colbert-reindex.timer"
         "opencode-sglang-ornith-35b.service"
+        "opencode-sglang-qwen35b.service"
+        "opencode-sglang-qwen27b.service"
     )
 
     for u in "${units[@]}"; do
-        if [ -f "${SCRIPT_DIR}/config/systemd/${u}" ]; then
-            if [ -L "${systemd_dest}/${u}" ]; then
+        if [ -f "${SCRIPT_DIR}/config/systemd/${u}" ] || [ -L "${SCRIPT_DIR}/config/systemd/${u}" ]; then
+            if [ -L "${systemd_dest}/${u}" ] || [ -f "${systemd_dest}/${u}" ]; then
                 rm -f "${systemd_dest}/${u}"
             fi
-            cp -f "${SCRIPT_DIR}/config/systemd/${u}" "${systemd_dest}/${u}"
+            cp -a "${SCRIPT_DIR}/config/systemd/${u}" "${systemd_dest}/${u}"
         fi
     done
 
@@ -1936,6 +2008,10 @@ with open(path, 'w') as f:
         sed -i \
             "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
             "${systemd_dest}/opencode-sglang-ornith-35b.service"
+    fi
+
+    if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${systemd_dest}/opencode-sglang-qwen27b.service" ]; then
+        sed -i "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|" "${systemd_dest}/opencode-sglang-qwen27b.service"
     fi
 
     # 5. Reload systemd daemon if available
@@ -1998,10 +2074,16 @@ install_opencode_global() {
 
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
+    local model_profile_arg=()
+    if [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen3.5-27b")
+    fi
+
     python3 -m harness.installer.compiler \
         --core-dir "${core_dir}" \
         --runtime opencode \
-        --output-dir "${opencode_dest}/agents"
+        --output-dir "${opencode_dest}/agents" \
+        "${model_profile_arg[@]}"
 
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
@@ -2265,10 +2347,16 @@ install_opencode_local() {
 
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
+    local model_profile_arg=()
+    if [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen3.5-27b")
+    fi
+
     python3 -m harness.installer.compiler \
         --core-dir "${core_dir}" \
         --runtime opencode \
-        --output-dir "${dest_opencode}/agents"
+        --output-dir "${dest_opencode}/agents" \
+        "${model_profile_arg[@]}"
 
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
@@ -2377,8 +2465,8 @@ EOF
                 install_opencode_local
                 recorded_roots+=("${TARGET_REPO}/.opencode")
                 if [ "$ENABLE_SYSTEMD" = true ]; then
-                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
-                        if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service" "opencode-sglang-qwen35b.service" "opencode-sglang-qwen27b.service"; do
+                        if [ -f "${SYSTEMD_USER_DIR}/${u}" ] || [ -L "${SYSTEMD_USER_DIR}/${u}" ]; then
                             recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                         fi
                     done
@@ -2389,8 +2477,8 @@ EOF
                 recorded_roots+=("${TARGET_REPO}/.orchestration" "${TARGET_REPO}/.claude" "${TARGET_REPO}/.opencode")
                 recorded_symlinks+=("${TARGET_REPO}/.agents:.orchestration")
                 if [ "$ENABLE_SYSTEMD" = true ]; then
-                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
-                        if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                    for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service" "opencode-sglang-qwen35b.service" "opencode-sglang-qwen27b.service"; do
+                        if [ -f "${SYSTEMD_USER_DIR}/${u}" ] || [ -L "${SYSTEMD_USER_DIR}/${u}" ]; then
                             recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                         fi
                     done
@@ -2446,8 +2534,8 @@ EOF
                 mkdir -p "${USER_HOME}/.orchestration"
                 install_opencode_global
                 recorded_roots+=("${USER_HOME}/.config/opencode")
-                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
-                    if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service" "opencode-sglang-qwen35b.service" "opencode-sglang-qwen27b.service"; do
+                    if [ -f "${SYSTEMD_USER_DIR}/${u}" ] || [ -L "${SYSTEMD_USER_DIR}/${u}" ]; then
                         recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                     fi
                 done
@@ -2459,8 +2547,8 @@ EOF
                 install_all_global
                 recorded_roots+=("${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}/plugins/agent-harness" "${USER_HOME}/.claude" "${USER_HOME}/.config/opencode")
                 recorded_symlinks+=("${USER_HOME}/.agents:${USER_HOME}/.orchestration" "${GEMINI_CONFIG_DIR}/plugins/agy-harness:${GEMINI_CONFIG_DIR}/plugins/agent-harness")
-                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service"; do
-                    if [ -f "${SYSTEMD_USER_DIR}/${u}" ]; then
+                for u in "opencode-server.service" "opencode-agent.slice" "opencode-colbert-reindex.service" "opencode-colbert-reindex.timer" "opencode-sglang-ornith-35b.service" "opencode-sglang-qwen35b.service" "opencode-sglang-qwen27b.service"; do
+                    if [ -f "${SYSTEMD_USER_DIR}/${u}" ] || [ -L "${SYSTEMD_USER_DIR}/${u}" ]; then
                         recorded_files+=("${SYSTEMD_USER_DIR}/${u}")
                     fi
                 done

@@ -12,6 +12,16 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+SYSTEMD_UNITS = (
+    "opencode-server.service",
+    "opencode-agent.slice",
+    "opencode-colbert-reindex.service",
+    "opencode-colbert-reindex.timer",
+    "opencode-sglang-ornith-35b.service",
+    "opencode-sglang-qwen35b.service",
+    "opencode-sglang-qwen27b.service",
+)
+
 
 def compute_sha256(filepath: Union[str, Path]) -> str:
     """Compute the SHA-256 hex digest of a file."""

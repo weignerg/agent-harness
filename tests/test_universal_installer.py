@@ -1150,7 +1150,21 @@ class TestUniversalInstaller(unittest.TestCase):
 
             pth_file = sp_dir / "agent_harness.pth"
             self.assertTrue(pth_file.is_file(), f"Missing agent_harness.pth at {pth_file}")
-            self.assertEqual(pth_file.read_text(encoding="utf-8").strip(), str(REPO_ROOT))
+            canonical_repo = str(REPO_ROOT)
+            try:
+                proc_git = subprocess.run(
+                    ["git", "-C", str(REPO_ROOT), "rev-parse", "--git-common-dir"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc_git.returncode == 0:
+                    common_git = (REPO_ROOT / proc_git.stdout.strip()).resolve()
+                    if common_git.name == ".git":
+                        canonical_repo = str(common_git.parent)
+            except Exception:
+                pass
+            self.assertIn(pth_file.read_text(encoding="utf-8").strip(), [str(REPO_ROOT), canonical_repo])
 
 
 if __name__ == "__main__":
