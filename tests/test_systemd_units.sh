@@ -89,6 +89,31 @@ if ! grep -q 'OnBootSec=2min' "$TIMER_FILE" || ! grep -q 'OnUnitActiveSec=5min' 
 fi
 echo "✅ Passed: opencode-colbert-reindex.timer configured with OnBootSec=2min, OnUnitActiveSec=5min, RandomizedDelaySec=15."
 
+# 7. Check Qwen 3.8 27B service model repo ID and CLI flags (Issue #20)
+echo "[CHECK 7] Verifying opencode-sglang-qwen27b.service model repo ID and quantization flags (Issue #20)..."
+QWEN27B_FILE="${CONFIG_DIR}/opencode-sglang-qwen27b.service"
+if grep -q "Qwen/Qwen3.8-27B-FP4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains invalid repo ID Qwen/Qwen3.8-27B-FP4"
+    exit 1
+fi
+if ! grep -q "SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
+    exit 1
+fi
+if grep -q "SGLANG_27B_QUANTIZATION=fp4" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains invalid quantization fp4"
+    exit 1
+fi
+if ! grep -q "SGLANG_27B_QUANTIZATION=modelopt" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_QUANTIZATION=modelopt"
+    exit 1
+fi
+if grep -q -- "--cuda-graph-max-bs " "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service contains ambiguous flag --cuda-graph-max-bs"
+    exit 1
+fi
+echo "✅ Passed: opencode-sglang-qwen27b.service correctly specifies nvidia/Qwen3.8-27B-NVFP4, modelopt, and valid SGLang flags."
+
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
 echo "================================================================================"

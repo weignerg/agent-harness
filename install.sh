@@ -1028,17 +1028,17 @@ EOF
 
     local primary_model="ornith-local/ornith-1.5-35b"
     local active_service="opencode-sglang-ornith-35b.service"
-    local qwen27b_quant="fp4"
+    local qwen27b_quant="modelopt"
     local qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
     if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
-        qwen27b_quant="fp4"
+        qwen27b_quant="modelopt"
         qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
     elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
         primary_model="local-sglang/qwen3.8-27b"
         active_service="opencode-sglang-qwen27b.service"
-        qwen27b_quant="q6_k"
+        qwen27b_quant="gguf"
         qwen27b_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         primary_model="ornith-local/ornith-1.5-35b"
@@ -1489,6 +1489,26 @@ warmup_sglang_service() {
     echo "  Live weight loading, download progress, and CUDA allocation will display below:"
     echo ""
 
+    local quant="${PROBED_QUANTIZATION:-}"
+    if [ -z "$quant" ] && [ -f "${BACKEND_DIR}/gpu_profile.json" ]; then
+        quant="$(python3 -c "import json, sys; d=json.load(open(sys.argv[1])); print(d.get('quantization', ''))" "${BACKEND_DIR}/gpu_profile.json" 2>/dev/null || true)"
+    fi
+    if [ -z "$quant" ] && [ -n "${SGLANG_27B_QUANTIZATION:-}" ] && [[ "$model_path" =~ Qwen3\.8-27B ]]; then
+        quant="${SGLANG_27B_QUANTIZATION}"
+    fi
+    if [ "$quant" = "fp4" ]; then
+        quant="modelopt"
+    fi
+    if [ "$quant" = "q6_k" ]; then
+        quant="gguf"
+    fi
+    if [ -z "$quant" ] && [[ "$model_path" =~ \.gguf$ ]]; then
+        quant="gguf"
+    fi
+    if [ -z "$quant" ] && [[ "$model_path" == "nvidia/Qwen3.8-27B-NVFP4" ]]; then
+        quant="modelopt"
+    fi
+
     local run_args=()
     if [[ "${sglang_cmd[*]}" =~ sglang$ ]]; then
         run_args=("serve")
@@ -1505,6 +1525,9 @@ warmup_sglang_service() {
         --port "${sglang_port}"
         --host 127.0.0.1
     )
+    if [ -n "$quant" ]; then
+        run_args+=(--quantization "${quant}")
+    fi
 
     (
         export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
@@ -1958,6 +1981,32 @@ deploy_opencode_backend_and_units() {
         probed_service="opencode-sglang-ornith-35b.service"
     fi
 
+    # Update gpu_profile.json when SGLANG_MODEL overrides profile parameters
+    if [ -n "$SGLANG_MODEL" ] && [ -f "${backend_env_dir}/gpu_profile.json" ]; then
+        python3 -c "
+import json, sys
+p = sys.argv[1]
+try:
+    with open(p, 'r') as f:
+        d = json.load(f)
+except Exception:
+    d = {}
+d['model'] = sys.argv[2]
+d['model_path'] = sys.argv[3]
+d['service'] = sys.argv[4]
+try:
+    d['max_context'] = int(sys.argv[5])
+except ValueError:
+    d['max_context'] = sys.argv[5]
+try:
+    d['memory_fraction'] = float(sys.argv[6])
+except ValueError:
+    d['memory_fraction'] = sys.argv[6]
+with open(p, 'w') as f:
+    json.dump(d, f, indent=2)
+" "${backend_env_dir}/gpu_profile.json" "${probed_model}" "${probed_model_path}" "${probed_service}" "${max_context}" "${mem_fraction}"
+    fi
+
     PROBED_MODEL_NAME="$probed_model"
     PROBED_MODEL_PATH="$probed_model_path"
     PROBED_SERVICE_NAME="$probed_service"
@@ -2196,7 +2245,11 @@ install_opencode_global() {
     cp -f "${canonical_repo}/config/opencode/tui.json" "${opencode_dest}/tui.json" 2>/dev/null || true
 
     if [ ! -f "${opencode_dest}/opencode.json" ]; then
-        cp -f "${canonical_repo}/config/opencode/opencode.json" "${opencode_dest}/opencode.json"
+        if [ -f "${SCRIPT_DIR}/config/opencode/opencode.json" ]; then
+            cp -f "${SCRIPT_DIR}/config/opencode/opencode.json" "${opencode_dest}/opencode.json"
+        else
+            cp -f "${canonical_repo}/config/opencode/opencode.json" "${opencode_dest}/opencode.json"
+        fi
     fi
 
     deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
@@ -2470,7 +2523,11 @@ install_opencode_local() {
     cp -f "${canonical_repo}/config/opencode/tui.json" "${dest_opencode}/tui.json" 2>/dev/null || true
 
     if [ ! -f "${dest_opencode}/opencode.json" ]; then
-        cp -f "${canonical_repo}/config/opencode/opencode.json" "${dest_opencode}/opencode.json"
+        if [ -f "${SCRIPT_DIR}/config/opencode/opencode.json" ]; then
+            cp -f "${SCRIPT_DIR}/config/opencode/opencode.json" "${dest_opencode}/opencode.json"
+        else
+            cp -f "${canonical_repo}/config/opencode/opencode.json" "${dest_opencode}/opencode.json"
+        fi
     fi
 
     python3 -m harness.installer.config_sync sync-opencode \

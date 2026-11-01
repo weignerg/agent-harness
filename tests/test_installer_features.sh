@@ -51,7 +51,7 @@ EOF
 chmod 0755 "${GLOBAL_MOCK_BIN}/systemctl"
 export PATH="${GLOBAL_MOCK_BIN}:${PATH}"
 cleanup_test_sandboxes() {
-    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" "${SANDBOX_PROF:-}" 2>/dev/null || true
+    rm -rf "${GLOBAL_MOCK_BIN:-}" "${SANDBOX:-}" "${SANDBOX_GP:-}" "${SANDBOX_HEAL:-}" "${SANDBOX_NV:-}" "${SANDBOX_WARMUP:-}" "${SANDBOX_HC_PROG:-}" "${SANDBOX_HC_FAIL:-}" "${SANDBOX_CLAUDE:-}" "${SANDBOX_AGY:-}" "${SANDBOX_T3:-}" "${SANDBOX_PROF:-}" "${SANDBOX_Q6:-}" 2>/dev/null || true
 }
 trap cleanup_test_sandboxes EXIT
 
@@ -891,14 +891,34 @@ echo "[Test 32] Verifying SGLang selectable model profiles and backend setup..."
 SANDBOX_PROF="$(mktemp -d /tmp/installer-test-prof-XXXXXX)"
 PROF_OUT="$(USER_HOME="${SANDBOX_PROF}" HOME="${SANDBOX_PROF}" "${INSTALL_SCRIPT}" --target=opencode --sglang-model=27b-nvfp4 --non-interactive 2>&1 || true)"
 ENV_FILE="${SANDBOX_PROF}/.config/opencode-backends/env"
+GPU_PROF="${SANDBOX_PROF}/.config/opencode-backends/gpu_profile.json"
 
 if [ -f "$ENV_FILE" ] && \
    grep -q "SGLANG_PRIMARY_MODEL=local-sglang/qwen3.8-27b" "$ENV_FILE" && \
    grep -q "SGLANG_SERVICE=opencode-sglang-qwen27b.service" "$ENV_FILE" && \
+   grep -q "SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4" "$ENV_FILE" && \
+   grep -q "SGLANG_27B_QUANTIZATION=modelopt" "$ENV_FILE" && \
+   ! grep -q "Qwen/Qwen3.8-27B-FP4" "$ENV_FILE" && \
+   ! grep -q "SGLANG_27B_QUANTIZATION=fp4" "$ENV_FILE" && \
+   [ -f "$GPU_PROF" ] && \
+   grep -q '"model_path": "nvidia/Qwen3.8-27B-NVFP4"' "$GPU_PROF" && \
+   ! grep -q "Qwen/Qwen3.8-27B-FP4" "$GPU_PROF" && \
    [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ]; then
     pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units"
 else
     fail "Installer failed to provision Qwen 3.8 27B profile configuration"
+fi
+
+# Verify 27b-q6 provisions valid SGLang gguf quantization flag
+SANDBOX_Q6="$(mktemp -d /tmp/installer-test-q6-XXXXXX)"
+Q6_OUT="$(USER_HOME="${SANDBOX_Q6}" HOME="${SANDBOX_Q6}" "${INSTALL_SCRIPT}" --target=opencode --sglang-model=27b-q6 --non-interactive 2>&1 || true)"
+ENV_FILE_Q6="${SANDBOX_Q6}/.config/opencode-backends/env"
+if [ -f "$ENV_FILE_Q6" ] && \
+   grep -q "SGLANG_27B_QUANTIZATION=gguf" "$ENV_FILE_Q6" && \
+   ! grep -q "SGLANG_27B_QUANTIZATION=q6_k" "$ENV_FILE_Q6"; then
+    pass "Installer provisions 27b-q6 profile with valid SGLang gguf quantization flag"
+else
+    fail "Installer failed to provision 27b-q6 with valid gguf quantization"
 fi
 
 # --- Test 33: TL;DR Quickstart & Multi-Runtime Usage Guide (Issue #19) ------

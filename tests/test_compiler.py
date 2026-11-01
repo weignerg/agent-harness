@@ -704,10 +704,32 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("--port 30000", content, "Port must be 30000")
         self.assertIn("--host 127.0.0.1", content, "Host must be 127.0.0.1")
         self.assertIn("SGLANG_SERVICE=opencode-sglang-qwen27b.service", content)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", content, "Service must specify nvidia/Qwen3.8-27B-NVFP4")
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", content, "Service must not reference non-existent Qwen/Qwen3.8-27B-FP4")
+        self.assertIn("SGLANG_27B_QUANTIZATION=modelopt", content, "Service must specify modelopt quantization")
+        self.assertNotIn("SGLANG_27B_QUANTIZATION=fp4", content, "Service must not use invalid fp4 quantization")
+        self.assertIn("--cuda-graph-max-bs-decode", content, "Service must use unambiguous --cuda-graph-max-bs-decode")
+        self.assertNotIn("--cuda-graph-max-bs ", content, "Service must not use ambiguous --cuda-graph-max-bs")
         self.assertTrue(
             "--speculative-algorithm" in content or "SGLANG_27B_SPECULATIVE" in content,
             "Service unit must configure speculative decoding",
         )
+
+    def test_regression_issue20_nvidia_qwen27b_nvfp4_repo_id(self) -> None:
+        """Verify Issue #20: Qwen/Qwen3.8-27B-FP4 is never emitted in templates, services, or installer."""
+        service_content = self.qwen27b_service_path.read_text(encoding="utf-8")
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", service_content)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", service_content)
+
+        install_sh_content = self.install_sh_path.read_text(encoding="utf-8")
+        self.assertNotIn("Qwen/Qwen3.8-27B-FP4", install_sh_content)
+        self.assertIn("nvidia/Qwen3.8-27B-NVFP4", install_sh_content)
+
+        models_catalog_path = REPO_ROOT / "config" / "models" / "models_catalog.json"
+        if models_catalog_path.exists():
+            cat_content = models_catalog_path.read_text(encoding="utf-8")
+            self.assertNotIn("Qwen/Qwen3.8-27B-FP4", cat_content)
+            self.assertIn("nvidia/Qwen3.8-27B-NVFP4", cat_content)
 
     def test_compiler_frontmatter_model_profile_resolution(self) -> None:
         """Verify compile_opencode_frontmatter preserves baseline default and respects overrides."""

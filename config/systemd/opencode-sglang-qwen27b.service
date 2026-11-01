@@ -8,7 +8,7 @@ EnvironmentFile=-%h/.config/opencode-backends/env
 Environment="SGLANG_SERVICE=opencode-sglang-qwen27b.service"
 Environment="SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
 Environment="SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
-Environment="SGLANG_27B_QUANTIZATION=fp4"
+Environment="SGLANG_27B_QUANTIZATION=modelopt"
 Environment="SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
 Environment="SGLANG_27B_MEM_FRACTION=0.88"
 Environment="SGLANG_27B_CONTEXT_LENGTH=65536"
@@ -33,7 +33,7 @@ ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --chunked-prefill-size ${SGLANG_27B_CHUNKED_PREFILL} \
   --attention-backend ${SGLANG_27B_ATTENTION_BACKEND} \
   --enable-torch-compile \
-  --cuda-graph-max-bs ${SGLANG_27B_CUDA_GRAPH_MAX_BS} \
+  --cuda-graph-max-bs-decode ${SGLANG_27B_CUDA_GRAPH_MAX_BS} \
   ${SGLANG_27B_SPECULATIVE_ARGS} \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
