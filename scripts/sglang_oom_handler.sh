@@ -19,8 +19,14 @@ detect_service() {
         return
     fi
     if [ -f "${HOME}/.config/opencode-backends/env" ]; then
+        local env_svc
+        env_svc="$(grep -s '^SGLANG_SERVICE=' "${HOME}/.config/opencode-backends/env" | head -n1 | cut -d'=' -f2- | tr -d '"\047')"
+        if [ -n "$env_svc" ]; then
+            echo "$env_svc"
+            return
+        fi
         local env_primary
-        env_primary="$(grep -s '^SGLANG_PRIMARY_MODEL=' "${HOME}/.config/opencode-backends/env" | cut -d'=' -f2-)"
+        env_primary="$(grep -s '^SGLANG_PRIMARY_MODEL=' "${HOME}/.config/opencode-backends/env" | head -n1 | cut -d'=' -f2- | tr -d '"\047')"
         if [[ "$env_primary" == *"27b"* ]]; then
             echo "opencode-sglang-qwen27b.service"
             return

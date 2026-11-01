@@ -2,37 +2,47 @@
   "version": "1.0.0",
   "model_tiers": {
     "heavy": {
-      "opencode": "local-sglang/qwen3.5-35b-a3b",
+      "opencode": "ornith-local/ornith-1.5-35b",
       "claude": "opus",
       "agy": "pro",
       "agy_model_id": "gemini-3.8-flash-high"
     },
     "workhorse": {
-      "opencode": "local-sglang/qwen3.5-35b-a3b",
+      "opencode": "ornith-local/ornith-1.5-35b",
       "claude": "sonnet",
       "agy": "flash",
       "agy_model_id": "gemini-3.8-flash-medium"
     },
     "fast": {
-      "opencode": "local-sglang/qwen3.5-9b",
+      "opencode": "ornith-local/ornith-1.5-9b",
       "claude": "haiku",
       "agy": "flash_lite",
       "agy_model_id": "gemini-3.8-flash-low"
     }
   },
   "model_profiles": {
-    "qwen3.5-35b-a3b": {
-      "heavy": "local-sglang/qwen3.5-35b-a3b",
-      "workhorse": "local-sglang/qwen3.5-35b-a3b",
-      "fast": "local-sglang/qwen3.5-9b"
+    "ornith-1.5-35b": {
+      "heavy": "ornith-local/ornith-1.5-35b",
+      "workhorse": "ornith-local/ornith-1.5-35b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    },
+    "qwen3.8-27b": {
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
+      "fast": "ornith-local/ornith-1.5-9b"
     },
     "qwen3.5-27b": {
       "heavy": "local-sglang/qwen3.5-27b",
       "workhorse": "local-sglang/qwen3.5-27b",
+      "fast": "ornith-local/ornith-1.5-9b"
+    },
+    "qwen3.5-35b-a3b": {
+      "heavy": "local-sglang/qwen3.5-35b-a3b",
+      "workhorse": "local-sglang/qwen3.5-35b-a3b",
       "fast": "local-sglang/qwen3.5-9b"
     }
   },
-  "default_model_profile": "qwen3.5-35b-a3b",
+  "default_model_profile": "ornith-1.5-35b",
   "roles": {
     "supreme-orchestrator": {
       "tier": "heavy",

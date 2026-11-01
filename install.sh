@@ -77,7 +77,7 @@ WITH_HEALTHCHECK="${WITH_HEALTHCHECK:-true}"
 EXPLICIT_HEALTHCHECK=false
 NO_BACKUP=false
 WIPE_BACKUPS=false
-SGLANG_MODEL="${SGLANG_MODEL:-35b-a3b}"
+SGLANG_MODEL="${SGLANG_MODEL:-ornith-35b}"
 
 PROBED_MODEL_NAME=""
 PROBED_MODEL_PATH=""
@@ -106,7 +106,7 @@ Actions:
   --uninstall                          Safely roll back installed files using install manifest
 
 Parity & Modules:
-  --sglang-model <35b-a3b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: 35b-a3b)
+  --sglang-model <ornith-35b|35b-a3b|qwen3.8-27b|qwen3.5-27b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: ornith-35b)
   --with-obsidian / --no-obsidian      Toggle Obsidian detection & pacman install (default: with)
   --with-vault / --no-vault            Toggle ~/Vaults/home starter scaffolding (default: with)
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096 & 30000 (default: with)
@@ -990,11 +990,16 @@ EOF
         chmod 0600 "$env_file"
     fi
 
-    local primary_model="local-sglang/qwen3.5-35b-a3b"
+    local primary_model="ornith-local/ornith-1.5-35b"
     local active_service="opencode-sglang-ornith-35b.service"
     local qwen27b_quant="fp4"
     local qwen27b_path="Qwen/Qwen3.5-27B-FP4"
-    if [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+        primary_model="local-sglang/qwen3.8-27b"
+        active_service="opencode-sglang-qwen27b.service"
+        qwen27b_quant="fp4"
+        qwen27b_path="Qwen/Qwen3.5-27B-FP4"
+    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         primary_model="local-sglang/qwen3.5-27b"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="fp4"
@@ -1006,6 +1011,9 @@ EOF
         qwen27b_path="Qwen/Qwen3.5-27B-Instruct-GGUF/qwen3.5-27b-instruct-q6_k.gguf"
     elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
         primary_model="local-sglang/qwen3.5-35b-a3b"
+        active_service="opencode-sglang-qwen35b.service"
+    elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
+        primary_model="ornith-local/ornith-1.5-35b"
         active_service="opencode-sglang-ornith-35b.service"
     fi
 
@@ -1573,7 +1581,7 @@ verify_backend_healthchecks() {
     local failure_reasons=()
 
     # 1. Start / enable units if systemctl is available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
         systemctl --user start opencode-colbert-reindex.timer opencode-server.service "${svc_name}" 2>/dev/null || true
@@ -1896,7 +1904,13 @@ deploy_opencode_backend_and_units() {
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
 
-    if [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+        probed_model="qwen3.8-27b"
+        probed_model_path="Qwen/Qwen3.5-27B-FP4"
+        probed_service="opencode-sglang-qwen27b.service"
+        max_context="65536"
+        mem_fraction="0.88"
+    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         probed_model="qwen3.5-27b"
         probed_model_path="Qwen/Qwen3.5-27B-FP4"
         probed_service="opencode-sglang-qwen27b.service"
@@ -1908,6 +1922,12 @@ deploy_opencode_backend_and_units() {
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
+    elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
+        probed_model="qwen3.5-35b-a3b"
+        probed_service="opencode-sglang-qwen35b.service"
+    elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
+        probed_model="ornith-1.5-35b"
+        probed_service="opencode-sglang-ornith-35b.service"
     fi
 
     PROBED_MODEL_NAME="$probed_model"
@@ -2015,7 +2035,7 @@ with open(path, 'w') as f:
     fi
 
     # 5. Reload systemd daemon if available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
     fi
     echo "  ✅ Deployed systemd user units to ${systemd_dest}/"
@@ -2075,8 +2095,14 @@ install_opencode_global() {
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+        model_profile_arg=(--model-profile "qwen3.8-27b")
+    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         model_profile_arg=(--model-profile "qwen3.5-27b")
+    elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
+        model_profile_arg=(--model-profile "qwen3.5-35b-a3b")
+    elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
+        model_profile_arg=(--model-profile "ornith-1.5-35b")
     fi
 
     python3 -m harness.installer.compiler \
@@ -2348,8 +2374,14 @@ install_opencode_local() {
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ]; then
+        model_profile_arg=(--model-profile "qwen3.8-27b")
+    elif [ "$SGLANG_MODEL" = "qwen3.5-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         model_profile_arg=(--model-profile "qwen3.5-27b")
+    elif [ "$SGLANG_MODEL" = "35b-a3b" ]; then
+        model_profile_arg=(--model-profile "qwen3.5-35b-a3b")
+    elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
+        model_profile_arg=(--model-profile "ornith-1.5-35b")
     fi
 
     python3 -m harness.installer.compiler \
@@ -2647,14 +2679,14 @@ run_uninstall() {
                 for u in "${systemd_user_dir}"/opencode-*.service "${systemd_user_dir}"/opencode-*.timer "${systemd_user_dir}"/opencode-*.slice; do
                     if [ -f "$u" ]; then
                         local unit_name="$(basename "$u")"
-                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                        if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                             systemctl --user stop "$unit_name" 2>/dev/null || true
                             systemctl --user disable "$unit_name" 2>/dev/null || true
                         fi
                         rm -f "$u"
                     fi
                 done
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user daemon-reload 2>/dev/null || true
                 fi
             fi

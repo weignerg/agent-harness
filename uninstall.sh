@@ -213,7 +213,7 @@ if [ "$MODE" = "global" ]; then
 
     # Clean harness systemd user units
     if [ -d "${SYSTEMD_USER_DIR}" ]; then
-        local SYSTEMD_UNITS=(
+        SYSTEMD_UNITS=(
             "opencode-server.service"
             "opencode-agent.slice"
             "opencode-colbert-reindex.service"
@@ -226,7 +226,7 @@ if [ "$MODE" = "global" ]; then
             u="${SYSTEMD_USER_DIR}/${unit_file}"
             if [ -f "$u" ] || [ -L "$u" ]; then
                 unit_name="$(basename "$u")"
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user stop "$unit_name" 2>/dev/null || true
                     systemctl --user disable "$unit_name" 2>/dev/null || true
                 fi
@@ -236,7 +236,7 @@ if [ "$MODE" = "global" ]; then
         for u in "${SYSTEMD_USER_DIR}"/opencode-*.service "${SYSTEMD_USER_DIR}"/opencode-*.timer "${SYSTEMD_USER_DIR}"/opencode-*.slice; do
             if [ -f "$u" ] || [ -L "$u" ]; then
                 unit_name="$(basename "$u")"
-                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ]; then
+                if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
                     systemctl --user stop "$unit_name" 2>/dev/null || true
                     systemctl --user disable "$unit_name" 2>/dev/null || true
                 fi

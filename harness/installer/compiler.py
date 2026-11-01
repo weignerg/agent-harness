@@ -34,7 +34,7 @@ def compile_opencode_frontmatter(
     if tier in ("heavy", "workhorse") and primary_model:
         model = primary_model
     else:
-        model = tier_models.get(tier, {}).get("opencode", "local-sglang/qwen3.5-35b-a3b")
+        model = tier_models.get(tier, {}).get("opencode", "ornith-local/ornith-1.5-35b")
     mode = meta.get("mode", "subagent")
     desc = meta.get("description", "").replace('"', '\\"')
     tools = meta.get("tools", {})
@@ -133,13 +133,21 @@ def compile_agents(
     if not effective_model and effective_profile:
         if effective_profile in profiles:
             effective_model = profiles[effective_profile].get("workhorse")
+        elif effective_profile in ("qwen3.8-27b", "27b-nvfp4", "27b-q6"):
+            effective_model = "local-sglang/qwen3.8-27b"
         elif effective_profile == "qwen3.5-27b":
             effective_model = "local-sglang/qwen3.5-27b"
-        elif effective_profile == "qwen3.5-35b-a3b":
+        elif effective_profile in ("qwen3.5-35b-a3b", "35b-a3b"):
             effective_model = "local-sglang/qwen3.5-35b-a3b"
+        elif effective_profile in ("ornith-1.5-35b", "ornith-35b"):
+            effective_model = "ornith-local/ornith-1.5-35b"
 
     if not effective_model:
-        effective_model = tier_models.get("workhorse", {}).get("opencode", "local-sglang/qwen3.5-35b-a3b")
+        default_prof_name = manifest.get("default_model_profile", "ornith-1.5-35b")
+        if default_prof_name in profiles:
+            effective_model = profiles[default_prof_name].get("workhorse")
+        if not effective_model:
+            effective_model = tier_models.get("workhorse", {}).get("opencode", "ornith-local/ornith-1.5-35b")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     generated: List[Path] = []
