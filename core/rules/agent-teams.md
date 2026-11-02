@@ -33,16 +33,16 @@ trigger: always_on
 
 Across all supported runtimes, roles align strictly to model reasoning tiers with zero hallucinated models:
 
-| Role | Claude Code | OpenCode (Local / Cloud Fallback) | Antigravity (AGY) |
-| :--- | :--- | :--- | :--- |
-| **`supreme-orchestrator`** | `opus` (orchestrator session) | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-high` (`pro`) |
-| **`team-orchestrator`** | `opus` / `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-high` (`pro`) |
-| **`architect`** | `opus` (read-only) | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-high` (`pro`) |
-| **`worker`** | `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-medium` (`flash`) |
-| **`reviewer`** | `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-medium` (`flash`) |
-| **`tester`** | `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-medium` (`flash`) |
-| **`scout`** | `haiku` | `ornith-1.5-9b` / `claude-3-5-haiku` | `gemini-3.8-flash-low` (`flash_lite`) |
-| **`grunt`** | `haiku` | `ornith-1.5-9b` / `claude-3-5-haiku` | `gemini-3.8-flash-low` (`flash_lite`) |
+| Role | Claude Code | OpenCode (Local / Cloud Fallback) | Antigravity (AGY) | T3 Code (Unified / Provider) |
+| :--- | :--- | :--- | :--- | :--- |
+| **`supreme-orchestrator`** | `opus` (orchestrator session) | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-high` (`pro`) | `local-sglang/ornith-1.5-35b` / `gemini-3.8-flash-high` |
+| **`team-orchestrator`** | `opus` / `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-high` (`pro`) | `local-sglang/ornith-1.5-35b` / `gemini-3.8-flash-high` |
+| **`architect`** | `opus` (read-only) | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-high` (`pro`) | `local-sglang/ornith-1.5-35b` / `gemini-3.8-flash-high` |
+| **`worker`** | `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-medium` (`flash`) | `local-sglang/ornith-1.5-35b` / `gemini-3.8-flash-medium` |
+| **`reviewer`** | `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-medium` (`flash`) | `local-sglang/ornith-1.5-35b` / `gemini-3.8-flash-medium` |
+| **`tester`** | `sonnet` | `ornith-1.5-35b` / `claude-3-7-sonnet` | `gemini-3.8-flash-medium` (`flash`) | `local-sglang/ornith-1.5-35b` / `gemini-3.8-flash-medium` |
+| **`scout`** | `haiku` | `ornith-1.5-9b` / `claude-3-5-haiku` | `gemini-3.8-flash-low` (`flash_lite`) | `local-sglang/ornith-1.5-9b` / `gemini-3.8-flash-low` |
+| **`grunt`** | `haiku` | `ornith-1.5-9b` / `claude-3-5-haiku` | `gemini-3.8-flash-low` (`flash_lite`) | `local-sglang/ornith-1.5-9b` / `gemini-3.8-flash-low` |
 
 ---
 

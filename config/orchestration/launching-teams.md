@@ -102,6 +102,27 @@ In Google Antigravity (`agy`), multi-tier orchestration operates natively via in
    - **Remote-Control Daemon**: `agy remote-control start|status|stop` manages the background remote-control daemon for detached workloads, out-of-session telemetry, and external task control.
    - **CLI Launch**: Standalone role sessions can also be launched directly via `agy --agent <agent> --effort <low|medium|high>`.
 
+### 4.3 T3 Code Launch & Thread Orchestration
+
+When running inside T3 Code (detected via `t3-code` tools or `T3_SERVE_PORT`), `supreme-orchestrator` dispatches `team-orchestrator` instances as dedicated project threads:
+
+1. **Pre-flight Check**: Call `orchestrator_capabilities` once per thread before dispatching.
+2. **Worktree Delegation**: Use `delegate_task` with `isolation: "worktree"` to ensure the team orchestrator works within an isolated git worktree branch in the same project:
+   ```json
+   {
+     "isolation": "worktree",
+     "task": "Role: Team Orchestrator. Read kickoff at .orchestration/kickoffs/<Branch_Name>.md and implement Issue #<n> in isolated worktree...",
+     "target": {
+       "model": "local-sglang/ornith-1.5-35b"
+     }
+   }
+   ```
+3. **Independent Thread Launch**: When creating new top-level threads for distinct issues, call `create_threads` or `t3_thread_launch` setting `title: "Issue #<n>: <description> (Team Orchestrator)"` under the project environment.
+4. **Thread Coordination**:
+   - Check status using `t3_thread_read` or follow the running delegate's `next`.
+   - Never poll in a tight loop.
+   - Enforce Orchestrator Non-Termination: never call `t3_thread_interrupt` on a child thread or `task_cancel` on an active orchestrator unless directed by the user.
+
 ## 5. Start table for the user
 
 When the user starts the teams, give one block per team in exactly this format, and keep it in `kickoffs/README.md`:
@@ -111,6 +132,7 @@ When the user starts the teams, give one block per team in exactly this format, 
 #: <n> - Team: <short name> - Work: <one line>
 Start command: `cd <repo> && opencode run --name '<Branch_Name>' 'Role: Team Orchestrator. Read ~/.config/opencode/orchestration/kickoffs/<file>.md and follow it as your kickoff.'`
 Claude background command: `claude --bg -n "<Branch_Name>" --agent team-orchestrator --add-dir "<worktree_path>" -p "Role: Team Orchestrator. Read ~/.claude/orchestration/kickoffs/<file>.md and follow it as your kickoff."`
+T3 Code delegate: `delegate_task(isolation="worktree", task="Role: Team Orchestrator. Read .orchestration/kickoffs/<file>.md and follow it as your kickoff.", target={"model": "local-sglang/ornith-1.5-35b"})`
 ────────────────────────────────────────
 ```
 
