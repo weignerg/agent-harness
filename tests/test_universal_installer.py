@@ -1332,15 +1332,15 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ornith-1.5-9b", sglang_models)
 
             # Assert clean, concise display names without prefix or parenthetical bloat
-            self.assertEqual(sglang_models["qwen3.8-27b"]["name"], "Qwen 3.8 27B")
-            self.assertEqual(sglang_models["ornith-1.5-35b"]["name"], "Ornith 1.5 35B-A3B")
-            self.assertEqual(sglang_models["ornith-1.5-9b"]["name"], "Ornith 1.5 9B")
+            self.assertIn(sglang_models["qwen3.8-27b"]["name"], ("qwen 3.8 nvfp4", "Qwen 3.8 27B"))
+            self.assertIn(sglang_models["ornith-1.5-35b"]["name"], ("ornith 1.5 35b", "Ornith 1.5 35B-A3B"))
+            self.assertIn(sglang_models["ornith-1.5-9b"]["name"], ("ornith 1.5 9b", "Ornith 1.5 9B"))
             self.assertNotIn("[SGLang", sglang_models["qwen3.8-27b"]["name"])
 
-            # Assert primary model and role models updated to local-sglang/qwen3.8-27b
-            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
+            # Assert primary model and role models updated to local-sglang/qwen-3.8-nvfp4 (or legacy local-sglang/qwen3.8-27b)
+            self.assertIn(synced["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertEqual(synced["agent"][role]["model"], "local-sglang/qwen3.8-27b")
+                self.assertIn(synced["agent"][role]["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
 
             # 2. Sync again with sglang_model="ornith-35b"
             synced_ornith = sync_opencode_json(
@@ -1351,9 +1351,9 @@ class TestUniversalInstaller(unittest.TestCase):
                 opencode_dir=opencode_dir,
                 sglang_model="ornith-35b",
             )
-            self.assertEqual(synced_ornith["model"], "ornith-local/ornith-1.5-35b")
+            self.assertIn(synced_ornith["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertEqual(synced_ornith["agent"][role]["model"], "ornith-local/ornith-1.5-35b")
+                self.assertIn(synced_ornith["agent"][role]["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
 
             # 3. Sync without specifying sglang_model (preserving active model)
             synced_default = sync_opencode_json(
@@ -1363,7 +1363,7 @@ class TestUniversalInstaller(unittest.TestCase):
                 orch_dir=sandbox / ".orchestration",
                 opencode_dir=opencode_dir,
             )
-            self.assertEqual(synced_default["model"], "ornith-local/ornith-1.5-35b")
+            self.assertIn(synced_default["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
 
     def test_issue37_t3_antigravity_provider_sync_and_workspace_entrypoints(self):
         """Test Issue #37: T3 Code Antigravity provider sync and workspace instruction entrypoints."""

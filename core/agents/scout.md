@@ -1,7 +1,7 @@
 ---
 description: "Read-only 9B search subagent: grep, file discovery, large-scale context consolidation"
 mode: subagent
-model: ornith-local/ornith-1.5-9b
+model: local-sglang/ornith-1.5-9b
 tools:
     write: false
     edit: false

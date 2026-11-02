@@ -1,7 +1,7 @@
 ---
 description: "Subsystem design, codebase surveys, high-context refactor blueprints, and dependency topology; calls scout for searches"
 mode: subagent
-model: ornith-local/ornith-1.5-35b
+model: local-sglang/qwen-3.8-nvfp4
 tools:
     write: false
     edit: false

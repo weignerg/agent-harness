@@ -51,6 +51,23 @@ resolve_canonical_repo_dir() {
 }
 
 USER_HOME="${USER_HOME:-${HOME}}"
+if [ -n "$USER_HOME" ]; then
+    if [ -n "${GEMINI_CONFIG_DIR:-}" ] && [[ "$GEMINI_CONFIG_DIR" != "$USER_HOME"* ]]; then
+        GEMINI_CONFIG_DIR="${USER_HOME}/.gemini/config"
+    fi
+    if [ -n "${SYSTEMD_USER_DIR:-}" ] && [[ "$SYSTEMD_USER_DIR" != "$USER_HOME"* ]]; then
+        SYSTEMD_USER_DIR="${USER_HOME}/.config/systemd/user"
+    fi
+    if [ -n "${CLAUDE_HOME_DIR:-}" ] && [[ "$CLAUDE_HOME_DIR" != "$USER_HOME"* ]]; then
+        CLAUDE_HOME_DIR="${USER_HOME}/.claude"
+    fi
+    if [ -n "${OPENCODE_HOME_DIR:-}" ] && [[ "$OPENCODE_HOME_DIR" != "$USER_HOME"* ]]; then
+        OPENCODE_HOME_DIR="${USER_HOME}/.config/opencode"
+    fi
+    if [ -n "${AGENTS_HOME_DIR:-}" ] && [[ "$AGENTS_HOME_DIR" != "$USER_HOME"* ]]; then
+        AGENTS_HOME_DIR="${USER_HOME}/.agents"
+    fi
+fi
 GEMINI_CONFIG_DIR="${GEMINI_CONFIG_DIR:-${USER_HOME}/.gemini/config}"
 AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
 CLAUDE_HOME_DIR="${CLAUDE_HOME_DIR:-${USER_HOME}/.claude}"
@@ -1160,22 +1177,25 @@ EOF
     local active_service="opencode-sglang-ornith-35b.service"
     local qwen27b_quant="modelopt"
     local qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        primary_model="local-sglang/qwen3.8-27b"
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        primary_model="local-sglang/qwen-3.8-nvfp4"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="modelopt"
         qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
-    elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        primary_model="local-sglang/qwen3.8-27b"
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        primary_model="local-sglang/qwen-3.8-q6"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="gguf"
         qwen27b_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        primary_model="local-sglang/ornith-1.5-9b"
+        active_service="opencode-sglang-ornith-35b.service"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
-        primary_model="ornith-local/ornith-1.5-35b"
+        primary_model="local-sglang/ornith-1.5-35b"
         active_service="opencode-sglang-ornith-35b.service"
     fi
 
-    local qwen27b_kv_dtype="nvfp4"
+    local qwen27b_kv_dtype="fp8_e4m3"
     if [ "$qwen27b_quant" = "gguf" ]; then
         qwen27b_kv_dtype="auto"
     fi
@@ -1189,12 +1209,13 @@ EOF
         "SGLANG_27B_KV_CACHE_DTYPE=${qwen27b_kv_dtype}"
         "SGLANG_27B_MEM_FRACTION=0.88"
         "SGLANG_27B_CONTEXT_LENGTH=65536"
-        "SGLANG_27B_CHUNKED_PREFILL=8192"
+        "SGLANG_27B_CHUNKED_PREFILL=2048"
         "SGLANG_27B_ATTENTION_BACKEND=flashinfer"
         "SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
         "SGLANG_27B_TORCH_COMPILE="
         "SGLANG_27B_SPECULATIVE_ALGO="
         "SGLANG_27B_SPECULATIVE_ARGS="
+        "SGLANG_27B_MAMBA_ARGS=--mamba-full-memory-ratio 4.59 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
     )
 
     for kv in "${sglang_vars[@]}"; do
@@ -2220,18 +2241,21 @@ deploy_opencode_backend_and_units() {
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
 
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        probed_model="qwen3.8-27b"
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        probed_model="qwen-3.8-nvfp4"
         probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
-    elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        probed_model="qwen3.8-27b"
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        probed_model="qwen-3.8-q6"
         probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        probed_model="ornith-1.5-9b"
+        probed_service="opencode-sglang-ornith-35b.service"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         probed_model="ornith-1.5-35b"
         probed_service="opencode-sglang-ornith-35b.service"
@@ -2525,8 +2549,12 @@ install_opencode_global() {
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen3.8-27b")
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-q6")
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        model_profile_arg=(--model-profile "ornith-1.5-9b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         model_profile_arg=(--model-profile "ornith-1.5-35b")
     fi
@@ -2807,8 +2835,12 @@ install_opencode_local() {
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen3.8-27b")
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-q6")
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        model_profile_arg=(--model-profile "ornith-1.5-9b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         model_profile_arg=(--model-profile "ornith-1.5-35b")
     fi

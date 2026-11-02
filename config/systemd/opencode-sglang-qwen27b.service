@@ -9,11 +9,11 @@ Environment="SGLANG_SERVICE=opencode-sglang-qwen27b.service"
 Environment="SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
 Environment="SGLANG_27B_SERVED_MODEL_NAME=qwen3.8-27b"
 Environment="SGLANG_27B_QUANTIZATION=modelopt"
-Environment="SGLANG_27B_KV_CACHE_DTYPE=nvfp4"
+Environment="SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3"
 # Alternative KV cache dtypes: fp8_e4m3 or auto
 Environment="SGLANG_27B_MEM_FRACTION=0.88"
 Environment="SGLANG_27B_CONTEXT_LENGTH=65536"
-Environment="SGLANG_27B_CHUNKED_PREFILL=8192"
+Environment="SGLANG_27B_CHUNKED_PREFILL=2048"
 Environment="SGLANG_27B_ATTENTION_BACKEND=flashinfer"
 Environment="SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
 Environment="SGLANG_27B_TORCH_COMPILE="
@@ -24,11 +24,12 @@ Environment="SGLANG_27B_SPECULATIVE_ALGO="
 # To enable speculative decoding with an external draft model or EAGLE3 when supported:
 # Environment="SGLANG_27B_SPECULATIVE_ARGS=--speculative-algorithm EAGLE3 --speculative-draft-model-path ${SGLANG_27B_DRAFT_MODEL_PATH} --speculative-num-steps 3 --speculative-eagle-topk 4"
 Environment="SGLANG_27B_SPECULATIVE_ARGS="
+Environment="SGLANG_27B_MAMBA_ARGS=--mamba-full-memory-ratio 4.59 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
 Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
-# Note: Unbraced $VAR syntax is required for optional flags ($SGLANG_27B_TORCH_COMPILE and $SGLANG_27B_SPECULATIVE_ARGS)
+# Note: Unbraced $VAR syntax is required for optional flags ($SGLANG_27B_TORCH_COMPILE, $SGLANG_27B_SPECULATIVE_ARGS, $SGLANG_27B_MAMBA_ARGS)
 # because systemd unbraced $VAR emits 0 arguments when empty and splits on whitespace when set,
 # whereas braced ${VAR} emits an empty argument "" when empty which causes argparse errors.
 ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
@@ -44,6 +45,7 @@ ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --cuda-graph-max-bs-decode ${SGLANG_27B_CUDA_GRAPH_MAX_BS} \
   $SGLANG_27B_TORCH_COMPILE \
   $SGLANG_27B_SPECULATIVE_ARGS \
+  $SGLANG_27B_MAMBA_ARGS \
   --reasoning-parser qwen3 \
   --tool-call-parser qwen3_coder \
   --max-running-requests 1 \

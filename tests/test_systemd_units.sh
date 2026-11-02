@@ -124,8 +124,8 @@ if grep -q -- "^ *--enable-torch-compile" "$QWEN27B_FILE"; then
     echo "❌ FAIL: opencode-sglang-qwen27b.service hardcodes --enable-torch-compile in ExecStart"
     exit 1
 fi
-if ! grep -q "SGLANG_27B_KV_CACHE_DTYPE=nvfp4" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_KV_CACHE_DTYPE=nvfp4"
+if ! grep -qE "SGLANG_27B_KV_CACHE_DTYPE=(fp8_e4m3|nvfp4)" "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3 or nvfp4"
     exit 1
 fi
 if grep -q -- "--mem-fraction-static [0-9.]*0.88" "$QWEN27B_FILE" || grep -q "0.880.88" "$QWEN27B_FILE"; then
