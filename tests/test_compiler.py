@@ -910,6 +910,25 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("## Zero-Warmup Orchestration & Reactive Turn Discipline", gemini_text)
         self.assertIn("Immediate Turn Termination on Async Dispatch", gemini_text)
 
+    def test_regression_issue41_t3_code_thread_dispatch(self) -> None:
+        """Verify Issue #41: T3 Code thread dispatch mechanics in supreme-orchestrator and rules."""
+        supreme_agent = (CORE_DIR / "agents" / "supreme-orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("T3 Code Dispatch Workflow", supreme_agent)
+        self.assertIn("delegate_task", supreme_agent)
+        self.assertIn('isolation: "worktree"', supreme_agent)
+        self.assertIn("create_threads", supreme_agent)
+        self.assertIn("orchestrator_capabilities", supreme_agent)
+
+        agent_teams = (CORE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
+        self.assertIn("T3 Code (Unified / Provider)", agent_teams)
+
+        launching_teams = (CONFIG_DIR / "orchestration" / "launching-teams.md").read_text(encoding="utf-8")
+        self.assertIn("4.3 T3 Code Launch & Thread Orchestration", launching_teams)
+        self.assertIn("delegate_task(isolation=\"worktree\"", launching_teams)
+
+        config_supreme = (CONFIG_DIR / "orchestration" / "supreme-orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("delegate_task(isolation=\"worktree\"", config_supreme)
+
 
 if __name__ == "__main__":
     unittest.main()
