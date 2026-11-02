@@ -1,7 +1,7 @@
 ---
 description: "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges"
 mode: subagent
-model: ornith-local/ornith-1.5-35b
+model: local-sglang/qwen-3.8-nvfp4
 tools:
     write: false
     edit: false

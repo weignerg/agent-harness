@@ -1,7 +1,7 @@
 ---
 description: "9B leaf subagent: atomic simple edits, localized checks, small searches"
 mode: subagent
-model: ornith-local/ornith-1.5-9b
+model: local-sglang/ornith-1.5-9b
 tools:
     write: true
     edit: true

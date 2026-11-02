@@ -29,7 +29,22 @@
     "qwen3.8-27b": {
       "heavy": "local-sglang/qwen3.8-27b",
       "workhorse": "local-sglang/qwen3.8-27b",
-      "fast": "ornith-local/ornith-1.5-9b"
+      "fast": "local-sglang/ornith-1.5-9b"
+    },
+    "qwen-3.8-nvfp4": {
+      "heavy": "local-sglang/qwen-3.8-nvfp4",
+      "workhorse": "local-sglang/qwen-3.8-nvfp4",
+      "fast": "local-sglang/ornith-1.5-9b"
+    },
+    "qwen-3.8-q6": {
+      "heavy": "local-sglang/qwen-3.8-q6",
+      "workhorse": "local-sglang/qwen-3.8-q6",
+      "fast": "local-sglang/ornith-1.5-9b"
+    },
+    "ornith-1.5-9b": {
+      "heavy": "local-sglang/ornith-1.5-9b",
+      "workhorse": "local-sglang/ornith-1.5-9b",
+      "fast": "local-sglang/ornith-1.5-9b"
     }
   },
   "default_model_profile": "ornith-1.5-35b",

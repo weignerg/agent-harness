@@ -27,6 +27,6 @@ if grep -qiE 'speculative|eagle|dflash|d-flash|draft|cpu-offload' "$U"; then fai
 grep -q 'ornith-local' "$R/config/opencode/opencode.json" && grep -q '"baseURL": "http://127.0.0.1:30000/v1"' "$R/config/opencode/opencode.json" && grep -q '"apiKey": "EMPTY"' "$R/config/opencode/opencode.json" && pass "opencode.json provider direct to :30000" || fail "opencode provider"
 [ -s "$R/docs/inference_architecture.md" ] && grep -q 'eagle-3' "$R/docs/inference_architecture.md" && grep -q 'continuous batching' "$R/docs/inference_architecture.md" && pass "docs/inference_architecture.md present" || fail "architecture doc"
 if curl -sf --max-time 2 http://127.0.0.1:30000/v1/models -o /tmp/_models.json 2>/dev/null; then
-    grep -q '"max_model_len": *262144\|262144' /tmp/_models.json && pass "live /v1/models reports 262144" || fail "live max_model_len"
+    grep -qE '"max_model_len": *(262144|131072|65536)' /tmp/_models.json && pass "live /v1/models reports valid context" || fail "live max_model_len"
 else echo "  ℹ️  SGLang not running; live /v1/models check skipped"; fi
 echo "RESULTS: $P passed, $F failed"; [ $F -eq 0 ]

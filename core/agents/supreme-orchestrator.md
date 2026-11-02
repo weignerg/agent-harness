@@ -1,7 +1,7 @@
 ---
 description: "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges"
 mode: primary
-model: ornith-local/ornith-1.5-35b
+model: local-sglang/qwen-3.8-nvfp4
 tools:
     write: false
     edit: false
