@@ -20,6 +20,11 @@ Configures SGLang for Qwen 3.8 27B Dense (`qwen3.8-27b`, HuggingFace model path 
 # Or specify an explicit quantization profile:
 ./install.sh --sglang-model 27b-nvfp4
 ./install.sh --sglang-model 27b-q6
+
+# The clean `qwen3.8` alias resolves to the same Qwen3.8-27B-NVFP4 model. local-sglang/qwen-3.8-nvfp4
+# (Qwen3.8-27B-NVFP4) is also the designated fallback target for any unmatched --sglang-model
+# selection, and leaf roles (scout/grunt) stay on `ornith-1.5-9b` regardless:
+./install.sh --sglang-model qwen3.8
 ```
 
 ### T3 Code (`t3 serve`) Unified Web UI Server
@@ -79,10 +84,11 @@ OpenCode runs locally with terminal TUI and connects directly to local SGLang on
   ```bash
   opencode
   ```
-- **Primary Agent**: Starts automatically in `supreme-orchestrator` (`ornith-local/ornith-1.5-35b` by default, or `local-sglang/qwen3.8-27b` if selected).
+- **Primary Agent**: Starts automatically in `supreme-orchestrator`, running the designated fallback target `local-sglang/qwen-3.8-nvfp4` (`Qwen3.8-27B-NVFP4`) by default. `--sglang-model qwen3.8` (a clean alias of `qwen3.8-27b` / `27b-nvfp4`) routes `supreme-orchestrator` and the other heavy/workhorse roles to this model; select `--sglang-model ornith-35b` to route it to `ornith-local/ornith-1.5-35b` instead.
 - **In-Session Model Selection**:
   ```bash
   # Override model via CLI launcher:
+  opencode --model local-sglang/qwen-3.8-nvfp4   # designated fallback target (Qwen3.8-27B-NVFP4)
   opencode --model local-sglang/qwen3.8-27b
   opencode --model ornith-local/ornith-1.5-35b
   ```
@@ -211,6 +217,11 @@ systemctl --user enable --now opencode-sglang-qwen27b.service
 ./install.sh --sglang-model qwen3.8-27b --no-backends --no-firewall --no-obsidian --skip-warmup --no-healthcheck -y
 ```
 
+The clean `qwen3.8` alias is equivalent to `qwen3.8-27b`/`27b-nvfp4` and resolves to the same
+`local-sglang/qwen-3.8-nvfp4` (`Qwen3.8-27B-NVFP4`) fallback target. Heavy/workhorse roles
+(`supreme-orchestrator`, `team-orchestrator`, `architect`, `worker`, `tester`, `reviewer`) switch to it,
+while leaf roles (`scout`, `grunt`, `summary`, `compaction`) remain on `ornith-1.5-9b`.
+
 ### Switch Back to Ornith 1.5 35B-A3B MoE (Workhorse Model)
 ```bash
 # 1. Stop Qwen 27B and activate Ornith 35B service:
@@ -236,11 +247,11 @@ systemctl --user enable --now opencode-sglang-ornith-35b.service
 
 | Role | Mode | Logical Tier | OpenCode Model | Claude Code Model | Antigravity Model & Tier | Allowed Subagents Fan-Out | Edit / Write Gates | Bash Deny / Ask Safety Invariants |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `supreme-orchestrator` | `primary` | `heavy` | `ornith-1.5-35b` / `qwen3.8-27b` | `opus` | `gemini-3.8-flash-high` (`pro`) | `team-orchestrator` only | ❌ Deny | **Deny**: `git commit*`, `git merge*`, `kill*`, `pkill*`, `systemctl stop*`<br>**Ask**: `git push*`, `gh pr *`, `gh issue *`, `gh workflow run*` |
-| `team-orchestrator` | `subagent` | `heavy` | `ornith-1.5-35b` / `qwen3.8-27b` | `opus` / `sonnet` | `gemini-3.8-flash-high` (`pro`) | `architect`, `worker`, `tester`, `reviewer`, `scout`, `grunt` | ❌ Deny | **Deny**: `git commit*`, `git merge*`, `kill*`, `pkill*`, `systemctl stop*`<br>**Ask**: Outward-facing writes |
-| `architect` | `subagent` | `heavy` | `ornith-1.5-35b` / `qwen3.8-27b` | `opus` (read-only) | `gemini-3.8-flash-high` (`pro`) | `scout` only | ❌ Deny | **Deny**: `git commit*`, `git merge*`, mutating shell ops |
-| `worker` | `subagent` | `workhorse` | `ornith-1.5-35b` / `qwen3.8-27b` | `sonnet` | `gemini-3.8-flash-medium` (`flash`) | `grunt`, `scout` only | ✅ Allow (worktree only) | **Deny**: Killing orchestrators / SGLang<br>**Ask**: Outward-facing writes |
-| `tester` | `subagent` | `workhorse` | `ornith-1.5-35b` / `qwen3.8-27b` | `sonnet` | `gemini-3.8-flash-medium` (`flash`) | `grunt`, `scout` only | ✅ Allow (test repairs) | **Deny**: Killing orchestrators / SGLang |
-| `reviewer` | `subagent` | `workhorse` | `ornith-1.5-35b` / `qwen3.8-27b` | `sonnet` | `gemini-3.8-flash-medium` (`flash`) | `scout` only | ❌ Deny | **Deny**: `git commit*`, `git merge*`, mutating shell ops |
+| `supreme-orchestrator` | `primary` | `heavy` | `ornith-1.5-35b` / `qwen3.8` / `qwen3.8-27b` | `opus` | `gemini-3.8-flash-high` (`pro`) | `team-orchestrator` only | ❌ Deny | **Deny**: `git commit*`, `git merge*`, `kill*`, `pkill*`, `systemctl stop*`<br>**Ask**: `git push*`, `gh pr *`, `gh issue *`, `gh workflow run*` |
+| `team-orchestrator` | `subagent` | `heavy` | `ornith-1.5-35b` / `qwen3.8` / `qwen3.8-27b` | `opus` / `sonnet` | `gemini-3.8-flash-high` (`pro`) | `architect`, `worker`, `tester`, `reviewer`, `scout`, `grunt` | ❌ Deny | **Deny**: `git commit*`, `git merge*`, `kill*`, `pkill*`, `systemctl stop*`<br>**Ask**: Outward-facing writes |
+| `architect` | `subagent` | `heavy` | `ornith-1.5-35b` / `qwen3.8` / `qwen3.8-27b` | `opus` (read-only) | `gemini-3.8-flash-high` (`pro`) | `scout` only | ❌ Deny | **Deny**: `git commit*`, `git merge*`, mutating shell ops |
+| `worker` | `subagent` | `workhorse` | `ornith-1.5-35b` / `qwen3.8` / `qwen3.8-27b` | `sonnet` | `gemini-3.8-flash-medium` (`flash`) | `grunt`, `scout` only | ✅ Allow (worktree only) | **Deny**: Killing orchestrators / SGLang<br>**Ask**: Outward-facing writes |
+| `tester` | `subagent` | `workhorse` | `ornith-1.5-35b` / `qwen3.8` / `qwen3.8-27b` | `sonnet` | `gemini-3.8-flash-medium` (`flash`) | `grunt`, `scout` only | ✅ Allow (test repairs) | **Deny**: Killing orchestrators / SGLang |
+| `reviewer` | `subagent` | `workhorse` | `ornith-1.5-35b` / `qwen3.8` / `qwen3.8-27b` | `sonnet` | `gemini-3.8-flash-medium` (`flash`) | `scout` only | ❌ Deny | **Deny**: `git commit*`, `git merge*`, mutating shell ops |
 | `scout` | `subagent` (leaf) | `fast` | `ornith-1.5-9b` | `haiku` | `gemini-3.8-flash-low` (`flash_lite`) | *None (Silent Leaf)* | ❌ Deny | **Deny**: `git commit*`, mutating shell ops |
 | `grunt` | `subagent` (leaf) | `fast` | `ornith-1.5-9b` | `haiku` | `gemini-3.8-flash-low` (`flash_lite`) | *None (Silent Leaf)* | ✅ Allow (atomic edits) | **Deny**: Killing orchestrators / SGLang |
