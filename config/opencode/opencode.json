@@ -122,7 +122,35 @@
           }
         },
         "qwen3.8-27b": {
-          "name": "qwen 3.8 nvfp4",
+          "name": "Qwen3.8-27B-NVFP4",
+          "context": 131072,
+          "output": 32768,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high",
+              "thinkingBudget": 16384
+            },
+            "medium": {
+              "reasoningEffort": "medium",
+              "thinkingBudget": 8192
+            },
+            "low": {
+              "reasoningEffort": "low",
+              "thinkingBudget": 4096
+            }
+          }
+        },
+        "qwen3.8": {
+          "name": "Qwen3.8-27B-NVFP4",
           "context": 131072,
           "output": 32768,
           "modalities": {

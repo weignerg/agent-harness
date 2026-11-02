@@ -1191,7 +1191,7 @@ assert 'local-sglang' in d['provider']
 assert 'ornith-local' in d['provider']
 sglang_models = d['provider']['local-sglang'].get('models', {})
 assert 'qwen3.8-27b' in sglang_models
-assert sglang_models['qwen3.8-27b'].get('name') == 'Qwen 3.8 27B'
+assert sglang_models['qwen3.8-27b'].get('name') == 'Qwen3.8-27B-NVFP4'
 assert sglang_models['ornith-1.5-35b'].get('name') == 'Ornith 1.5 35B-A3B'
 assert sglang_models['ornith-1.5-9b'].get('name') == 'Ornith 1.5 9B'
 assert '[SGLang' not in sglang_models['qwen3.8-27b'].get('name', '')

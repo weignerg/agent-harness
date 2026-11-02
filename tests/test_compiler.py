@@ -667,13 +667,16 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         sglang_prov = providers["local-sglang"]
         sglang_models = sglang_prov.get("models", {})
         self.assertIn("qwen3.8-27b", sglang_models)
+        self.assertIn("qwen3.8", sglang_models)
         self.assertIn("qwen-3.8-nvfp4", sglang_models)
         self.assertIn("qwen-3.8-q6", sglang_models)
         self.assertIn("ornith-1.5-35b", sglang_models)
         self.assertIn("ornith-1.5-9b", sglang_models)
 
         qwen38_27b = sglang_models["qwen3.8-27b"]
-        self.assertTrue("qwen 3.8" in qwen38_27b.get("name", "").lower())
+        # Issue #43: display name normalized to the canonical Qwen3.8-27B-NVFP4 (distinct from the
+        # qwen-3.8-nvfp4 alias, which previously duplicated this display name).
+        self.assertEqual(qwen38_27b.get("name"), "Qwen3.8-27B-NVFP4")
         self.assertGreaterEqual(qwen38_27b.get("context", 0), 131072)
         self.assertGreaterEqual(qwen38_27b.get("output", 0), 32768)
         self.assertEqual(qwen38_27b.get("modalities"), {"input": ["text", "image"], "output": ["text"]})

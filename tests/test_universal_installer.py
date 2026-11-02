@@ -1332,7 +1332,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ornith-1.5-9b", sglang_models)
 
             # Assert clean, concise display names without prefix or parenthetical bloat
-            self.assertIn(sglang_models["qwen3.8-27b"]["name"], ("qwen 3.8 nvfp4", "Qwen 3.8 27B"))
+            self.assertIn(sglang_models["qwen3.8-27b"]["name"], ("qwen 3.8 nvfp4", "Qwen 3.8 27B", "Qwen3.8-27B-NVFP4"))
             self.assertIn(sglang_models["ornith-1.5-35b"]["name"], ("ornith 1.5 35b", "Ornith 1.5 35B-A3B"))
             self.assertIn(sglang_models["ornith-1.5-9b"]["name"], ("ornith 1.5 9b", "Ornith 1.5 9B"))
             self.assertNotIn("[SGLang", sglang_models["qwen3.8-27b"]["name"])
@@ -1364,6 +1364,72 @@ class TestUniversalInstaller(unittest.TestCase):
                 opencode_dir=opencode_dir,
             )
             self.assertIn(synced_default["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+
+    def _sync_once(self, sandbox, sglang_model):
+        """Helper: run sync_opencode_json against a fresh sandbox and return the synced dict."""
+        from harness.installer.config_sync import sync_opencode_json
+        opencode_dir = sandbox / ".config" / "opencode"
+        opencode_dir.mkdir(parents=True, exist_ok=True)
+        opencode_json = opencode_dir / "opencode.json"
+        opencode_json.write_text(
+            json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "provider": {},
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return sync_opencode_json(
+            opencode_json_path=opencode_json,
+            repo_dir=REPO_ROOT,
+            py_bin=sys.executable,
+            orch_dir=sandbox / ".orchestration",
+            opencode_dir=opencode_dir,
+            sglang_model=sglang_model,
+        )
+
+    def test_issue43_qwen38_alias_and_designated_fallback_routing(self):
+        """Test Issue #43: qwen3.8 alias, designated fallback target, and leaves stay ornith-1.5-9b."""
+        from harness.installer.config_sync import sync_opencode_json
+
+        heavy = ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer")
+        leaves = ("scout", "grunt", "summary", "compaction", "title")
+
+        # 1. Clean `qwen3.8` alias routes heavy/workhorse roles to the designated fallback target.
+        with tempfile.TemporaryDirectory() as tmp:
+            q = self._sync_once(Path(tmp) / "q", "qwen3.8")
+            self.assertEqual(q["model"], "local-sglang/qwen-3.8-nvfp4")
+            for role in heavy:
+                self.assertEqual(q["agent"][role]["model"], "local-sglang/qwen-3.8-nvfp4", role)
+            # Leaves and the small_model are NOT re-routed to the 27b-class qwen 3.8.
+            for role in leaves:
+                self.assertEqual(q["agent"][role]["model"], "local-sglang/ornith-1.5-9b", role)
+            self.assertEqual(q["small_model"], "local-sglang/ornith-1.5-9b")
+            # The clean alias model entry is registered in the local-sglang provider.
+            self.assertIn("qwen3.8", q["provider"]["local-sglang"]["models"])
+
+        # 2. qwen3.8-27b resolves to the same designated fallback target (alias convergence).
+        with tempfile.TemporaryDirectory() as tmp:
+            q2 = self._sync_once(Path(tmp) / "q2", "qwen3.8-27b")
+            self.assertEqual(q2["model"], "local-sglang/qwen-3.8-nvfp4")
+            for role in heavy:
+                self.assertEqual(q2["agent"][role]["model"], "local-sglang/qwen-3.8-nvfp4", role)
+            self.assertEqual(q2["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
+
+        # 3. Default route (no --sglang-model) on a fresh config falls back to the fallback target.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self._sync_once(Path(tmp) / "d", None)
+            self.assertEqual(d["model"], "local-sglang/qwen-3.8-nvfp4")
+
+        # 4. Explicit ornith-35b selection still routes heavy/workhorse to ornith (no fallback override).
+        with tempfile.TemporaryDirectory() as tmp:
+            o = self._sync_once(Path(tmp) / "o", "ornith-35b")
+            self.assertEqual(o["model"], "local-sglang/ornith-1.5-35b")
+            for role in heavy:
+                self.assertEqual(o["agent"][role]["model"], "local-sglang/ornith-1.5-35b", role)
+            self.assertEqual(o["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
 
     def test_issue37_t3_antigravity_provider_sync_and_workspace_entrypoints(self):
         """Test Issue #37: T3 Code Antigravity provider sync and workspace instruction entrypoints."""
