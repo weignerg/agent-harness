@@ -1,7 +1,7 @@
 ---
 description: "Implementation, refactoring, test authoring, and commits; calls grunt and scout"
 mode: subagent
-model: ornith-local/ornith-1.5-35b
+model: local-sglang/qwen-3.8-nvfp4
 tools:
     write: true
     edit: true

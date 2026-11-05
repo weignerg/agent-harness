@@ -45,10 +45,10 @@ Each team runs in its own terminal or konsole tab so it has a head: the user can
 Read `~/.config/opencode/orchestration/launching-teams.md` first. It covers planning a set of teams, writing kickoffs, the read-only block, launch commands, the user's start-table format, verification, and pitfalls.
 
 1. **Fill the kickoff** per §2 of the playbook, and write it to `~/.config/opencode/orchestration/kickoffs/`.
-2. **Launch** with a method from §4, or give the user the §5 start table. To adopt an existing live session instead, message it: "Read `<kickoff path>` and adopt it as your role. Reply to the Supreme Orchestrator when you have." If it isn't already named `{Branch_Name}`, ask it to `/rename` itself.
-3. **Confirm** with the §6 checks, then tell the user which terminal or tab belongs to each team.
+2. **Launch** with a method from §4, or give the user the §5 start table. When running under T3 Code, dispatch the team orchestrator in an isolated worktree thread via `delegate_task(isolation="worktree", task="...", target={"model": "local-sglang/ornith-1.5-35b"})` or launch a project thread via `create_threads` / `t3_thread_launch`. To adopt an existing live session instead, message it: "Read `<kickoff path>` and adopt it as your role. Reply to the Supreme Orchestrator when you have." If it isn't already named `{Branch_Name}`, ask it to `/rename` itself.
+3. **Confirm** with the §6 checks, then tell the user which terminal, tab, or thread belongs to each team.
 
-Teams start in the repo root and create their own worktree at `.opencode/worktrees/<branch>`. Leave the main checkout clean.
+Teams start in the repo root and create their own worktree at `.opencode/worktrees/<branch>` (or inherit worktree isolation from T3 Code / `.orchestration/worktrees/<branch>`). Leave the main checkout clean.
 
 ## Status sweep
 

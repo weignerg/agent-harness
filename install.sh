@@ -51,6 +51,23 @@ resolve_canonical_repo_dir() {
 }
 
 USER_HOME="${USER_HOME:-${HOME}}"
+if [ -n "$USER_HOME" ]; then
+    if [ -n "${GEMINI_CONFIG_DIR:-}" ] && [[ "$GEMINI_CONFIG_DIR" != "$USER_HOME"* ]]; then
+        GEMINI_CONFIG_DIR="${USER_HOME}/.gemini/config"
+    fi
+    if [ -n "${SYSTEMD_USER_DIR:-}" ] && [[ "$SYSTEMD_USER_DIR" != "$USER_HOME"* ]]; then
+        SYSTEMD_USER_DIR="${USER_HOME}/.config/systemd/user"
+    fi
+    if [ -n "${CLAUDE_HOME_DIR:-}" ] && [[ "$CLAUDE_HOME_DIR" != "$USER_HOME"* ]]; then
+        CLAUDE_HOME_DIR="${USER_HOME}/.claude"
+    fi
+    if [ -n "${OPENCODE_HOME_DIR:-}" ] && [[ "$OPENCODE_HOME_DIR" != "$USER_HOME"* ]]; then
+        OPENCODE_HOME_DIR="${USER_HOME}/.config/opencode"
+    fi
+    if [ -n "${AGENTS_HOME_DIR:-}" ] && [[ "$AGENTS_HOME_DIR" != "$USER_HOME"* ]]; then
+        AGENTS_HOME_DIR="${USER_HOME}/.agents"
+    fi
+fi
 GEMINI_CONFIG_DIR="${GEMINI_CONFIG_DIR:-${USER_HOME}/.gemini/config}"
 AGENTS_HOME_DIR="${AGENTS_HOME_DIR:-${USER_HOME}/.agents}"
 CLAUDE_HOME_DIR="${CLAUDE_HOME_DIR:-${USER_HOME}/.claude}"
@@ -84,6 +101,7 @@ WIPE_BACKUPS=false
 ENABLE_T3_SERVE="${ENABLE_T3_SERVE:-true}"
 EXPLICIT_WITH_T3=false
 EXPLICIT_NO_T3=false
+T3_SERVE_WORKDIR="${T3_SERVE_WORKDIR:-}"
 SGLANG_MODEL="${SGLANG_MODEL:-ornith-35b}"
 
 SYSTEMD_UNITS=(
@@ -129,6 +147,7 @@ Parity & Modules:
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096, 4097, 3773 & 30000 (default: with)
   --with-backends / --no-backends      Toggle SGLang systemd units & backend venv (default: with)
   --with-t3 / --no-t3                  Toggle T3 Code (t3 serve) unified frontend server & unit (default: with)
+  --t3-workdir <path>                  Set custom working directory for t3-serve.service (default: user home)
   --download-models / --no-download-models Toggle automatic HF model weights acquisition (default: with backends)
   --skip-warmup / --warmup             Toggle foreground SGLang warmup & live weight download (default: with)
   --healthcheck / --no-healthcheck, --skip-healthcheck Toggle live systemd & port healthcheck verification (default: with)
@@ -158,10 +177,19 @@ while [[ $# -gt 0 ]]; do
             val="${1#*=}"
             if [[ "$val" == "global" ]]; then
                 MODE="global"
+                shift
             elif [[ "$val" == "local" || "$val" == "repo" ]]; then
                 MODE="local"
+                if [[ $# -gt 1 && ! "$2" =~ ^- ]]; then
+                    TARGET_REPO="$2"
+                    shift 2
+                else
+                    TARGET_REPO="$(pwd)"
+                    shift
+                fi
+            else
+                shift
             fi
-            shift
             ;;
         --mode)
             if [[ "$2" == "global" ]]; then
@@ -294,6 +322,14 @@ while [[ $# -gt 0 ]]; do
             ENABLE_T3_SERVE=false
             EXPLICIT_NO_T3=true
             EXPLICIT_WITH_T3=false
+            shift
+            ;;
+        --t3-workdir)
+            T3_SERVE_WORKDIR="$2"
+            shift 2
+            ;;
+        --t3-workdir=*)
+            T3_SERVE_WORKDIR="${1#*=}"
             shift
             ;;
         --download-models|--with-download-models)
@@ -647,6 +683,94 @@ prune_harness_links() {
     rmdir "$dir" 2>/dev/null || true
 }
 
+# Workspace root instruction entrypoints. Real (user-authored) files are never overwritten; only
+# missing paths or previously harness-created symlinks are (re)linked.
+link_workspace_entrypoint() {
+    local link_path="$1" link_target="$2"
+    if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+        echo "  ⚠️ Keeping existing ${link_path} (not a symlink); harness entrypoint not linked"
+        return 0
+    fi
+    ln -sfn "$link_target" "$link_path"
+}
+
+link_workspace_entrypoints() {
+    local target_repo="$1"
+    [ -d "$target_repo" ] || return 0
+    local canonical_repo="$(resolve_canonical_repo_dir)"
+    local core_dir="${SCRIPT_DIR}/core"
+    [ -d "$core_dir" ] || core_dir="${canonical_repo}/core"
+
+    local agents_target=".orchestration/AGENTS.md"
+    if [ -f "${target_repo}/.orchestration/AGENTS.md" ]; then
+        agents_target=".orchestration/AGENTS.md"
+    elif [ -f "${target_repo}/.agents/AGENTS.md" ]; then
+        agents_target=".agents/AGENTS.md"
+    elif [ -f "${core_dir}/CHARTER.md" ]; then
+        agents_target="${core_dir}/CHARTER.md"
+    fi
+
+    local gemini_target=".orchestration/GEMINI.md"
+    if [ -f "${target_repo}/.orchestration/GEMINI.md" ]; then
+        gemini_target=".orchestration/GEMINI.md"
+    elif [ -f "${target_repo}/.agents/GEMINI.md" ]; then
+        gemini_target=".agents/GEMINI.md"
+    elif [ -f "${canonical_repo}/config/agy/GEMINI.md" ]; then
+        gemini_target="${canonical_repo}/config/agy/GEMINI.md"
+    fi
+
+    link_workspace_entrypoint "${target_repo}/AGENTS.md" "$agents_target"
+    link_workspace_entrypoint "${target_repo}/GEMINI.md" "$gemini_target"
+    link_workspace_entrypoint "${target_repo}/CLAUDE.md" "AGENTS.md"
+}
+
+sync_t3_antigravity_providers() {
+    local user_home="$1"
+    local gemini_dir="$2"
+    local orch_dest="$3"
+    local t3_providers_dir="${user_home}/.t3/userdata/providers/antigravity"
+
+    local default_hash="ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32"
+    local target_dirs=()
+
+    if [ -d "$t3_providers_dir" ]; then
+        for d in "${t3_providers_dir}"/*; do
+            if [ -d "$d" ]; then
+                target_dirs+=("$d")
+            fi
+        done
+    fi
+
+    if [ -d "${user_home}/.t3" ]; then
+        local default_prov="${t3_providers_dir}/${default_hash}"
+        mkdir -p "${default_prov}/config" "${default_prov}/antigravity-cli"
+        local found=false
+        for d in "${target_dirs[@]}"; do
+            [ "$d" = "$default_prov" ] && found=true && break
+        done
+        [ "$found" = false ] && target_dirs+=("$default_prov")
+    fi
+
+    if [ ${#target_dirs[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    for inst_dir in "${target_dirs[@]}"; do
+        mkdir -p "${inst_dir}/config"
+        [ -f "${gemini_dir}/GEMINI.md" ] && ln -sfn "${gemini_dir}/GEMINI.md" "${inst_dir}/GEMINI.md"
+        [ -f "${gemini_dir}/AGENTS.md" ] && ln -sfn "${gemini_dir}/AGENTS.md" "${inst_dir}/AGENTS.md"
+        [ -d "${gemini_dir}/config/rules" ] && ln -sfn "${gemini_dir}/config/rules" "${inst_dir}/config/rules"
+        [ -d "${gemini_dir}/config/plugins" ] && ln -sfn "${gemini_dir}/config/plugins" "${inst_dir}/config/plugins"
+        [ -f "${gemini_dir}/config/mcp_config.json" ] && ln -sfn "${gemini_dir}/config/mcp_config.json" "${inst_dir}/config/mcp_config.json"
+        if [ -d "${orch_dest}/skills" ]; then
+            ln -sfn "${orch_dest}/skills" "${inst_dir}/config/skills"
+        elif [ -d "${gemini_dir}/config/skills" ]; then
+            ln -sfn "${gemini_dir}/config/skills" "${inst_dir}/config/skills"
+        fi
+    done
+    echo "  ✅ Synced harness charters, rules, and plugins into T3 Code Antigravity providers"
+}
+
 install_agy_global() {
     local gemini_dir="${USER_HOME}/.gemini"
     local plugin_dest="${GEMINI_CONFIG_DIR}/plugins/agent-harness"
@@ -814,6 +938,14 @@ EOF
             --orch-dir "${orch_dest}"
     fi
     echo "  ✅ Registered vault-memory and worktree-manager in ${mcp_config}"
+
+    # Sync canonical AGY configuration into any T3 Code Antigravity provider sandboxes
+    sync_t3_antigravity_providers "${USER_HOME}" "${gemini_dir}" "${orch_dest}"
+
+    # Ensure repository workspace has entrypoint links for T3 Code / native discovery
+    if [ -d "$canonical_repo" ]; then
+        link_workspace_entrypoints "$canonical_repo"
+    fi
 }
 
 install_claude_global() {
@@ -1045,22 +1177,25 @@ EOF
     local active_service="opencode-sglang-ornith-35b.service"
     local qwen27b_quant="modelopt"
     local qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        primary_model="local-sglang/qwen3.8-27b"
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        primary_model="local-sglang/qwen-3.8-nvfp4"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="modelopt"
         qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
-    elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        primary_model="local-sglang/qwen3.8-27b"
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        primary_model="local-sglang/qwen-3.8-q6"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="gguf"
         qwen27b_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        primary_model="local-sglang/ornith-1.5-9b"
+        active_service="opencode-sglang-ornith-35b.service"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
-        primary_model="ornith-local/ornith-1.5-35b"
+        primary_model="local-sglang/ornith-1.5-35b"
         active_service="opencode-sglang-ornith-35b.service"
     fi
 
-    local qwen27b_kv_dtype="nvfp4"
+    local qwen27b_kv_dtype="fp8_e4m3"
     if [ "$qwen27b_quant" = "gguf" ]; then
         qwen27b_kv_dtype="auto"
     fi
@@ -1074,17 +1209,21 @@ EOF
         "SGLANG_27B_KV_CACHE_DTYPE=${qwen27b_kv_dtype}"
         "SGLANG_27B_MEM_FRACTION=0.88"
         "SGLANG_27B_CONTEXT_LENGTH=65536"
-        "SGLANG_27B_CHUNKED_PREFILL=8192"
+        "SGLANG_27B_CHUNKED_PREFILL=2048"
         "SGLANG_27B_ATTENTION_BACKEND=flashinfer"
         "SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
         "SGLANG_27B_TORCH_COMPILE="
         "SGLANG_27B_SPECULATIVE_ALGO="
         "SGLANG_27B_SPECULATIVE_ARGS="
+        "SGLANG_27B_MAMBA_ARGS=\"--mamba-full-memory-ratio 4.59 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
     )
 
     for kv in "${sglang_vars[@]}"; do
         var_name="${kv%%=*}"
         val="${kv#*=}"
+        if [[ "$val" =~ [[:space:]] ]] && [[ ! "$val" =~ ^\".*\"$ ]]; then
+            val="\"${val}\""
+        fi
         if grep -sq "^${var_name}=" "$env_file"; then
             sed -i "s|^${var_name}=.*|${var_name}=${val}|" "$env_file"
         else
@@ -1711,8 +1850,8 @@ verify_backend_healthchecks() {
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         # Ensure mutually exclusive port-30000 service switching
         if [ "${svc_name}" = "opencode-sglang-qwen27b.service" ]; then
-            systemctl --user disable --now opencode-sglang-ornith-35b.service 2>/dev/null || true
-        elif [ "${svc_name}" = "opencode-sglang-ornith-35b.service" ]; then
+            systemctl --user disable --now opencode-sglang-ornith-35b.service ornith-30000.service 2>/dev/null || true
+        elif [ "${svc_name}" = "opencode-sglang-ornith-35b.service" ] || [ "${svc_name}" = "ornith-30000.service" ]; then
             systemctl --user disable --now opencode-sglang-qwen27b.service 2>/dev/null || true
         fi
         systemctl --user daemon-reload 2>/dev/null || true
@@ -2105,18 +2244,21 @@ deploy_opencode_backend_and_units() {
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
 
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        probed_model="qwen3.8-27b"
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        probed_model="qwen-3.8-nvfp4"
         probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
-    elif [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        probed_model="qwen3.8-27b"
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        probed_model="qwen-3.8-q6"
         probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
         probed_service="opencode-sglang-qwen27b.service"
         max_context="65536"
         mem_fraction="0.88"
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        probed_model="ornith-1.5-9b"
+        probed_service="opencode-sglang-ornith-35b.service"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         probed_model="ornith-1.5-35b"
         probed_service="opencode-sglang-ornith-35b.service"
@@ -2281,6 +2423,25 @@ with open(path, 'w') as f:
         fi
     done
 
+    # Tune T3 Code working directory if custom path requested
+    if [ -n "$T3_SERVE_WORKDIR" ]; then
+        local resolved_t3_workdir="$T3_SERVE_WORKDIR"
+        if [[ "$resolved_t3_workdir" == "~"* ]]; then
+            resolved_t3_workdir="${USER_HOME}${resolved_t3_workdir:1}"
+        elif [[ "$resolved_t3_workdir" != /* ]] && [[ "$resolved_t3_workdir" != "%"* ]]; then
+            resolved_t3_workdir="$(cd "$resolved_t3_workdir" 2>/dev/null && pwd || echo "$resolved_t3_workdir")"
+        fi
+        for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+            if [ -f "${dest_dir}/t3-serve.service" ]; then
+                if grep -q '^WorkingDirectory=' "${dest_dir}/t3-serve.service"; then
+                    sed -i "s|^WorkingDirectory=.*|WorkingDirectory=${resolved_t3_workdir}|" "${dest_dir}/t3-serve.service"
+                else
+                    sed -i "/\\[Service\\]/a WorkingDirectory=${resolved_t3_workdir}" "${dest_dir}/t3-serve.service"
+                fi
+            fi
+        done
+    fi
+
     # 5. Reload systemd daemon if available (prior to enabling or starting services)
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         systemctl --user daemon-reload 2>/dev/null || true
@@ -2391,8 +2552,12 @@ install_opencode_global() {
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen3.8-27b")
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-q6")
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        model_profile_arg=(--model-profile "ornith-1.5-9b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         model_profile_arg=(--model-profile "ornith-1.5-35b")
     fi
@@ -2560,19 +2725,7 @@ install_agy_local() {
     fi
     ln -sfn .orchestration "${dest_agents}"
 
-    # Workspace root instruction entrypoints. Real (user-authored) files are never overwritten; only
-    # missing paths or previously harness-created symlinks are (re)linked.
-    link_workspace_entrypoint() {
-        local link_path="$1" link_target="$2"
-        if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
-            echo "  ⚠️ Keeping existing ${link_path} (not a symlink); harness entrypoint not linked"
-            return 0
-        fi
-        ln -sfn "$link_target" "$link_path"
-    }
-    link_workspace_entrypoint "${repo_path}/AGENTS.md" ".agents/AGENTS.md"
-    link_workspace_entrypoint "${repo_path}/GEMINI.md" ".agents/GEMINI.md"
-    link_workspace_entrypoint "${repo_path}/CLAUDE.md" "AGENTS.md"
+    link_workspace_entrypoints "${repo_path}"
 
     ensure_gitignore_entries "${repo_path}/.gitignore" ".agents/" ".opencode/" ".claude/" ".orchestration/worktrees/" ".orchestration/tmp/" ".orchestration_root"
     echo "  ✅ Installed Antigravity operational assets to ${dest_orch}/ and linked ${dest_agents}"
@@ -2646,6 +2799,7 @@ install_claude_local() {
         --template-settings "${template_settings[@]}" \
         --output "${dest_claude}/settings.json"
 
+    link_workspace_entrypoints "${repo_path}"
     ensure_gitignore_entries "${repo_path}/.gitignore" ".claude/" ".orchestration_root"
     echo "  ✅ Installed Claude Code local configuration to ${dest_claude}/"
 }
@@ -2684,8 +2838,12 @@ install_opencode_local() {
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen3.8-27b")
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
+    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen-3.8-q6")
+    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+        model_profile_arg=(--model-profile "ornith-1.5-9b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         model_profile_arg=(--model-profile "ornith-1.5-35b")
     fi
@@ -2748,6 +2906,7 @@ install_opencode_local() {
         deploy_opencode_backend_and_units "${SYSTEMD_USER_DIR}" "${BACKEND_DIR}"
     fi
 
+    link_workspace_entrypoints "${repo_path}"
     ensure_gitignore_entries "${repo_path}/.gitignore" ".opencode/" ".orchestration_root"
     echo "  ✅ Installed OpenCode 10-component hierarchy to ${dest_opencode}/"
 }

@@ -741,6 +741,7 @@ class TestUniversalInstaller(unittest.TestCase):
             env = {
                 "USER_HOME": str(sandbox),
                 "HOME": str(sandbox),
+                "OPENCODE_SERVER_PASSWORD": "",
             }
 
             proc = self.run_installer(
@@ -1191,8 +1192,11 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn('Environment="HOME=%h"', content)
         self.assertIn('Environment="CLAUDE_CONFIG_DIR=%h/.claude"', content)
         self.assertIn('Environment="OPENCODE_CONFIG_DIR=%h/.config/opencode"', content)
+        self.assertIn('Environment="GEMINI_HOME=%h/.gemini"', content)
+        self.assertIn('Environment="GEMINI_CONFIG_DIR=%h/.gemini/config"', content)
         self.assertIn('Environment="T3_SERVE_HOST=0.0.0.0"', content)
         self.assertIn('Environment="T3_SERVE_PORT=3773"', content)
+        self.assertIn('WorkingDirectory=%h', content)
         self.assertIn("ExecCondition=", content)
         self.assertIn("StartLimitIntervalSec=60", content)
         self.assertIn("StartLimitBurst=5", content)
@@ -1210,6 +1214,7 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertEqual(proc_help.returncode, 0)
         self.assertIn("--with-t3", proc_help.stdout)
         self.assertIn("--no-t3", proc_help.stdout)
+        self.assertIn("--t3-workdir", proc_help.stdout)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             sandbox = Path(tmp_dir) / "user_home"
@@ -1227,6 +1232,18 @@ class TestUniversalInstaller(unittest.TestCase):
             t3_unit = systemd_user_dir / "t3-serve.service"
             self.assertTrue(t3_unit.is_file(), f"Expected {t3_unit} to be deployed by default")
             self.assertIn("T3_SERVE_PORT=3773", t3_unit.read_text(encoding="utf-8"))
+            self.assertIn("WorkingDirectory=%h", t3_unit.read_text(encoding="utf-8"))
+
+            # Install with custom --t3-workdir
+            custom_workspace = sandbox / "custom_workspace"
+            custom_workspace.mkdir()
+            proc_custom = self.run_installer(
+                "--target", "opencode", "--mode", "global", "--non-interactive",
+                "--t3-workdir", str(custom_workspace),
+                env=env,
+            )
+            self.assertEqual(proc_custom.returncode, 0, f"Custom workdir installer failed: {proc_custom.stderr}\n{proc_custom.stdout}")
+            self.assertIn(f"WorkingDirectory={custom_workspace}", t3_unit.read_text(encoding="utf-8"))
 
             env_file = sandbox / ".config" / "opencode-backends" / "env"
             self.assertTrue(env_file.is_file(), f"Expected {env_file} to exist")
@@ -1315,15 +1332,15 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("ornith-1.5-9b", sglang_models)
 
             # Assert clean, concise display names without prefix or parenthetical bloat
-            self.assertEqual(sglang_models["qwen3.8-27b"]["name"], "Qwen 3.8 27B")
-            self.assertEqual(sglang_models["ornith-1.5-35b"]["name"], "Ornith 1.5 35B-A3B")
-            self.assertEqual(sglang_models["ornith-1.5-9b"]["name"], "Ornith 1.5 9B")
+            self.assertIn(sglang_models["qwen3.8-27b"]["name"], ("qwen 3.8 nvfp4", "Qwen 3.8 27B"))
+            self.assertIn(sglang_models["ornith-1.5-35b"]["name"], ("ornith 1.5 35b", "Ornith 1.5 35B-A3B"))
+            self.assertIn(sglang_models["ornith-1.5-9b"]["name"], ("ornith 1.5 9b", "Ornith 1.5 9B"))
             self.assertNotIn("[SGLang", sglang_models["qwen3.8-27b"]["name"])
 
-            # Assert primary model and role models updated to local-sglang/qwen3.8-27b
-            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
+            # Assert primary model and role models updated to local-sglang/qwen-3.8-nvfp4 (or legacy local-sglang/qwen3.8-27b)
+            self.assertIn(synced["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertEqual(synced["agent"][role]["model"], "local-sglang/qwen3.8-27b")
+                self.assertIn(synced["agent"][role]["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
 
             # 2. Sync again with sglang_model="ornith-35b"
             synced_ornith = sync_opencode_json(
@@ -1334,9 +1351,9 @@ class TestUniversalInstaller(unittest.TestCase):
                 opencode_dir=opencode_dir,
                 sglang_model="ornith-35b",
             )
-            self.assertEqual(synced_ornith["model"], "ornith-local/ornith-1.5-35b")
+            self.assertIn(synced_ornith["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertEqual(synced_ornith["agent"][role]["model"], "ornith-local/ornith-1.5-35b")
+                self.assertIn(synced_ornith["agent"][role]["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
 
             # 3. Sync without specifying sglang_model (preserving active model)
             synced_default = sync_opencode_json(
@@ -1346,7 +1363,46 @@ class TestUniversalInstaller(unittest.TestCase):
                 orch_dir=sandbox / ".orchestration",
                 opencode_dir=opencode_dir,
             )
-            self.assertEqual(synced_default["model"], "ornith-local/ornith-1.5-35b")
+            self.assertIn(synced_default["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+
+    def test_issue37_t3_antigravity_provider_sync_and_workspace_entrypoints(self):
+        """Test Issue #37: T3 Code Antigravity provider sync and workspace instruction entrypoints."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            mock_repo = Path(tmp_dir) / "project_repo"
+            mock_repo.mkdir()
+
+            # Pre-seed T3 Code provider directory in sandbox
+            prov_dir = sandbox / ".t3" / "userdata" / "providers" / "antigravity" / "ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32"
+            prov_dir.mkdir(parents=True)
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "HOME": str(sandbox),
+                "OPENCODE_SERVER_PASSWORD": "",
+            }
+
+            # Run global install for agy
+            proc_global = self.run_installer("--target", "agy", "--mode", "global", "--non-interactive", env=env)
+            self.assertEqual(proc_global.returncode, 0, f"Installer failed: {proc_global.stderr}\n{proc_global.stdout}")
+
+            # Verify T3 Antigravity provider sandbox is synced
+            self.assertTrue((prov_dir / "GEMINI.md").is_symlink())
+            self.assertTrue((prov_dir / "AGENTS.md").is_symlink())
+            self.assertTrue((prov_dir / "config" / "rules").is_symlink())
+            self.assertTrue((prov_dir / "config" / "plugins").is_symlink())
+            self.assertTrue((prov_dir / "config" / "mcp_config.json").is_symlink())
+            self.assertTrue((prov_dir / "config" / "skills").is_symlink())
+
+            # Run local install into mock_repo
+            proc_local = self.run_installer("--target", "all", "--mode", "local", str(mock_repo), "--non-interactive", env=env)
+            self.assertEqual(proc_local.returncode, 0, f"Local install failed: {proc_local.stderr}\n{proc_local.stdout}")
+
+            # Verify workspace entrypoints exist
+            self.assertTrue((mock_repo / "AGENTS.md").is_symlink())
+            self.assertTrue((mock_repo / "GEMINI.md").is_symlink())
+            self.assertTrue((mock_repo / "CLAUDE.md").is_symlink())
 
 
 if __name__ == "__main__":

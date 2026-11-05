@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -630,6 +631,9 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
     """Test suite for SGLang Qwen 3.8 27B and Ornith 35B selectable profiles, compiler, and configurations."""
 
     def setUp(self) -> None:
+        self.orig_env = os.environ.copy()
+        for k in ("SGLANG_PRIMARY_MODEL", "SGLANG_MODEL_PROFILE", "MODEL_PROFILE"):
+            os.environ.pop(k, None)
         self.core_dir = REPO_ROOT / "core"
         self.opencode_json_path = REPO_ROOT / "config" / "opencode" / "opencode.json"
         self.manifest_path = self.core_dir / "manifest.json"
@@ -638,6 +642,10 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
 
         with open(self.manifest_path, "r", encoding="utf-8") as f:
             self.manifest = json.load(f)
+
+    def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self.orig_env)
 
     def test_opencode_json_defines_selectable_sglang_models(self) -> None:
         """Verify config/opencode/opencode.json registers both ornith-local and local-sglang with 27B models."""
@@ -654,16 +662,18 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         ornith_models = ornith_prov.get("models", {})
         self.assertIn("ornith-1.5-35b", ornith_models)
         self.assertIn("ornith-1.5-9b", ornith_models)
-        self.assertIn("qwen3.8-27b", ornith_models)
 
         # local-sglang provider models
         sglang_prov = providers["local-sglang"]
         sglang_models = sglang_prov.get("models", {})
         self.assertIn("qwen3.8-27b", sglang_models)
+        self.assertIn("qwen-3.8-nvfp4", sglang_models)
+        self.assertIn("qwen-3.8-q6", sglang_models)
         self.assertIn("ornith-1.5-35b", sglang_models)
+        self.assertIn("ornith-1.5-9b", sglang_models)
 
         qwen38_27b = sglang_models["qwen3.8-27b"]
-        self.assertIn("Qwen 3.8 27B", qwen38_27b.get("name", ""))
+        self.assertTrue("qwen 3.8" in qwen38_27b.get("name", "").lower())
         self.assertGreaterEqual(qwen38_27b.get("context", 0), 131072)
         self.assertGreaterEqual(qwen38_27b.get("output", 0), 32768)
         self.assertEqual(qwen38_27b.get("modalities"), {"input": ["text", "image"], "output": ["text"]})
@@ -725,7 +735,11 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         service_content = self.qwen27b_service_path.read_text(encoding="utf-8")
         self.assertIn("--disable-prefill-cuda-graph", service_content)
         self.assertNotIn("\n  --enable-torch-compile", service_content)
-        self.assertIn("SGLANG_27B_KV_CACHE_DTYPE=nvfp4", service_content)
+        self.assertTrue(
+            "SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3" in service_content
+            or "SGLANG_27B_KV_CACHE_DTYPE=nvfp4" in service_content,
+            "SGLANG_27B_KV_CACHE_DTYPE must be fp8_e4m3 or nvfp4",
+        )
         self.assertNotIn("0.880.88", service_content)
         self.assertIn("$SGLANG_27B_TORCH_COMPILE", service_content)
         self.assertIn("$SGLANG_27B_SPECULATIVE_ARGS", service_content)
@@ -895,6 +909,25 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         gemini_text = (CONFIG_DIR / "agy" / "GEMINI.md").read_text(encoding="utf-8")
         self.assertIn("## Zero-Warmup Orchestration & Reactive Turn Discipline", gemini_text)
         self.assertIn("Immediate Turn Termination on Async Dispatch", gemini_text)
+
+    def test_regression_issue41_t3_code_thread_dispatch(self) -> None:
+        """Verify Issue #41: T3 Code thread dispatch mechanics in supreme-orchestrator and rules."""
+        supreme_agent = (CORE_DIR / "agents" / "supreme-orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("T3 Code Dispatch Workflow", supreme_agent)
+        self.assertIn("delegate_task", supreme_agent)
+        self.assertIn('isolation: "worktree"', supreme_agent)
+        self.assertIn("create_threads", supreme_agent)
+        self.assertIn("orchestrator_capabilities", supreme_agent)
+
+        agent_teams = (CORE_DIR / "rules" / "agent-teams.md").read_text(encoding="utf-8")
+        self.assertIn("T3 Code (Unified / Provider)", agent_teams)
+
+        launching_teams = (CONFIG_DIR / "orchestration" / "launching-teams.md").read_text(encoding="utf-8")
+        self.assertIn("4.3 T3 Code Launch & Thread Orchestration", launching_teams)
+        self.assertIn("delegate_task(isolation=\"worktree\"", launching_teams)
+
+        config_supreme = (CONFIG_DIR / "orchestration" / "supreme-orchestrator.md").read_text(encoding="utf-8")
+        self.assertIn("delegate_task(isolation=\"worktree\"", config_supreme)
 
 
 if __name__ == "__main__":

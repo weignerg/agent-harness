@@ -418,7 +418,7 @@ fi
 echo "[Test 22] Verifying post-install summary UX and automatic password generation..."
 SANDBOX_GP="$(mktemp -d /tmp/installer-test-summary-XXXXXX)"
 
-GP_OUT="$(HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
+GP_OUT="$(OPENCODE_SERVER_PASSWORD="" USER_HOME="${SANDBOX_GP}" HOME="${SANDBOX_GP}" "${INSTALL_SCRIPT}" --target=opencode --non-interactive 2>&1 || true)"
 
 # 1. Verify 16-character password auto-generated in env file
 if [ -f "${SANDBOX_GP}/.config/opencode-backends/env" ]; then
@@ -889,23 +889,26 @@ T3_UNIT_SRC="${REPO_DIR}/config/systemd/t3-serve.service"
 if [ -f "$T3_UNIT_SRC" ] && \
    grep -q '^EnvironmentFile=-%h/\.config/opencode-backends/env' "$T3_UNIT_SRC" && \
    grep -q 'Environment="T3_SERVE_PORT=3773"' "$T3_UNIT_SRC" && \
+   grep -q 'Environment="GEMINI_HOME=%h/\.gemini"' "$T3_UNIT_SRC" && \
+   grep -q 'Environment="GEMINI_CONFIG_DIR=%h/\.gemini/config"' "$T3_UNIT_SRC" && \
    grep -q 't3' "$T3_UNIT_SRC" && \
    grep -q 'serve' "$T3_UNIT_SRC" && \
    grep -q '3773' "$T3_UNIT_SRC" && \
+   grep -q 'WorkingDirectory=%h' "$T3_UNIT_SRC" && \
    grep -q 'ExecCondition=' "$T3_UNIT_SRC" && \
    ! grep -q 'http\.server' "$T3_UNIT_SRC" && \
    ! grep -q 'bunx' "$T3_UNIT_SRC" && \
    ! grep -q 'npx' "$T3_UNIT_SRC"; then
-    pass "t3-serve.service exists with secure t3 serve, port 3773, and ExecCondition guard"
+    pass "t3-serve.service exists with secure t3 serve, port 3773, GEMINI env vars, WorkingDirectory=%h, and ExecCondition guard"
 else
     fail "t3-serve.service missing expected t3 serve configuration or contains forbidden fallbacks"
 fi
 
 HELP_OUT="$("${INSTALL_SCRIPT}" --help)"
-if echo "$HELP_OUT" | grep -q -- "--with-t3" && echo "$HELP_OUT" | grep -q -- "--no-t3"; then
-    pass "install.sh --help documents --with-t3 and --no-t3"
+if echo "$HELP_OUT" | grep -q -- "--with-t3" && echo "$HELP_OUT" | grep -q -- "--no-t3" && echo "$HELP_OUT" | grep -q -- "--t3-workdir"; then
+    pass "install.sh --help documents --with-t3, --no-t3, and --t3-workdir"
 else
-    fail "install.sh --help missing --with-t3 or --no-t3"
+    fail "install.sh --help missing --with-t3, --no-t3, or --t3-workdir"
 fi
 
 # 31a: Default install (without --with-t3) automatically provisions T3 Code serve env and units
@@ -919,10 +922,21 @@ if [ -f "$DEPLOYED_T3_DEF" ] && [ -f "$ENV_T3_DEF" ] && \
    grep -q "^T3_SERVE_PORT=3773" "$ENV_T3_DEF" && \
    grep -q "^T3_SERVE_HOST=0.0.0.0" "$ENV_T3_DEF" && \
    grep -q "^OPENCODE_SERVER_PORT=4096" "$ENV_T3_DEF" && \
-   grep -q "^OPENCODE_SERVER_HOST=0.0.0.0" "$ENV_T3_DEF"; then
-    pass "Default install automatically provisions T3_SERVE_PORT and OPENCODE_SERVER_PORT in env and deploys unit"
+   grep -q "^OPENCODE_SERVER_HOST=0.0.0.0" "$ENV_T3_DEF" && \
+   grep -q "^WorkingDirectory=%h" "$DEPLOYED_T3_DEF"; then
+    pass "Default install automatically provisions T3_SERVE_PORT and OPENCODE_SERVER_PORT in env and deploys unit with WorkingDirectory=%h"
 else
     fail "Default install failed to automatically configure T3 Code serve env and unit"
+fi
+
+# 31a-custom: Install with custom --t3-workdir sets WorkingDirectory
+SANDBOX_T3_CUST="$(mktemp -d /tmp/test-installer-t3-cust-XXXXXX)"
+USER_HOME="${SANDBOX_T3_CUST}" HOME="${SANDBOX_T3_CUST}" "${INSTALL_SCRIPT}" --target=opencode --t3-workdir="${SANDBOX_T3_CUST}/custom_ws" --non-interactive >/dev/null 2>&1 || true
+DEPLOYED_T3_CUST="${SANDBOX_T3_CUST}/.config/systemd/user/t3-serve.service"
+if [ -f "$DEPLOYED_T3_CUST" ] && grep -q "^WorkingDirectory=${SANDBOX_T3_CUST}/custom_ws" "$DEPLOYED_T3_CUST"; then
+    pass "Installer sets custom WorkingDirectory in t3-serve.service when --t3-workdir is specified"
+else
+    fail "Installer failed to set custom WorkingDirectory when --t3-workdir was specified"
 fi
 
 # 31b: Update existing env file with missing T3 config
@@ -1045,6 +1059,30 @@ if [ ! -f "$DEPLOYED_T3_DEF" ]; then
     pass "uninstall.sh cleanly removed t3-serve.service"
 else
     fail "uninstall.sh failed to remove t3-serve.service"
+fi
+
+# 31f: T3 Code Antigravity provider sync and workspace instruction entrypoints (Issue #37)
+SANDBOX_T3_SYNC="$(mktemp -d /tmp/test-installer-t3-sync-XXXXXX)"
+MOCK_REPO_T3="$(mktemp -d /tmp/test-installer-t3-repo-XXXXXX)"
+PROV_DIR="${SANDBOX_T3_SYNC}/.t3/userdata/providers/antigravity/ac0a3dfd6dddb20962cecff6ee5fe65e19d3923be20e52c5ab52ff877f7e4c32"
+mkdir -p "${PROV_DIR}"
+
+OPENCODE_SERVER_PASSWORD="" USER_HOME="${SANDBOX_T3_SYNC}" HOME="${SANDBOX_T3_SYNC}" "${INSTALL_SCRIPT}" --target=agy --non-interactive >/dev/null 2>&1 || true
+
+if [ -L "${PROV_DIR}/GEMINI.md" ] && [ -L "${PROV_DIR}/AGENTS.md" ] && \
+   [ -L "${PROV_DIR}/config/rules" ] && [ -L "${PROV_DIR}/config/plugins" ] && \
+   [ -L "${PROV_DIR}/config/skills" ]; then
+    pass "T3 Code Antigravity provider directory automatically synced with GEMINI.md, AGENTS.md, rules, and plugins"
+else
+    fail "T3 Code Antigravity provider directory failed to sync with harness assets"
+fi
+
+OPENCODE_SERVER_PASSWORD="" USER_HOME="${SANDBOX_T3_SYNC}" HOME="${SANDBOX_T3_SYNC}" "${INSTALL_SCRIPT}" --target=all --mode=local "${MOCK_REPO_T3}" --non-interactive >/dev/null 2>&1 || true
+
+if [ -L "${MOCK_REPO_T3}/AGENTS.md" ] && [ -L "${MOCK_REPO_T3}/GEMINI.md" ] && [ -L "${MOCK_REPO_T3}/CLAUDE.md" ]; then
+    pass "Local repository mode automatically links workspace entrypoints (AGENTS.md, GEMINI.md, CLAUDE.md)"
+else
+    fail "Local repository mode failed to link workspace entrypoints"
 fi
 
 # --- Test 32: SGLang Selectable Model Profiles (Qwen 3.8 27B) -----------
