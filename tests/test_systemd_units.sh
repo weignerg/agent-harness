@@ -146,6 +146,28 @@ if ! grep -q '\$SGLANG_27B_TORCH_COMPILE' "$QWEN27B_FILE" || ! grep -q '\$SGLANG
 fi
 echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
 
+# 9. Check SGLANG_27B_MAMBA_ARGS quoting in install.sh and env file
+echo "[CHECK 9] Verifying SGLANG_27B_MAMBA_ARGS quoting in install.sh and env file..."
+if grep -q 'SGLANG_27B_MAMBA_ARGS=--mamba' "$INSTALL_SCRIPT"; then
+    echo "❌ FAIL: install.sh contains unquoted SGLANG_27B_MAMBA_ARGS"
+    exit 1
+fi
+if ! grep -q 'SGLANG_27B_MAMBA_ARGS=\\"--mamba' "$INSTALL_SCRIPT"; then
+    echo "❌ FAIL: install.sh missing quoted SGLANG_27B_MAMBA_ARGS"
+    exit 1
+fi
+if [ -f "${HOME}/.config/opencode-backends/env" ]; then
+    if ! bash -n "${HOME}/.config/opencode-backends/env" 2>/dev/null; then
+        echo "❌ FAIL: ~/.config/opencode-backends/env has syntax errors"
+        exit 1
+    fi
+    if ! bash -c "source ${HOME}/.config/opencode-backends/env" 2>/dev/null; then
+        echo "❌ FAIL: ~/.config/opencode-backends/env cannot be sourced cleanly"
+        exit 1
+    fi
+fi
+echo "✅ Passed: SGLANG_27B_MAMBA_ARGS is properly quoted and env file sources cleanly without error."
+
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
 echo "================================================================================"

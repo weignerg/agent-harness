@@ -1215,12 +1215,15 @@ EOF
         "SGLANG_27B_TORCH_COMPILE="
         "SGLANG_27B_SPECULATIVE_ALGO="
         "SGLANG_27B_SPECULATIVE_ARGS="
-        "SGLANG_27B_MAMBA_ARGS=--mamba-full-memory-ratio 4.59 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+        "SGLANG_27B_MAMBA_ARGS=\"--mamba-full-memory-ratio 4.59 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
     )
 
     for kv in "${sglang_vars[@]}"; do
         var_name="${kv%%=*}"
         val="${kv#*=}"
+        if [[ "$val" =~ [[:space:]] ]] && [[ ! "$val" =~ ^\".*\"$ ]]; then
+            val="\"${val}\""
+        fi
         if grep -sq "^${var_name}=" "$env_file"; then
             sed -i "s|^${var_name}=.*|${var_name}=${val}|" "$env_file"
         else
@@ -1847,8 +1850,8 @@ verify_backend_healthchecks() {
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         # Ensure mutually exclusive port-30000 service switching
         if [ "${svc_name}" = "opencode-sglang-qwen27b.service" ]; then
-            systemctl --user disable --now opencode-sglang-ornith-35b.service 2>/dev/null || true
-        elif [ "${svc_name}" = "opencode-sglang-ornith-35b.service" ]; then
+            systemctl --user disable --now opencode-sglang-ornith-35b.service ornith-30000.service 2>/dev/null || true
+        elif [ "${svc_name}" = "opencode-sglang-ornith-35b.service" ] || [ "${svc_name}" = "ornith-30000.service" ]; then
             systemctl --user disable --now opencode-sglang-qwen27b.service 2>/dev/null || true
         fi
         systemctl --user daemon-reload 2>/dev/null || true
