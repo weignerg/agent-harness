@@ -1328,27 +1328,25 @@ class TestUniversalInstaller(unittest.TestCase):
                 sglang_model="27b-nvfp4",
             )
 
-            # Assert custom provider and models are preserved
+            # Assert custom provider is preserved, while duplicate ornith-local is pruned
             self.assertIn("custom-provider", synced["provider"])
-            self.assertIn("legacy-model", synced["provider"]["ornith-local"]["models"])
+            self.assertNotIn("ornith-local", synced["provider"])
 
-            # Assert local-sglang and ornith-local were synced
+            # Assert local-sglang was synced dynamically with canonical models only
             self.assertIn("local-sglang", synced["provider"])
             sglang_models = synced["provider"]["local-sglang"]["models"]
-            self.assertIn("qwen3.8-27b", sglang_models)
-            self.assertIn("ornith-1.5-35b", sglang_models)
-            self.assertIn("ornith-1.5-9b", sglang_models)
+            self.assertEqual(set(sglang_models.keys()), {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"})
 
             # Assert clean, concise display names without prefix or parenthetical bloat
-            self.assertIn(sglang_models["qwen3.8-27b"]["name"], ("qwen 3.8 nvfp4", "Qwen 3.8 27B", "Qwen3.8-27B-NVFP4"))
-            self.assertIn(sglang_models["ornith-1.5-35b"]["name"], ("ornith 1.5 35b", "Ornith 1.5 35B-A3B"))
-            self.assertIn(sglang_models["ornith-1.5-9b"]["name"], ("ornith 1.5 9b", "Ornith 1.5 9B"))
+            self.assertEqual(sglang_models["qwen3.8-27b"]["name"], "Qwen3.8-27B-NVFP4")
+            self.assertEqual(sglang_models["ornith-1.5-35b"]["name"], "ornith 1.5 35b")
+            self.assertEqual(sglang_models["ornith-1.5-9b"]["name"], "ornith 1.5 9b")
             self.assertNotIn("[SGLang", sglang_models["qwen3.8-27b"]["name"])
 
-            # Assert primary model and role models updated to local-sglang/qwen-3.8-nvfp4 (or legacy local-sglang/qwen3.8-27b)
-            self.assertIn(synced["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
+            # Assert primary model and role models updated to canonical local-sglang/qwen3.8-27b
+            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertIn(synced["agent"][role]["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
+                self.assertEqual(synced["agent"][role]["model"], "local-sglang/qwen3.8-27b")
 
             # 2. Sync again with sglang_model="ornith-35b"
             synced_ornith = sync_opencode_json(
@@ -1359,11 +1357,11 @@ class TestUniversalInstaller(unittest.TestCase):
                 opencode_dir=opencode_dir,
                 sglang_model="ornith-35b",
             )
-            self.assertIn(synced_ornith["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+            self.assertEqual(synced_ornith["model"], "local-sglang/ornith-1.5-35b")
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertIn(synced_ornith["agent"][role]["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+                self.assertEqual(synced_ornith["agent"][role]["model"], "local-sglang/ornith-1.5-35b")
 
-            # 3. Sync without specifying sglang_model (preserving active model)
+            # 3. Sync without specifying sglang_model (preserving active canonical model)
             synced_default = sync_opencode_json(
                 opencode_json_path=opencode_json,
                 repo_dir=REPO_ROOT,
@@ -1371,7 +1369,7 @@ class TestUniversalInstaller(unittest.TestCase):
                 orch_dir=sandbox / ".orchestration",
                 opencode_dir=opencode_dir,
             )
-            self.assertIn(synced_default["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+            self.assertEqual(synced_default["model"], "local-sglang/ornith-1.5-35b")
 
     def _sync_once(self, sandbox, sglang_model):
         """Helper: run sync_opencode_json against a fresh sandbox and return the synced dict."""
@@ -1399,45 +1397,124 @@ class TestUniversalInstaller(unittest.TestCase):
         )
 
     def test_issue43_qwen38_alias_and_designated_fallback_routing(self):
-        """Test Issue #43: qwen3.8 alias, designated fallback target, and leaves stay ornith-1.5-9b."""
-        from harness.installer.config_sync import sync_opencode_json
-
+        """Test Issue #43 / #56: qwen3.8 alias routes to canonical qwen3.8-27b, leaves stay ornith-1.5-9b, and only canonical models are advertised."""
         heavy = ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer")
         leaves = ("scout", "grunt", "summary", "compaction", "title")
 
-        # 1. Clean `qwen3.8` alias routes heavy/workhorse roles to the designated fallback target.
+        # 1. Clean `qwen3.8` alias routes heavy/workhorse roles to canonical local-sglang/qwen3.8-27b.
         with tempfile.TemporaryDirectory() as tmp:
             q = self._sync_once(Path(tmp) / "q", "qwen3.8")
-            self.assertEqual(q["model"], "local-sglang/qwen-3.8-nvfp4")
+            self.assertEqual(q["model"], "local-sglang/qwen3.8-27b")
             for role in heavy:
-                self.assertEqual(q["agent"][role]["model"], "local-sglang/qwen-3.8-nvfp4", role)
+                self.assertEqual(q["agent"][role]["model"], "local-sglang/qwen3.8-27b", role)
             # Leaves and the small_model are NOT re-routed to the 27b-class qwen 3.8.
             for role in leaves:
                 self.assertEqual(q["agent"][role]["model"], "local-sglang/ornith-1.5-9b", role)
             self.assertEqual(q["small_model"], "local-sglang/ornith-1.5-9b")
-            # The clean alias model entry is registered in the local-sglang provider.
-            self.assertIn("qwen3.8", q["provider"]["local-sglang"]["models"])
+            # Only canonical served_model_names appear under local-sglang (no stale alias clutter).
+            self.assertEqual(
+                set(q["provider"]["local-sglang"]["models"].keys()),
+                {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"},
+            )
 
-        # 2. qwen3.8-27b resolves to the same designated fallback target (alias convergence).
+        # 2. qwen3.8-27b resolves to the same canonical target.
         with tempfile.TemporaryDirectory() as tmp:
             q2 = self._sync_once(Path(tmp) / "q2", "qwen3.8-27b")
-            self.assertEqual(q2["model"], "local-sglang/qwen-3.8-nvfp4")
+            self.assertEqual(q2["model"], "local-sglang/qwen3.8-27b")
             for role in heavy:
-                self.assertEqual(q2["agent"][role]["model"], "local-sglang/qwen-3.8-nvfp4", role)
+                self.assertEqual(q2["agent"][role]["model"], "local-sglang/qwen3.8-27b", role)
             self.assertEqual(q2["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
 
-        # 3. Default route (no --sglang-model) on a fresh config falls back to the fallback target.
+        # 3. Default route (no --sglang-model) on a fresh config defaults to canonical ornith-1.5-35b.
         with tempfile.TemporaryDirectory() as tmp:
             d = self._sync_once(Path(tmp) / "d", None)
-            self.assertEqual(d["model"], "local-sglang/qwen-3.8-nvfp4")
+            self.assertEqual(d["model"], "local-sglang/ornith-1.5-35b")
 
-        # 4. Explicit ornith-35b selection still routes heavy/workhorse to ornith (no fallback override).
+        # 4. Explicit ornith-35b selection routes heavy/workhorse to ornith-1.5-35b.
         with tempfile.TemporaryDirectory() as tmp:
             o = self._sync_once(Path(tmp) / "o", "ornith-35b")
             self.assertEqual(o["model"], "local-sglang/ornith-1.5-35b")
             for role in heavy:
                 self.assertEqual(o["agent"][role]["model"], "local-sglang/ornith-1.5-35b", role)
             self.assertEqual(o["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
+
+    def test_issue56_prunes_stale_models_and_migrates_legacy_refs(self):
+        """Test Issue #56: sync_opencode_json prunes stale models on catalog changes and migrates legacy model strings."""
+        from harness.installer.config_sync import sync_opencode_json
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = Path(tmp) / "home"
+            opencode_dir = sandbox / ".config" / "opencode"
+            opencode_dir.mkdir(parents=True)
+            opencode_json = opencode_dir / "opencode.json"
+            opencode_json.write_text(
+                json.dumps(
+                    {
+                        "$schema": "https://opencode.ai/config.json",
+                        "provider": {
+                            "custom-provider": {"name": "Custom", "models": {"m1": {"name": "M1"}}},
+                            "ornith-local": {"name": "Ornith", "models": {"ornith-1.5-35b": {"name": "old"}}},
+                            "local-sglang": {
+                                "name": "Local SGLang",
+                                "models": {
+                                    "qwen-3.8-nvfp4": {"name": "stale"},
+                                    "qwen-3.8-q6": {"name": "stale"},
+                                    "qwen3.8": {"name": "stale"},
+                                    "deleted-old-model": {"name": "removed"},
+                                },
+                            },
+                        },
+                        "model": "local-sglang/qwen-3.8-nvfp4",
+                        "small_model": "ornith-local/ornith-1.5-9b",
+                        "agent": {
+                            "worker": {"model": "ornith-local/ornith-1.5-35b"},
+                            "scout": {"model": "ornith-local/ornith-1.5-9b"},
+                        },
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            synced = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=REPO_ROOT,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+            )
+            self.assertNotIn("ornith-local", synced["provider"])
+            self.assertIn("custom-provider", synced["provider"])
+            self.assertEqual(
+                set(synced["provider"]["local-sglang"]["models"].keys()),
+                {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"},
+            )
+            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
+            self.assertEqual(synced["small_model"], "local-sglang/ornith-1.5-9b")
+            self.assertEqual(synced["agent"]["worker"]["model"], "local-sglang/ornith-1.5-35b")
+            self.assertEqual(synced["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
+
+            # Also verify removing a model from models_catalog.json prunes it immediately
+            mini_repo = Path(tmp) / "repo"
+            (mini_repo / "config" / "models").mkdir(parents=True)
+            (mini_repo / "config" / "opencode").mkdir(parents=True)
+            shutil.copy(REPO_ROOT / "config" / "opencode" / "opencode.json", mini_repo / "config" / "opencode" / "opencode.json")
+            catalog = json.loads((REPO_ROOT / "config" / "models" / "models_catalog.json").read_text(encoding="utf-8"))
+            catalog.pop("sglang-qwen3.8-27b", None)
+            (mini_repo / "config" / "models" / "models_catalog.json").write_text(json.dumps(catalog), encoding="utf-8")
+
+            resynced = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=mini_repo,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+            )
+            self.assertEqual(
+                set(resynced["provider"]["local-sglang"]["models"].keys()),
+                {"ornith-1.5-35b", "ornith-1.5-9b"},
+            )
 
     def test_issue37_t3_antigravity_provider_sync_and_workspace_entrypoints(self):
         """Test Issue #37: T3 Code Antigravity provider sync and workspace instruction entrypoints."""

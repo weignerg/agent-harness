@@ -34,13 +34,13 @@ class TestSGLangOpenCodeE2E(unittest.TestCase):
         self.assertIn("local-sglang", data["provider"])
         models = data["provider"]["local-sglang"].get("models", {})
 
-        # Assert all 4 clean model IDs are registered
+        # Assert ONLY canonical served_model_name IDs are registered (no stale aliases)
         expected_models = {
-            "qwen-3.8-nvfp4": "qwen 3.8 nvfp4",
-            "qwen-3.8-q6": "qwen 3.8 q6",
+            "qwen3.8-27b": "Qwen3.8-27B-NVFP4",
             "ornith-1.5-9b": "ornith 1.5 9b",
             "ornith-1.5-35b": "ornith 1.5 35b",
         }
+        self.assertEqual(set(models.keys()), set(expected_models.keys()))
         for mid, clean_name in expected_models.items():
             self.assertIn(mid, models, f"Model {mid} missing from local-sglang")
             self.assertEqual(models[mid]["name"], clean_name)
@@ -49,14 +49,12 @@ class TestSGLangOpenCodeE2E(unittest.TestCase):
             self.assertIn("medium", variants, f"Variant 'medium' missing from {mid}")
             self.assertIn("high", variants, f"Variant 'high' missing from {mid}")
 
-        # Assert primary model and agents point to clean local-sglang model
-        self.assertEqual(data.get("model"), "local-sglang/qwen-3.8-nvfp4")
-        self.assertEqual(data["agent"]["supreme-orchestrator"]["model"], "local-sglang/qwen-3.8-nvfp4")
+        # Assert primary model and agents point to canonical local-sglang model
+        self.assertEqual(data.get("model"), "local-sglang/ornith-1.5-35b")
+        self.assertEqual(data["agent"]["supreme-orchestrator"]["model"], "local-sglang/ornith-1.5-35b")
 
-        # Assert Qwen was purged from ornith-local
-        if "ornith-local" in data["provider"]:
-            self.assertNotIn("qwen3.8-27b", data["provider"]["ornith-local"].get("models", {}))
-            self.assertNotIn("qwen-3.8-nvfp4", data["provider"]["ornith-local"].get("models", {}))
+        # Assert duplicate ornith-local provider was removed
+        self.assertNotIn("ornith-local", data["provider"])
 
     def _get_active_model_id(self) -> str:
         """Fetch active model id from /v1/models, or default to ornith-1.5-35b."""

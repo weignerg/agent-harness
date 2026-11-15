@@ -95,6 +95,16 @@ class TestModelRouter(unittest.TestCase):
         self.assertIsNotNone(res_ornith_prov)
         self.assertEqual(res_ornith_prov[0], "sglang-ornith-1.5-35b")
 
+    def test_resolve_rejects_substring_false_positives(self):
+        for bad in (
+            "huggingface/Qwen/Qwen3.8-2.4T-A95B",
+            "qwen-3.8-flash-next",
+            "1.5",
+            "unknown-model-xyz",
+            "anthropic/claude-3-7-sonnet",
+        ):
+            self.assertIsNone(self.router.resolve_model_service(bad), f"Expected None for {bad}")
+
 
 class TestModelProxyServer(unittest.TestCase):
     def setUp(self):
@@ -134,22 +144,44 @@ class TestModelProxyServer(unittest.TestCase):
                 self.assertEqual(data["status"], "ok")
                 self.assertEqual(data["active_service"], "sglang-qwen3.8-27b.service")
 
-    def test_v1_models_endpoint_includes_catalog_aliases(self):
+    def test_v1_models_endpoint_returns_canonical_catalog_models_only(self):
         url = f"http://127.0.0.1:{self.proxy_port}/v1/models"
         with urllib.request.urlopen(url, timeout=2.0) as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(data["object"], "list")
             model_ids = {m["id"] for m in data["data"]}
-            self.assertIn("qwen3.8-27b", model_ids)
-            self.assertIn("qwen-3.8-nvfp4", model_ids)
-            self.assertIn("qwen3.8", model_ids)
-            self.assertIn("ornith-1.5-35b", model_ids)
-            self.assertIn("ornith-1.5-9b", model_ids)
+            self.assertEqual(model_ids, {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"})
+            self.assertNotIn("qwen-3.8-nvfp4", model_ids)
+            self.assertNotIn("qwen3.8", model_ids)
 
     def test_wait_for_backend_ready_verifies_expected_served_model(self):
         self.assertTrue(self.router.wait_for_backend_ready(timeout=1.5, expected_served_model="qwen3.8-27b"))
         self.assertFalse(self.router.wait_for_backend_ready(timeout=0.7, expected_served_model="ornith-1.5-35b"))
+
+    def test_chat_completions_rejects_unknown_model_with_404(self):
+        import urllib.error
+
+        for bad_model in ("unknown-model-xyz", "1.5", "local-sglang/qwen-3.8-flash-next"):
+            _MockBackendHandler.last_request_body = None
+            url = f"http://127.0.0.1:{self.proxy_port}/v1/chat/completions"
+            payload = {
+                "model": bad_model,
+                "messages": [{"role": "user", "content": "Hello"}],
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=3.0)
+            self.assertEqual(ctx.exception.code, 404)
+            err_body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertEqual(err_body["error"]["code"], "model_not_found")
+            self.assertIn("ornith-1.5-35b", err_body["error"]["message"])
+            self.assertIsNone(_MockBackendHandler.last_request_body)
 
     def test_chat_completions_switches_service_and_rewrites_model_name(self):
         with patch.object(self.router, "ensure_service_running", return_value=True) as mock_ensure:
@@ -187,6 +219,81 @@ class TestModelProxyServer(unittest.TestCase):
 
             handler._send_json(200, {"status": "ok"})
             handler.wfile.write.assert_called_once()
+
+    def test_concurrent_cross_model_request_waits_for_in_flight_completion(self):
+        import time
+
+        events = []
+        entered_35b = threading.Event()
+        allow_35b_finish = threading.Event()
+
+        def fake_ensure(target_service, timeout=180.0):
+            events.append(("ensure", target_service))
+            return True
+
+        orig_forward = None
+        from harness.orchestrator.model_proxy import ModelProxyRequestHandler
+        orig_forward = ModelProxyRequestHandler._forward_request
+
+        def slow_forward(handler, method, body=None):
+            if body and b"ornith-1.5-35b" in body:
+                events.append(("forward_start", "35b"))
+                entered_35b.set()
+                allow_35b_finish.wait(timeout=3.0)
+                events.append(("forward_end", "35b"))
+            elif body and b"ornith-1.5-9b" in body:
+                events.append(("forward_start", "9b"))
+            return orig_forward(handler, method, body=body)
+
+        def post_model(model_name, results):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.proxy_port}/v1/chat/completions",
+                data=json.dumps({"model": model_name, "messages": [{"role": "user", "content": "hi"}]}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                results.append(resp.status)
+
+        with patch.object(self.router, "ensure_service_running", side_effect=fake_ensure), \
+             patch.object(ModelProxyRequestHandler, "_forward_request", autospec=True, side_effect=slow_forward):
+            res_35b = []
+            res_9b = []
+            t1 = threading.Thread(target=post_model, args=("local-sglang/ornith-1.5-35b", res_35b))
+            t1.start()
+            self.assertTrue(entered_35b.wait(timeout=2.0))
+
+            t2 = threading.Thread(target=post_model, args=("local-sglang/ornith-1.5-9b", res_9b))
+            t2.start()
+            time.sleep(0.15)
+            # 9b switch MUST NOT happen while 35b is still in-flight
+            self.assertNotIn(("ensure", "sglang-ornith-1.5-9b.service"), events)
+
+            allow_35b_finish.set()
+            t1.join(timeout=3.0)
+            t2.join(timeout=3.0)
+
+        self.assertEqual(res_35b, [200])
+        self.assertEqual(res_9b, [200])
+        self.assertLess(
+            events.index(("forward_end", "35b")),
+            events.index(("ensure", "sglang-ornith-1.5-9b.service")),
+        )
+
+    def test_idle_timeout_skipped_while_request_in_flight(self):
+        import time
+
+        self.router.idle_timeout_seconds = 1
+        self.router.last_activity_time = time.time() - 10
+        with patch.object(self.router, "ensure_service_running", return_value=True), \
+             patch("harness.orchestrator.model_proxy.subprocess.run") as mock_sub:
+            self.assertTrue(self.router.acquire_for_request("sglang-ornith-1.5-35b.service", timeout=1.0))
+            try:
+                self.router.last_activity_time = time.time() - 10
+                self.router.check_idle_timeout()
+                mock_sub.assert_not_called()
+            finally:
+                self.router.release_request()
 
 
 if __name__ == "__main__":

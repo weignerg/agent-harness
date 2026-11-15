@@ -1175,17 +1175,17 @@ EOF
         chmod 0600 "$env_file"
     fi
 
-    local primary_model="ornith-local/ornith-1.5-35b"
+    local primary_model="local-sglang/ornith-1.5-35b"
     local active_service="sglang-ornith-1.5-35b.service"
     local qwen27b_quant="modelopt"
     local qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
     if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        primary_model="local-sglang/qwen-3.8-nvfp4"
+        primary_model="local-sglang/qwen3.8-27b"
         active_service="sglang-qwen3.8-27b.service"
         qwen27b_quant="modelopt"
         qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
     elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        primary_model="local-sglang/qwen-3.8-q6"
+        primary_model="local-sglang/qwen3.8-27b"
         active_service="sglang-qwen3.8-27b.service"
         qwen27b_quant="gguf"
         qwen27b_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
@@ -2286,14 +2286,14 @@ deploy_opencode_backend_and_units() {
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'sglang-ornith-1.5-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "sglang-ornith-1.5-35b.service")"
 
     if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        probed_model="qwen-3.8-nvfp4"
+        probed_model="qwen3.8-27b"
         probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
         probed_service="sglang-qwen3.8-27b.service"
         max_context="$qwen27b_max_context"
         mem_fraction="$qwen27b_mem_fraction"
         probed_cpu_offload="$qwen27b_cpu_offload_gb"
     elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        probed_model="qwen-3.8-q6"
+        probed_model="qwen3.8-27b"
         probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
         probed_service="sglang-qwen3.8-27b.service"
         max_context="$qwen27b_max_context"
@@ -2717,10 +2717,8 @@ install_opencode_global() {
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
-    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen-3.8-q6")
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen3.8-27b")
     elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
         model_profile_arg=(--model-profile "ornith-1.5-9b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
@@ -2791,6 +2789,10 @@ install_opencode_global() {
         --sglang-model "${SGLANG_MODEL:-}"
 
     if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+        rm -f "${USER_HOME}/.t3/caches/opencode.json"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl --user try-restart opencode-server.service 2>/dev/null || true
+        fi
         if command -v opencode >/dev/null 2>&1 && pgrep -u "$(id -u)" -f "opencode serve --service" >/dev/null 2>&1; then
             if command -v timeout >/dev/null 2>&1; then
                 timeout 3 opencode reload >/dev/null 2>&1 || true
@@ -3003,10 +3005,8 @@ install_opencode_local() {
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
-    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        model_profile_arg=(--model-profile "qwen-3.8-q6")
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+        model_profile_arg=(--model-profile "qwen3.8-27b")
     elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
         model_profile_arg=(--model-profile "ornith-1.5-9b")
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
@@ -3065,6 +3065,13 @@ install_opencode_local() {
         --orch-dir "${repo_path}/.orchestration" \
         --opencode-dir "${dest_opencode}" \
         --sglang-model "${SGLANG_MODEL:-}"
+
+    if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
+        rm -f "${USER_HOME}/.t3/caches/opencode.json"
+        if command -v systemctl >/dev/null 2>&1; then
+            systemctl --user try-restart opencode-server.service 2>/dev/null || true
+        fi
+    fi
 
     if [ "$ENABLE_SYSTEMD" = true ]; then
         setup_backend_environment "${BACKEND_DIR}"

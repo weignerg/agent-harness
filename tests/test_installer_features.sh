@@ -1187,21 +1187,20 @@ with open(sys.argv[1], 'r', encoding='utf-8') as f:
 
 # Custom provider preserved
 assert 'custom-prov' in d.get('provider', {})
-# local-sglang and ornith-local synced
+# local-sglang synced dynamically from catalog and legacy ornith-local pruned
 assert 'local-sglang' in d['provider']
-assert 'ornith-local' in d['provider']
+assert 'ornith-local' not in d['provider']
 sglang_models = d['provider']['local-sglang'].get('models', {})
-assert 'qwen3.8-27b' in sglang_models
-assert 'qwen3.8' in sglang_models
+assert set(sglang_models.keys()) == {'qwen3.8-27b', 'ornith-1.5-35b', 'ornith-1.5-9b'}, sglang_models.keys()
 assert sglang_models['qwen3.8-27b'].get('name') == 'Qwen3.8-27B-NVFP4'
 assert sglang_models['ornith-1.5-35b'].get('name') in ('ornith 1.5 35b', 'Ornith 1.5 35B-A3B')
 assert sglang_models['ornith-1.5-9b'].get('name') in ('ornith 1.5 9b', 'Ornith 1.5 9B')
 assert '[SGLang' not in sglang_models['qwen3.8-27b'].get('name', '')
 
-# Primary model updated to local-sglang/qwen-3.8-nvfp4 (or local-sglang/qwen3.8-27b)
-assert d.get('model') in ('local-sglang/qwen-3.8-nvfp4', 'local-sglang/qwen3.8-27b')
+# Primary model updated to canonical local-sglang/qwen3.8-27b
+assert d.get('model') == 'local-sglang/qwen3.8-27b', d.get('model')
 for role in ('supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester', 'reviewer'):
-    assert d['agent'][role].get('model') in ('local-sglang/qwen-3.8-nvfp4', 'local-sglang/qwen3.8-27b'), role
+    assert d['agent'][role].get('model') == 'local-sglang/qwen3.8-27b', role
 " "$SYNCED_JSON"; then
     pass "SGLang provider, concise model names, and primary model synced into existing opencode.json"
 else

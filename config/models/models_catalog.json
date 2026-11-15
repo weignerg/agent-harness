@@ -1,6 +1,9 @@
 {
   "sglang-qwen3.8-27b": {
     "name": "sglang-qwen3.8-27b",
+    "display_name": "Qwen3.8-27B-NVFP4",
+    "context": 262144,
+    "output": 32768,
     "aliases": [
       "qwen-3.8-nvfp4", "qwen3.8", "qwen3.8-27b", "qwen-3.8-27b", "qwen27b", "qwen-3.8-q6",
       "qwen-3.8-27b-nvfp4", "qwen3.8-27b-nvfp4", "27b-nvfp4", "27b-q6",
@@ -14,6 +17,9 @@
   },
   "sglang-ornith-1.5-35b": {
     "name": "sglang-ornith-1.5-35b",
+    "display_name": "ornith 1.5 35b",
+    "context": 262144,
+    "output": 32768,
     "aliases": [
       "ornith-1.5-35b", "ornith-1.5-35b-a3b", "ornith-35b", "ornith35b", "ornith", "ornith-moe", "ornith-local",
       "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
@@ -28,6 +34,9 @@
   },
   "sglang-ornith-1.5-9b": {
     "name": "sglang-ornith-1.5-9b",
+    "display_name": "ornith 1.5 9b",
+    "context": 262144,
+    "output": 32768,
     "aliases": [
       "ornith-1.5-9b", "ornith-9b", "ornith9b", "sub-agent-local", "subagent-local",
       "ornith-1.5-9b-nvfp4-low-ctx",

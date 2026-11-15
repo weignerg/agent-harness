@@ -54,6 +54,9 @@ class ModelRouter:
         self.active_service: Optional[str] = None
         self.last_activity_time = time.time()
         self.lock = threading.Lock()
+        self._request_cond = threading.Condition()
+        self._in_flight_requests = 0
+        self._switching = False
         self.catalog: Dict[str, Any] = {}
         self.alias_to_model: Dict[str, str] = {}
         self.model_to_service: Dict[str, str] = {}
@@ -118,9 +121,17 @@ class ModelRouter:
             self.model_to_served_name[model_key] = served_name
             self.service_to_served_name[svc_name] = served_name
 
-            # Map key and all aliases (normalized lowercase, strip provider prefix)
+            # Map key, served_model_name, model_path, and all aliases (normalized lowercase, strip provider prefix)
             clean_key = self._normalize_model_id(model_key)
             self.alias_to_model[clean_key] = model_key
+            clean_served = self._normalize_model_id(str(served_name))
+            if clean_served:
+                self.alias_to_model[clean_served] = model_key
+            model_path = info.get("model_path", "")
+            if model_path:
+                clean_path = self._normalize_model_id(str(model_path))
+                if clean_path:
+                    self.alias_to_model[clean_path] = model_key
             for alias in info.get("aliases", []):
                 clean_alias = self._normalize_model_id(str(alias))
                 # Preserve first registration for shared aliases unless not yet registered
@@ -136,7 +147,7 @@ class ModelRouter:
         return clean
 
     def resolve_model_service(self, requested_model: str) -> Optional[tuple[str, str]]:
-        """Resolve a requested model string to (model_key, service_name)."""
+        """Resolve a requested model string to (model_key, service_name) via exact normalized match."""
         if not self.alias_to_model:
             self.load_catalog()
 
@@ -144,11 +155,6 @@ class ModelRouter:
         if clean in self.alias_to_model:
             model_key = self.alias_to_model[clean]
             return model_key, self.model_to_service.get(model_key, f"{model_key}.service")
-
-        # Fallback exact substring match
-        for alias, model_key in sorted(self.alias_to_model.items(), key=lambda x: -len(x[0])):
-            if alias in clean or clean in alias:
-                return model_key, self.model_to_service.get(model_key, f"{model_key}.service")
 
         return None
 
@@ -174,7 +180,7 @@ class ModelRouter:
         return self._normalize_model_id(requested_model)
 
     def get_catalog_models_payload(self) -> Dict[str, Any]:
-        """Build an OpenAI-compatible /v1/models list covering catalog models and primary aliases."""
+        """Build an OpenAI-compatible /v1/models list advertising ONLY canonical served_model_names."""
         if not self.catalog:
             self.load_catalog()
 
@@ -198,9 +204,6 @@ class ModelRouter:
         for model_key, info in self.catalog.items():
             served = self.model_to_served_name.get(model_key, model_key)
             _add_model(served, model_key)
-            _add_model(model_key, model_key)
-            for alias in info.get("aliases", []):
-                _add_model(str(alias), model_key)
 
         return {"object": "list", "data": data}
 
@@ -306,25 +309,81 @@ class ModelRouter:
         logger.warning("Backend timed out waiting for readiness at %s", url)
         return False
 
+    def acquire_for_request(self, target_service: str, timeout: float = 180.0) -> bool:
+        """Wait for any conflicting in-flight requests/switches to finish, ensure target_service is up, and mark in-flight."""
+        with self._request_cond:
+            while self._switching or (
+                self._in_flight_requests > 0 and self.active_service != target_service
+            ):
+                self._request_cond.wait()
+            needs_switch = self.active_service != target_service
+            if needs_switch:
+                self._switching = True
+            else:
+                self._in_flight_requests += 1
+
+        if needs_switch:
+            ok = False
+            try:
+                ok = self.ensure_service_running(target_service, timeout=timeout)
+            finally:
+                with self._request_cond:
+                    self._switching = False
+                    if ok:
+                        self.active_service = target_service
+                        self._in_flight_requests += 1
+                    self._request_cond.notify_all()
+            return ok
+
+        ok = False
+        try:
+            ok = self.ensure_service_running(target_service, timeout=timeout)
+        finally:
+            if not ok:
+                with self._request_cond:
+                    if self._in_flight_requests > 0:
+                        self._in_flight_requests -= 1
+                    self._request_cond.notify_all()
+        return ok
+
+    def release_request(self) -> None:
+        """Mark an in-flight backend request complete and wake waiters."""
+        with self._request_cond:
+            if self._in_flight_requests > 0:
+                self._in_flight_requests -= 1
+            self._request_cond.notify_all()
+
     def check_idle_timeout(self) -> None:
         """Unload service if idle duration exceeds idle_timeout_seconds."""
         if self.idle_timeout_seconds <= 0:
             return
 
-        with self.lock:
-            idle_duration = time.time() - self.last_activity_time
-            if idle_duration > self.idle_timeout_seconds:
-                current = self.get_currently_running_service()
-                if current:
-                    logger.info(
-                        "Idle timeout reached (%ds > %ds). Unloading %s to free GPU VRAM.",
-                        int(idle_duration),
-                        self.idle_timeout_seconds,
-                        current,
-                    )
-                    subprocess.run(["systemctl", "--user", "stop", current], check=False, capture_output=True)
-                    self.active_service = None
-                    self.last_activity_time = time.time()
+        with self._request_cond:
+            if self._in_flight_requests > 0 or self._switching:
+                return
+            if (time.time() - self.last_activity_time) <= self.idle_timeout_seconds:
+                return
+            self._switching = True
+
+        try:
+            with self.lock:
+                idle_duration = time.time() - self.last_activity_time
+                if idle_duration > self.idle_timeout_seconds:
+                    current = self.get_currently_running_service()
+                    if current:
+                        logger.info(
+                            "Idle timeout reached (%ds > %ds). Unloading %s to free GPU VRAM.",
+                            int(idle_duration),
+                            self.idle_timeout_seconds,
+                            current,
+                        )
+                        subprocess.run(["systemctl", "--user", "stop", current], check=False, capture_output=True)
+                        self.active_service = None
+                        self.last_activity_time = time.time()
+        finally:
+            with self._request_cond:
+                self._switching = False
+                self._request_cond.notify_all()
 
 
 class ModelProxyServer(ThreadingHTTPServer):
@@ -379,18 +438,27 @@ class ModelProxyRequestHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/v1/models" or self.path.startswith("/v1/models?"):
-            # Try querying active backend first; merge with catalog models so clients see all selectable aliases
+            # Try querying active backend first; keep metadata ONLY for canonical served model IDs and merge canonical catalog entries
             catalog_payload = self.router.get_catalog_models_payload()
+            canonical_ids = {
+                m["id"] for m in catalog_payload.get("data", []) if isinstance(m, dict) and m.get("id")
+            }
             try:
                 url = f"http://{self.router.backend_host}:{self.router.backend_port}/v1/models"
                 req = urllib.request.Request(url, headers={"Authorization": "Bearer EMPTY"})
                 with urllib.request.urlopen(req, timeout=1.5) as resp:
                     if resp.status == 200:
                         backend_data = json.loads(resp.read().decode("utf-8"))
-                        existing_ids = {m.get("id") for m in backend_data.get("data", []) if isinstance(m, dict)}
+                        filtered_backend = [
+                            m
+                            for m in backend_data.get("data", [])
+                            if isinstance(m, dict) and m.get("id") in canonical_ids
+                        ]
+                        existing_ids = {m.get("id") for m in filtered_backend}
                         for cat_m in catalog_payload.get("data", []):
                             if cat_m["id"] not in existing_ids:
-                                backend_data.setdefault("data", []).append(cat_m)
+                                filtered_backend.append(cat_m)
+                        backend_data["data"] = filtered_backend
                         self._send_json(200, backend_data)
                         return
             except Exception:
@@ -405,19 +473,38 @@ class ModelProxyRequestHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         raw_body = self.rfile.read(content_length) if content_length > 0 else b""
 
-        if self.path.startswith("/v1/chat/completions") or self.path.startswith("/v1/completions"):
-            if raw_body:
-                try:
-                    body_json = json.loads(raw_body.decode("utf-8"))
-                except Exception:
-                    body_json = None
+        acquired_request = False
+        try:
+            if self.path.startswith("/v1/chat/completions") or self.path.startswith("/v1/completions"):
+                if raw_body:
+                    try:
+                        body_json = json.loads(raw_body.decode("utf-8"))
+                    except Exception:
+                        body_json = None
 
-                if isinstance(body_json, dict) and "model" in body_json:
-                    requested_model = str(body_json["model"])
-                    resolved = self.router.resolve_model_service(requested_model)
-                    if resolved:
+                    if isinstance(body_json, dict) and body_json.get("model"):
+                        requested_model = str(body_json["model"])
+                        resolved = self.router.resolve_model_service(requested_model)
+                        if resolved is None:
+                            available = [
+                                str(m["id"])
+                                for m in self.router.get_catalog_models_payload().get("data", [])
+                                if isinstance(m, dict) and m.get("id")
+                            ]
+                            self._send_json(
+                                404,
+                                {
+                                    "error": {
+                                        "message": f"Model '{requested_model}' is not available. Available models: {', '.join(available)}",
+                                        "type": "invalid_request_error",
+                                        "code": "model_not_found",
+                                    }
+                                },
+                            )
+                            return
+
                         model_key, target_service = resolved
-                        ok = self.router.ensure_service_running(target_service, timeout=self.switch_timeout)
+                        ok = self.router.acquire_for_request(target_service, timeout=self.switch_timeout)
                         if not ok:
                             self._send_json(
                                 503,
@@ -429,6 +516,7 @@ class ModelProxyRequestHandler(BaseHTTPRequestHandler):
                                 },
                             )
                             return
+                        acquired_request = True
 
                         served_name = self.router.resolve_served_model_name(
                             requested_model,
@@ -438,8 +526,11 @@ class ModelProxyRequestHandler(BaseHTTPRequestHandler):
                         body_json["model"] = served_name
                         raw_body = json.dumps(body_json).encode("utf-8")
 
-        self.router.last_activity_time = time.time()
-        self._forward_request("POST", body=raw_body)
+            self.router.last_activity_time = time.time()
+            self._forward_request("POST", body=raw_body)
+        finally:
+            if acquired_request:
+                self.router.release_request()
 
     def _forward_request(self, method: str, body: Optional[bytes] = None) -> None:
         conn = http.client.HTTPConnection(self.router.backend_host, self.router.backend_port, timeout=600)

@@ -27,7 +27,7 @@ fi
 if grep -qiE 'speculative|eagle|dflash|d-flash|draft|cpu-offload' "$U"; then fail "no speculative/offload flags"; else pass "no speculative/offload flags"; fi
 Q27B="$R/config/systemd/sglang-qwen3.8-27b.service"
 if grep -q -- '--max-mamba-cache-size 5' "$Q27B" && ! grep -q -- '--mamba-full-memory-ratio 4.59' "$Q27B"; then pass "qwen27b Mamba cache preserves 64k+ KV cache"; else fail "qwen27b Mamba cache configuration"; fi
-grep -q 'ornith-local' "$R/config/opencode/opencode.json" && grep -q '"baseURL": "http://127.0.0.1:30000/v1"' "$R/config/opencode/opencode.json" && grep -q '"apiKey": "EMPTY"' "$R/config/opencode/opencode.json" && pass "opencode.json provider direct to :30000" || fail "opencode provider"
+grep -q 'local-sglang' "$R/config/opencode/opencode.json" && ! grep -q 'ornith-local' "$R/config/opencode/opencode.json" && grep -q '"baseURL": "http://127.0.0.1:30000/v1"' "$R/config/opencode/opencode.json" && grep -q '"apiKey": "EMPTY"' "$R/config/opencode/opencode.json" && pass "opencode.json provider direct to :30000" || fail "opencode provider"
 [ -s "$R/docs/inference_architecture.md" ] && grep -q 'eagle-3' "$R/docs/inference_architecture.md" && grep -q 'continuous batching' "$R/docs/inference_architecture.md" && pass "docs/inference_architecture.md present" || fail "architecture doc"
 if curl -sf --max-time 2 http://127.0.0.1:30000/v1/models -o /tmp/_models.json 2>/dev/null; then
     grep -qE '"max_model_len": *(262144|131072|65536)' /tmp/_models.json && pass "live /v1/models reports valid context" || fail "live max_model_len"
