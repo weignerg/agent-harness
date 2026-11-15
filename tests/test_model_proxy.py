@@ -173,6 +173,21 @@ class TestModelProxyServer(unittest.TestCase):
             self.assertEqual(_MockBackendHandler.last_request_body["model"], "qwen3.8-27b")
             self.assertEqual(resp_data["model"], "qwen3.8-27b")
 
+    def test_send_json_handles_client_disconnect(self):
+        from unittest.mock import MagicMock
+        from harness.orchestrator.model_proxy import ModelProxyRequestHandler
+
+        for exc in (BrokenPipeError("client disconnected"), ConnectionResetError("connection reset")):
+            handler = ModelProxyRequestHandler.__new__(ModelProxyRequestHandler)
+            handler.send_response = MagicMock()
+            handler.send_header = MagicMock()
+            handler.end_headers = MagicMock()
+            handler.wfile = MagicMock()
+            handler.wfile.write.side_effect = exc
+
+            handler._send_json(200, {"status": "ok"})
+            handler.wfile.write.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

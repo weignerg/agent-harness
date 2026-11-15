@@ -757,8 +757,9 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
         self.assertIn("SGLANG_WARMUP_TIMEOUT:-300", install_sh_content, "warmup timeout must default to 300s")
         self.assertIn("SGLANG_HEALTHCHECK_RETRIES:-240", install_sh_content, "max_sglang_wait must default to 240s")
-        self.assertIn("disable --now sglang-ornith-1.5-35b.service", install_sh_content)
-        self.assertIn("disable --now sglang-qwen3.8-27b.service", install_sh_content)
+        self.assertRegex(install_sh_content, r"for _legacy_u in .*sglang-ornith-1\.5-35b\.service")
+        self.assertRegex(install_sh_content, r"for _legacy_u in .*sglang-qwen3\.8-27b\.service")
+        self.assertIn('systemctl --user disable --now "$_legacy_u"', install_sh_content)
 
         # Verify sed tuning idempotency and absence of 0.880.88 corruption
         with tempfile.TemporaryDirectory() as tmp_dir:

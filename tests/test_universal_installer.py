@@ -1508,12 +1508,12 @@ class TestUniversalInstaller(unittest.TestCase):
             ornith_content = ornith_unit.read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
 
-            # 2. Qwen 27B service must have 262144 context on RTX 5090 and --max-mamba-cache-size 3 (no 4.59 ratio starvation)
+            # 2. Qwen 27B service must have 262144 context on RTX 5090 and --max-mamba-cache-size 5 (no 4.59 ratio starvation)
             qwen_unit = systemd_user_dir / "sglang-qwen3.8-27b.service"
             self.assertTrue(qwen_unit.is_file())
             qwen_content = qwen_unit.read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
-            self.assertIn("--max-mamba-cache-size 3", qwen_content)
+            self.assertIn("--max-mamba-cache-size 5", qwen_content)
             self.assertNotIn("--mamba-full-memory-ratio 4.59", qwen_content)
 
     def test_issue49_adaptive_hardware_sizing_and_cpu_offload(self):
@@ -1637,6 +1637,25 @@ class TestUniversalInstaller(unittest.TestCase):
                 self.assertIn(f'Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', ornith_content)
                 self.assertIn(f'Environment="SGLANG_27B_CONTEXT_LENGTH={expected_ctx}"', qwen_content)
                 self.assertIn(f'Environment="SGLANG_27B_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', qwen_content)
+
+    def test_issue54_per_unit_systemctl_disable_loop(self):
+        """Test Issue #54: install.sh loops per unit rather than passing multiple units to systemctl --user disable --now."""
+        import re
+
+        install_text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("for _legacy_u in", install_text)
+        joined = re.sub(r"\\\n\s*", " ", install_text)
+        disable_lines = [line for line in joined.splitlines() if "systemctl --user disable --now" in line]
+        self.assertGreater(len(disable_lines), 0)
+        for line in disable_lines:
+            after = line.split("disable --now", 1)[1]
+            after = re.split(r"[|;&>]|2>/dev/null", after)[0].strip()
+            args = [a for a in after.split() if a]
+            self.assertEqual(
+                len(args),
+                1,
+                f"Expected single unit per systemctl --user disable --now call, got {args}: {line.strip()}",
+            )
 
 
 if __name__ == "__main__":
