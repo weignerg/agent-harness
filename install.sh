@@ -1223,7 +1223,7 @@ EOF
         "SGLANG_9B_CONTEXT_LENGTH=262144"
         "SGLANG_9B_MEM_FRACTION=0.88"
         "SGLANG_9B_CPU_OFFLOAD_ARGS="
-        "SGLANG_27B_MAMBA_ARGS=\"--max-mamba-cache-size 3 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
+        "SGLANG_27B_MAMBA_ARGS=\"--max-mamba-cache-size 5 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
     )
 
     for kv in "${sglang_vars[@]}"; do
@@ -1858,13 +1858,21 @@ verify_backend_healthchecks() {
     # 1. Start / enable units if systemctl is available
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
         # Disable legacy SGLang units and mutually exclusive model units
-        systemctl --user disable --now opencode-sglang-ornith-35b.service opencode-sglang-qwen27b.service ornith-1.5-9b-nvfp4-low-ctx.service ornith-30000.service 2>/dev/null || true
+        for _legacy_u in opencode-sglang-ornith-35b.service opencode-sglang-qwen27b.service ornith-1.5-9b-nvfp4-low-ctx.service ornith-30000.service; do
+            systemctl --user disable --now "$_legacy_u" 2>/dev/null || true
+        done
         if [ "${svc_name}" = "sglang-qwen3.8-27b.service" ] || [ "${svc_name}" = "opencode-sglang-qwen27b.service" ]; then
-            systemctl --user disable --now sglang-ornith-1.5-35b.service sglang-ornith-1.5-9b.service opencode-sglang-ornith-35b.service ornith-30000.service 2>/dev/null || true
+            for _legacy_u in sglang-ornith-1.5-35b.service sglang-ornith-1.5-9b.service opencode-sglang-ornith-35b.service ornith-30000.service; do
+                systemctl --user disable --now "$_legacy_u" 2>/dev/null || true
+            done
         elif [ "${svc_name}" = "sglang-ornith-1.5-9b.service" ]; then
-            systemctl --user disable --now sglang-ornith-1.5-35b.service sglang-qwen3.8-27b.service opencode-sglang-qwen27b.service opencode-sglang-ornith-35b.service 2>/dev/null || true
+            for _legacy_u in sglang-ornith-1.5-35b.service sglang-qwen3.8-27b.service opencode-sglang-qwen27b.service opencode-sglang-ornith-35b.service; do
+                systemctl --user disable --now "$_legacy_u" 2>/dev/null || true
+            done
         elif [ "${svc_name}" = "sglang-ornith-1.5-35b.service" ] || [ "${svc_name}" = "opencode-sglang-ornith-35b.service" ] || [ "${svc_name}" = "ornith-30000.service" ]; then
-            systemctl --user disable --now sglang-qwen3.8-27b.service sglang-ornith-1.5-9b.service opencode-sglang-qwen27b.service 2>/dev/null || true
+            for _legacy_u in sglang-qwen3.8-27b.service sglang-ornith-1.5-9b.service opencode-sglang-qwen27b.service; do
+                systemctl --user disable --now "$_legacy_u" 2>/dev/null || true
+            done
         fi
         systemctl --user daemon-reload 2>/dev/null || true
         systemctl --user enable opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service "${svc_name}" 2>/dev/null || true
@@ -2421,13 +2429,18 @@ with open(path, 'w') as f:
 
     # 3. Stop/disable and remove stale legacy model service files from backend_env_dir and systemd_dest
     if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
-        systemctl --user disable --now \
+        for _legacy_u in \
             opencode-sglang-ornith-35b.service \
             opencode-sglang-qwen27b.service \
             ornith-1.5-9b-nvfp4-low-ctx.service \
             ornith-30000.service \
             ornith-1.5-35b-a3b-nvfp4.service \
-            qwen-3.8-27b-nvfp4-med-ctx.service 2>/dev/null || true
+            qwen-3.8-27b-nvfp4-med-ctx.service; do
+            systemctl --user disable --now "$_legacy_u" 2>/dev/null || true
+        done
+    fi
+    if [ "$DRY_RUN" != true ]; then
+        rm -f "${backend_env_dir}/context_length.state"
     fi
     for stale_dir in "${backend_env_dir}" "${systemd_dest}"; do
         rm -f "${stale_dir}"/gemma-4-*.service \

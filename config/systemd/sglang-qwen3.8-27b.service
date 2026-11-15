@@ -27,7 +27,7 @@ Environment="SGLANG_27B_SPECULATIVE_ALGO="
 # Environment="SGLANG_27B_SPECULATIVE_ARGS=--speculative-algorithm EAGLE3 --speculative-draft-model-path ${SGLANG_27B_DRAFT_MODEL_PATH} --speculative-num-steps 3 --speculative-eagle-topk 4"
 Environment="SGLANG_27B_SPECULATIVE_ARGS="
 Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="
-Environment="SGLANG_27B_MAMBA_ARGS=--max-mamba-cache-size 3 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+Environment="SGLANG_27B_MAMBA_ARGS=--max-mamba-cache-size 5 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
 Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"

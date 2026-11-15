@@ -160,8 +160,8 @@ if grep -q -- '--mamba-full-memory-ratio 4.59' "$QWEN27B_FILE" "$INSTALL_SCRIPT"
     echo "❌ FAIL: Found KV-starving --mamba-full-memory-ratio 4.59 in service or installer"
     exit 1
 fi
-if ! grep -qE -- '--max-mamba-cache-size 3|--mamba-full-memory-ratio 0\.25' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: sglang-qwen3.8-27b.service missing --max-mamba-cache-size 3 or --mamba-full-memory-ratio 0.25"
+if ! grep -q -- '--max-mamba-cache-size 5' "$QWEN27B_FILE" || ! grep -q -- '--max-mamba-cache-size 5' "$INSTALL_SCRIPT"; then
+    echo "❌ FAIL: sglang-qwen3.8-27b.service or install.sh missing --max-mamba-cache-size 5"
     exit 1
 fi
 if [ -f "${HOME}/.config/opencode-backends/env" ]; then
