@@ -1508,6 +1508,125 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertIn("--max-mamba-cache-size 3", qwen_content)
             self.assertNotIn("--mamba-full-memory-ratio 4.59", qwen_content)
 
+    def test_issue49_adaptive_hardware_sizing_and_cpu_offload(self):
+        """Test Issue #49: Adaptive per-model GPU/RAM sizing, context scaling, and CPU offload in install.sh."""
+        # 1. RTX 5090 (32 GB VRAM): 100% in VRAM (empty offload args) for both Ornith 35B (256k) and Qwen 27B (256k)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home_5090"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-5090",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
+            qwen_content = (systemd_user_dir / "opencode-sglang-qwen27b.service").read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
+            self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS="', ornith_content)
+            self.assertIn("$SGLANG_CPU_OFFLOAD_ARGS", ornith_content)
+            self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
+            self.assertIn('Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="', qwen_content)
+            self.assertIn("$SGLANG_27B_CPU_OFFLOAD_ARGS", qwen_content)
+
+        # 2. RTX 4090 (24 GB VRAM, host RAM >= 32 GB): Ornith 35B at 64k pure-GPU, Qwen 27B at 64k with 6 GB CPU offload
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home_4090"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-4090",
+                "--sglang-model", "qwen3.8",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
+            qwen_content = (systemd_user_dir / "opencode-sglang-qwen27b.service").read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=65536"', ornith_content)
+            self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS="', ornith_content)
+            self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=65536"', qwen_content)
+            self.assertIn('Environment="SGLANG_27B_CPU_OFFLOAD_ARGS=--cpu-offload-gb 6"', qwen_content)
+
+            env_content = (sandbox / ".config" / "opencode-backends" / "env").read_text(encoding="utf-8")
+            self.assertIn('SGLANG_27B_CPU_OFFLOAD_ARGS="--cpu-offload-gb 6"', env_content)
+            self.assertIn("PROBED_CPU_OFFLOAD_GB=6", env_content)
+
+        # 3. RTX 4090 with TARGET_CONTEXT=262144: Ornith 35B enables 8 GB CPU offload for 256k context
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home_4090_256k"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+                "TARGET_CONTEXT": "262144",
+            }
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-4090",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
+            self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb 8"', ornith_content)
+
+        # 4. RTX 4080 (16 GB VRAM) and RTX 4070 (12 GB VRAM) profiles
+        for gpu_override, expected_ctx, expected_offload in [
+            ("rtx-4080", "32768", "14"),
+            ("rtx-4070", "16384", "16"),
+        ]:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                sandbox = Path(tmp_dir) / f"home_{gpu_override}"
+                sandbox.mkdir()
+                systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+                env = {
+                    "USER_HOME": str(sandbox),
+                    "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                    "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                    "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+                }
+                proc = self.run_installer(
+                    "--target", "opencode",
+                    "--mode", "global",
+                    "--override-gpu", gpu_override,
+                    "--non-interactive",
+                    env=env,
+                )
+                self.assertEqual(proc.returncode, 0, f"Installer failed for {gpu_override}: {proc.stderr}\n{proc.stdout}")
+
+                ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
+                qwen_content = (systemd_user_dir / "opencode-sglang-qwen27b.service").read_text(encoding="utf-8")
+                self.assertIn(f'Environment="SGLANG_CONTEXT_LENGTH={expected_ctx}"', ornith_content)
+                self.assertIn(f'Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', ornith_content)
+                self.assertIn(f'Environment="SGLANG_27B_CONTEXT_LENGTH={expected_ctx}"', qwen_content)
+                self.assertIn(f'Environment="SGLANG_27B_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', qwen_content)
+
 
 if __name__ == "__main__":
     unittest.main()

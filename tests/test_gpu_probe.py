@@ -24,7 +24,9 @@ from harness.hardware.probe import (
     GPUInfo,
     HardwareProbe,
     SystemResources,
+    classify_model_sizing,
     classify_profile,
+    compute_dynamic_vram_spillover,
     evaluate_multi_gpu,
     filter_compute_gpus,
     probe_hardware,
@@ -526,6 +528,285 @@ class TestLiveHostProbe(unittest.TestCase):
         self.assertEqual(profile.tensor_parallel_size, 1)
         self.assertEqual(profile.cuda_visible_devices, "0")
         self.assertGreaterEqual(profile.vram_gb, 30.0)
+
+
+class TestPerModelHardwareSizingIssue49(unittest.TestCase):
+    """Test Issue #49 adaptive per-model hardware sizing, context scaling, and CPU offload."""
+
+    def test_rtx_5090_32gb_vram_125gb_ram_pure_gpu_sizing(self):
+        """RTX 5090 (32 GB VRAM, 125 GB RAM): 100% in VRAM, Ornith 35B, Qwen 3.8 27B, and Ornith 9B at 262144."""
+        gpu = GPUInfo(
+            index=0,
+            name="NVIDIA GeForce RTX 5090",
+            memory_total_mb=32768,
+            compute_cap=12.0,
+            driver="nvidia",
+        )
+        p = classify_profile(
+            effective_vram_gb=32.0,
+            primary_gpu=gpu,
+            host_ram_gb=125.0,
+            host_cpu_cores=24,
+            tier="mock",
+        )
+        d = p.to_dict()
+        self.assertIn("model_sizing", d)
+        self.assertIn("models", d)
+        sizing = d["model_sizing"]
+
+        # Ornith 1.5 35B: 100% VRAM, 256k context
+        ornith = sizing["ornith-1.5-35b"]
+        self.assertEqual(ornith["max_context"], 262144)
+        self.assertEqual(ornith["memory_fraction"], 0.88)
+        self.assertFalse(ornith["cpu_offload"])
+        self.assertEqual(ornith["cpu_offload_gb"], 0)
+        self.assertEqual(ornith["offload"], "pure-gpu")
+
+        # Qwen 3.8 27B: 100% VRAM, 256k context
+        qwen = sizing["qwen3.8-27b"]
+        self.assertEqual(qwen["max_context"], 262144)
+        self.assertEqual(qwen["memory_fraction"], 0.88)
+        self.assertFalse(qwen["cpu_offload"])
+        self.assertEqual(qwen["cpu_offload_gb"], 0)
+        self.assertEqual(qwen["offload"], "pure-gpu")
+
+        # Ornith 1.5 9B: 100% VRAM, 256k context
+        ornith9b = sizing["ornith-1.5-9b"]
+        self.assertEqual(ornith9b["max_context"], 262144)
+        self.assertEqual(ornith9b["memory_fraction"], 0.88)
+        self.assertFalse(ornith9b["cpu_offload"])
+        self.assertEqual(ornith9b["cpu_offload_gb"], 0)
+        self.assertEqual(ornith9b["offload"], "pure-gpu")
+
+    def test_continuous_dynamic_vram_spillover_across_arbitrary_gpus(self):
+        """Test compute_dynamic_vram_spillover attempts 100% GPU first and spills deficit to CPU RAM only when needed."""
+        # 1. 32 GB GPU (RTX 5090): 100% pure GPU at 262144 context for both 35B MoE and 27B Dense
+        res_32 = compute_dynamic_vram_spillover(
+            effective_vram_gb=32.0,
+            host_ram_gb=125.0,
+            model_weights_gb=19.0,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=9.0,
+            memory_fraction=0.88,
+        )
+        self.assertEqual(res_32["max_context"], 262144)
+        self.assertFalse(res_32["cpu_offload"])
+        self.assertEqual(res_32["cpu_offload_gb"], 0)
+        self.assertEqual(res_32["offload"], "pure-gpu")
+
+        # 2. 24 GB GPU (RTX 4090): 100% pure GPU at 65536 context when 256k not forced (usable 21.12 >= 19.0 + 2.0)
+        res_24_pure = compute_dynamic_vram_spillover(
+            effective_vram_gb=24.0,
+            host_ram_gb=64.0,
+            model_weights_gb=19.0,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=9.5,
+            memory_fraction=0.88,
+        )
+        self.assertEqual(res_24_pure["max_context"], 65536)
+        self.assertFalse(res_24_pure["cpu_offload"])
+        self.assertEqual(res_24_pure["cpu_offload_gb"], 0)
+        self.assertEqual(res_24_pure["recommended_cpu_offload_gb"], 8)
+        self.assertEqual(res_24_pure["offload"], "pure-gpu")
+
+        # 3. 20 GB intermediate GPU: usable 17.6 GB < 21.0 GB -> spills 4 GB to CPU RAM
+        res_20_spill = compute_dynamic_vram_spillover(
+            effective_vram_gb=20.0,
+            host_ram_gb=64.0,
+            model_weights_gb=19.0,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=9.5,
+            memory_fraction=0.88,
+        )
+        self.assertTrue(res_20_spill["cpu_offload"])
+        self.assertEqual(res_20_spill["cpu_offload_gb"], 4)
+        self.assertEqual(res_20_spill["offload"], "cpu-offload")
+        self.assertEqual(res_20_spill["max_context"], 65536)
+
+        # 4. 16 GB GPU (RTX 4080) and 12 GB GPU (RTX 4070): proportional spillover
+        res_16 = compute_dynamic_vram_spillover(
+            effective_vram_gb=16.0,
+            host_ram_gb=64.0,
+            model_weights_gb=19.0,
+            min_kv_gb=8.5,
+            full_ctx_kv_gb=9.5,
+            memory_fraction=0.88,
+        )
+        self.assertTrue(res_16["cpu_offload"])
+        self.assertEqual(res_16["cpu_offload_gb"], 14)
+
+        res_12 = compute_dynamic_vram_spillover(
+            effective_vram_gb=12.0,
+            host_ram_gb=64.0,
+            model_weights_gb=19.0,
+            min_kv_gb=6.5,
+            full_ctx_kv_gb=9.5,
+            memory_fraction=0.85,
+        )
+        self.assertTrue(res_12["cpu_offload"])
+        self.assertEqual(res_12["cpu_offload_gb"], 16)
+
+    def test_rtx_4090_24gb_vram_64gb_ram_and_16gb_ram(self):
+        """RTX 4090 (24 GB VRAM, 64 GB RAM & 16 GB RAM): context scaling and automatic CPU RAM offload."""
+        gpu = GPUInfo(
+            index=0,
+            name="NVIDIA GeForce RTX 4090",
+            memory_total_mb=24576,
+            compute_cap=8.9,
+            driver="nvidia",
+        )
+
+        # Case 1: 24 GB VRAM + 64 GB Host RAM (default target_context)
+        p_64 = classify_profile(
+            effective_vram_gb=24.0,
+            primary_gpu=gpu,
+            host_ram_gb=64.0,
+            host_cpu_cores=16,
+            tier="mock",
+        )
+        s_64 = p_64.to_dict()["model_sizing"]
+        self.assertEqual(s_64["ornith-1.5-35b"]["max_context"], 65536)
+        self.assertFalse(s_64["ornith-1.5-35b"]["cpu_offload"])
+        self.assertEqual(s_64["ornith-1.5-35b"]["cpu_offload_gb"], 0)
+        self.assertEqual(s_64["ornith-1.5-35b"]["recommended_cpu_offload_gb"], 8)
+
+        # Qwen 27B Dense enables 6 GB CPU offload on 24 GB VRAM + 64 GB RAM so 64k context fits without OOM
+        self.assertEqual(s_64["qwen3.8-27b"]["max_context"], 65536)
+        self.assertTrue(s_64["qwen3.8-27b"]["cpu_offload"])
+        self.assertEqual(s_64["qwen3.8-27b"]["cpu_offload_gb"], 6)
+        self.assertEqual(s_64["qwen3.8-27b"]["offload"], "cpu-offload")
+
+        # Case 2: 24 GB VRAM + 64 GB Host RAM with target_context=262144
+        p_256k = classify_profile(
+            effective_vram_gb=24.0,
+            primary_gpu=gpu,
+            host_ram_gb=64.0,
+            host_cpu_cores=16,
+            target_context=262144,
+            tier="mock",
+        )
+        s_256k = p_256k.to_dict()["model_sizing"]
+        self.assertEqual(s_256k["ornith-1.5-35b"]["max_context"], 262144)
+        self.assertTrue(s_256k["ornith-1.5-35b"]["cpu_offload"])
+        self.assertEqual(s_256k["ornith-1.5-35b"]["cpu_offload_gb"], 8)
+        self.assertEqual(s_256k["ornith-1.5-35b"]["offload"], "cpu-offload")
+
+        # Case 3: 24 GB VRAM + 16 GB Host RAM (insufficient RAM for CPU offload -> pure GPU with scaled context)
+        p_16 = classify_profile(
+            effective_vram_gb=24.0,
+            primary_gpu=gpu,
+            host_ram_gb=16.0,
+            host_cpu_cores=8,
+            tier="mock",
+        )
+        s_16 = p_16.to_dict()["model_sizing"]
+        self.assertEqual(s_16["ornith-1.5-35b"]["max_context"], 65536)
+        self.assertFalse(s_16["ornith-1.5-35b"]["cpu_offload"])
+        self.assertEqual(s_16["ornith-1.5-35b"]["cpu_offload_gb"], 0)
+
+        self.assertEqual(s_16["qwen3.8-27b"]["max_context"], 32768)
+        self.assertFalse(s_16["qwen3.8-27b"]["cpu_offload"])
+        self.assertEqual(s_16["qwen3.8-27b"]["cpu_offload_gb"], 0)
+        self.assertEqual(s_16["qwen3.8-27b"]["offload"], "pure-gpu")
+
+    def test_rtx_4080_16gb_and_rtx_4070_12gb_profiles(self):
+        """RTX 4080 (16 GB VRAM) and RTX 4070 (12 GB VRAM) per-model sizing and offload."""
+        gpu_4080 = GPUInfo(
+            index=0,
+            name="NVIDIA GeForce RTX 4080",
+            memory_total_mb=16384,
+            compute_cap=8.9,
+            driver="nvidia",
+        )
+        # RTX 4080 with 64 GB RAM (>= 48 GB)
+        p_4080_high_ram = classify_profile(
+            effective_vram_gb=16.0,
+            primary_gpu=gpu_4080,
+            host_ram_gb=64.0,
+            host_cpu_cores=16,
+            tier="mock",
+        )
+        self.assertEqual(p_4080_high_ram.model, "ornith-1.5-9b")
+        self.assertEqual(p_4080_high_ram.max_context, 262144)
+        self.assertFalse(p_4080_high_ram.cpu_offload)
+        s_4080_high = p_4080_high_ram.to_dict()["model_sizing"]
+        for m in ("ornith-1.5-35b", "qwen3.8-27b"):
+            self.assertEqual(s_4080_high[m]["max_context"], 32768)
+            self.assertTrue(s_4080_high[m]["cpu_offload"])
+            self.assertEqual(s_4080_high[m]["cpu_offload_gb"], 14)
+            self.assertEqual(s_4080_high[m]["offload"], "cpu-offload")
+
+        # RTX 4080 with 32 GB RAM (< 48 GB)
+        p_4080_low_ram = classify_profile(
+            effective_vram_gb=16.0,
+            primary_gpu=gpu_4080,
+            host_ram_gb=32.0,
+            host_cpu_cores=8,
+            tier="mock",
+        )
+        s_4080_low = p_4080_low_ram.to_dict()["model_sizing"]
+        for m in ("ornith-1.5-35b", "qwen3.8-27b"):
+            self.assertEqual(s_4080_low[m]["max_context"], 16384)
+            self.assertTrue(s_4080_low[m]["cpu_offload"])
+            self.assertEqual(s_4080_low[m]["cpu_offload_gb"], 12)
+            self.assertEqual(s_4080_low[m]["offload"], "cpu-offload")
+
+        # RTX 4070 (12 GB VRAM) with 64 GB RAM
+        gpu_4070 = GPUInfo(
+            index=0,
+            name="NVIDIA GeForce RTX 4070",
+            memory_total_mb=12288,
+            compute_cap=8.9,
+            driver="nvidia",
+        )
+        p_4070 = classify_profile(
+            effective_vram_gb=12.0,
+            primary_gpu=gpu_4070,
+            host_ram_gb=64.0,
+            host_cpu_cores=16,
+            tier="mock",
+        )
+        self.assertEqual(p_4070.model, "ornith-1.5-9b")
+        self.assertEqual(p_4070.max_context, 65536)
+        self.assertFalse(p_4070.cpu_offload)
+        s_4070 = p_4070.to_dict()["model_sizing"]
+        for m in ("ornith-1.5-35b", "qwen3.8-27b"):
+            self.assertEqual(s_4070[m]["max_context"], 16384)
+            self.assertTrue(s_4070[m]["cpu_offload"])
+            self.assertEqual(s_4070[m]["cpu_offload_gb"], 16)
+            self.assertEqual(s_4070[m]["offload"], "cpu-offload")
+
+    def test_model_cli_flag_and_probe_hardware_model_override(self):
+        """Test --model flag in probe.py and scripts/gpu_probe.sh."""
+        import subprocess
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parent.parent
+        gpu_probe_sh = repo_root / "scripts" / "gpu_probe.sh"
+
+        # 1. Python API with model="qwen3.8-27b" on rtx-4090
+        p = probe_hardware(override_gpu="rtx-4090", model="qwen3.8-27b")
+        self.assertEqual(p.model, "qwen3.8-27b")
+        self.assertEqual(p.service, "opencode-sglang-qwen27b.service")
+        self.assertEqual(p.max_context, 65536)
+        self.assertTrue(p.cpu_offload)
+        self.assertEqual(p.cpu_offload_gb, 6)
+        self.assertIn("--cpu-offload-gb 6", p.to_flags())
+
+        # 2. Shell CLI wrapper with --model qwen3.8-27b on rtx-4090
+        proc = subprocess.run(
+            [str(gpu_probe_sh), "--override-gpu", "rtx-4090", "--model", "qwen3.8-27b"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["model"], "qwen3.8-27b")
+        self.assertEqual(data["max_context"], 65536)
+        self.assertTrue(data["cpu_offload"])
+        self.assertEqual(data["cpu_offload_gb"], 6)
+        self.assertIn("model_sizing", data)
 
 
 if __name__ == "__main__":

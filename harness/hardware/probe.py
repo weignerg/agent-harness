@@ -26,11 +26,12 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, asdict
 import json
+import math
 import os
 import re
 import subprocess
 import sys
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -73,8 +74,10 @@ class ProbedProfile:
     host_ram_gb: float = 0.0
     host_cpu_cores: int = 0
     detection_tier: str = "unknown"
+    model_sizing: Optional[Dict[str, Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        sizing = self.model_sizing or {}
         return {
             "profile": self.profile,
             "memory_fraction": self.memory_fraction,
@@ -94,6 +97,8 @@ class ProbedProfile:
             "host_ram_gb": round(self.host_ram_gb, 2),
             "host_cpu_cores": self.host_cpu_cores,
             "detection_tier": self.detection_tier,
+            "model_sizing": sizing,
+            "models": sizing,
         }
 
     def to_env(self) -> str:
@@ -547,6 +552,379 @@ def evaluate_multi_gpu(
         return tp_size, eff_vram_gb, cvd, False, primary
 
 
+def normalize_model_key(model_name: Optional[str]) -> Optional[str]:
+    if not model_name:
+        return None
+    m = model_name.strip().lower()
+    if "/" in m:
+        m = m.split("/", 1)[1]
+    if m in ("ornith-1.5-35b", "ornith-35b", "35b"):
+        return "ornith-1.5-35b"
+    if m in ("qwen3.8-27b", "qwen3.8", "qwen-3.8-nvfp4", "27b-nvfp4", "qwen-3.8-q6", "27b-q6", "27b"):
+        return "qwen3.8-27b"
+    if m in ("ornith-1.5-9b", "ornith-9b", "9b"):
+        return "ornith-1.5-9b"
+    raise ValueError(
+        f"Unknown --model value: {model_name} (valid: ornith-1.5-35b, qwen3.8-27b, ornith-1.5-9b)"
+    )
+
+
+def compute_dynamic_vram_spillover(
+    effective_vram_gb: float,
+    host_ram_gb: float,
+    model_weights_gb: float,
+    min_kv_gb: float,
+    full_ctx_kv_gb: float,
+    target_context: Optional[int] = None,
+    memory_fraction: float = 0.88,
+) -> Dict[str, Any]:
+    """
+    Continuous dynamic sizing helper:
+    1. Attempts 100% GPU VRAM first for any GPU capacity.
+    2. Only spills the deficit over to system RAM (--cpu-offload-gb) when model + KV cache
+       cannot fit in usable_vram_gb (effective_vram_gb * memory_fraction).
+    """
+    usable_vram_gb = effective_vram_gb * memory_fraction
+
+    # 1. Fits 100% in GPU VRAM at full 262144 context
+    if usable_vram_gb >= (model_weights_gb + full_ctx_kv_gb):
+        ctx = target_context if target_context else 262144
+        return {
+            "max_context": ctx,
+            "memory_fraction": memory_fraction,
+            "cpu_offload": False,
+            "cpu_offload_gb": 0,
+            "recommended_cpu_offload_gb": 0,
+            "offload": "pure-gpu",
+        }
+
+    # 2. Fits 100% in GPU VRAM with scaled context (65536) when >64k is not forced
+    if usable_vram_gb >= (model_weights_gb + min_kv_gb) and (
+        target_context is None or target_context <= 65536
+    ):
+        ctx = min(target_context, 65536) if target_context else 65536
+        full_deficit_gb = max(
+            0, int(math.ceil((model_weights_gb + full_ctx_kv_gb) - usable_vram_gb))
+        )
+        can_spill_full = host_ram_gb >= max(24.0, full_deficit_gb * 2.0)
+        return {
+            "max_context": ctx,
+            "memory_fraction": memory_fraction,
+            "cpu_offload": False,
+            "cpu_offload_gb": 0,
+            "recommended_cpu_offload_gb": full_deficit_gb if can_spill_full else 0,
+            "offload": "pure-gpu",
+        }
+
+    # 3. Spill over the deficit to system RAM when model weights + required KV exceed usable VRAM
+    wants_full_ctx = target_context is not None and target_context >= 262144
+    required_kv_gb = full_ctx_kv_gb if wants_full_ctx else min_kv_gb
+    deficit_gb = max(1, int(math.ceil((model_weights_gb + required_kv_gb) - usable_vram_gb)))
+
+    if host_ram_gb >= max(24.0, deficit_gb * 2.0):
+        if wants_full_ctx:
+            ctx = target_context or 262144
+        elif effective_vram_gb >= 20.0:
+            ctx = min(target_context, 65536) if target_context else 65536
+        elif effective_vram_gb >= 14.0:
+            base_ctx = 32768 if host_ram_gb >= 48.0 else 16384
+            ctx = min(target_context, base_ctx) if target_context else base_ctx
+        else:
+            ctx = min(target_context, 16384) if target_context else 16384
+
+        return {
+            "max_context": ctx,
+            "memory_fraction": memory_fraction,
+            "cpu_offload": True,
+            "cpu_offload_gb": deficit_gb,
+            "recommended_cpu_offload_gb": deficit_gb,
+            "offload": "cpu-offload",
+        }
+
+    # 4. Host RAM is too small for spillover: keep 100% GPU and step down context
+    if usable_vram_gb >= (model_weights_gb + min_kv_gb):
+        fallback_ctx = 65536
+    elif effective_vram_gb >= 20.0:
+        fallback_ctx = 32768
+    else:
+        fallback_ctx = 16384
+    if target_context:
+        fallback_ctx = min(target_context, fallback_ctx)
+
+    return {
+        "max_context": fallback_ctx,
+        "memory_fraction": memory_fraction,
+        "cpu_offload": False,
+        "cpu_offload_gb": 0,
+        "recommended_cpu_offload_gb": 0,
+        "offload": "pure-gpu",
+    }
+
+
+def classify_model_sizing(
+    effective_vram_gb: float,
+    host_ram_gb: float = 0.0,
+    target_context: Optional[int] = None,
+    primary_gpu: Optional[GPUInfo] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Computes tailored settings (max_context, memory_fraction, cpu_offload, cpu_offload_gb, offload)
+    for each local model family (ornith-1.5-35b, qwen3.8-27b, ornith-1.5-9b) using continuous
+    100% GPU first sizing with dynamic CPU RAM spillover only when VRAM is exceeded.
+    """
+    vram = effective_vram_gb
+    gpu_name = (primary_gpu.name if primary_gpu else "NVIDIA GPU").lower()
+    is_spark = vram >= 100.0 or "spark" in gpu_name
+    is_pro6000 = (not is_spark) and (vram >= 44.0 or "pro 6000" in gpu_name or "pro-6000" in gpu_name)
+
+    if vram >= 30.0 or is_spark or is_pro6000:
+        base_offload = "unified-memory" if "spark" in gpu_name else "pure-gpu"
+        ornith_35b_mem = 0.92 if is_spark else (0.90 if is_pro6000 else 0.88)
+
+        o35_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=max(vram, 32.0),
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=19.0,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=9.0,
+            target_context=target_context,
+            memory_fraction=ornith_35b_mem,
+        )
+        ornith_35b_ctx = 512000 if ("spark" in gpu_name and not target_context) else o35_dyn["max_context"]
+
+        q27_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=max(vram, 32.0),
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=18.0,
+            min_kv_gb=8.2,
+            full_ctx_kv_gb=8.4,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+        qwen_27b_ctx = q27_dyn["max_context"]
+
+        o9_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=max(vram, 32.0),
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=5.5,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=6.0,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+        ornith_9b_ctx = o9_dyn["max_context"]
+
+        return {
+            "ornith-1.5-35b": {
+                "model": "ornith-1.5-35b",
+                "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+                "service": "opencode-sglang-ornith-35b.service",
+                "max_context": ornith_35b_ctx,
+                "memory_fraction": ornith_35b_mem,
+                "cpu_offload": False,
+                "cpu_offload_gb": 0,
+                "recommended_cpu_offload_gb": 0,
+                "offload": base_offload,
+            },
+            "qwen3.8-27b": {
+                "model": "qwen3.8-27b",
+                "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+                "service": "opencode-sglang-qwen27b.service",
+                "max_context": qwen_27b_ctx,
+                "memory_fraction": 0.88,
+                "cpu_offload": False,
+                "cpu_offload_gb": 0,
+                "recommended_cpu_offload_gb": 0,
+                "offload": base_offload,
+            },
+            "ornith-1.5-9b": {
+                "model": "ornith-1.5-9b",
+                "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "max_context": ornith_9b_ctx,
+                "memory_fraction": 0.88,
+                "cpu_offload": False,
+                "cpu_offload_gb": 0,
+                "recommended_cpu_offload_gb": 0,
+                "offload": base_offload,
+            },
+        }
+
+    elif vram >= 20.0:
+        # 20 GB <= VRAM < 30 GB (e.g., RTX 4090 / RTX 3090 24 GB, or 20 GB GPU)
+        o35_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=vram,
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=19.0,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=9.5,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+        q27_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=vram,
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=18.5,
+            min_kv_gb=8.0,
+            full_ctx_kv_gb=8.4,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+        o9_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=vram,
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=5.5,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=6.0,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+
+        return {
+            "ornith-1.5-35b": {
+                "model": "ornith-1.5-35b",
+                "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+                "service": "opencode-sglang-ornith-35b.service",
+                **o35_dyn,
+            },
+            "qwen3.8-27b": {
+                "model": "qwen3.8-27b",
+                "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+                "service": "opencode-sglang-qwen27b.service",
+                **q27_dyn,
+            },
+            "ornith-1.5-9b": {
+                "model": "ornith-1.5-9b",
+                "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                **o9_dyn,
+            },
+        }
+
+    elif vram >= 14.0:
+        # 14 GB <= VRAM < 20 GB (e.g., RTX 4080 / RTX 5080 16 GB)
+        req_kv = 8.5 if host_ram_gb >= 48.0 else 6.5
+        heavy_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=vram,
+            host_ram_gb=max(host_ram_gb, 32.0),
+            model_weights_gb=19.0,
+            min_kv_gb=req_kv,
+            full_ctx_kv_gb=9.5,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+        o9_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=vram,
+            host_ram_gb=host_ram_gb,
+            model_weights_gb=5.5,
+            min_kv_gb=2.0,
+            full_ctx_kv_gb=6.0,
+            target_context=target_context,
+            memory_fraction=0.88,
+        )
+
+        return {
+            "ornith-1.5-35b": {
+                "model": "ornith-1.5-35b",
+                "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+                "service": "opencode-sglang-ornith-35b.service",
+                **heavy_dyn,
+            },
+            "qwen3.8-27b": {
+                "model": "qwen3.8-27b",
+                "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+                "service": "opencode-sglang-qwen27b.service",
+                **heavy_dyn,
+            },
+            "ornith-1.5-9b": {
+                "model": "ornith-1.5-9b",
+                "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                **o9_dyn,
+            },
+        }
+
+    elif vram >= 8.0:
+        # 8 GB <= VRAM < 14 GB (e.g., RTX 4070 12 GB / RTX 3070 8 GB)
+        default_o9_ctx = 65536 if vram >= 12.0 else 32768
+        o9_ctx = min(target_context, default_o9_ctx) if target_context else default_o9_ctx
+        heavy_dyn = compute_dynamic_vram_spillover(
+            effective_vram_gb=12.0,
+            host_ram_gb=max(host_ram_gb, 32.0),
+            model_weights_gb=19.0,
+            min_kv_gb=6.5,
+            full_ctx_kv_gb=9.5,
+            target_context=target_context,
+            memory_fraction=0.85,
+        )
+
+        return {
+            "ornith-1.5-35b": {
+                "model": "ornith-1.5-35b",
+                "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+                "service": "opencode-sglang-ornith-35b.service",
+                **heavy_dyn,
+            },
+            "qwen3.8-27b": {
+                "model": "qwen3.8-27b",
+                "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+                "service": "opencode-sglang-qwen27b.service",
+                **heavy_dyn,
+            },
+            "ornith-1.5-9b": {
+                "model": "ornith-1.5-9b",
+                "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "max_context": o9_ctx,
+                "memory_fraction": 0.85,
+                "cpu_offload": False,
+                "cpu_offload_gb": 0,
+                "recommended_cpu_offload_gb": 0,
+                "offload": "pure-gpu",
+            },
+        }
+
+    else:
+        # Fallback (< 8 GB VRAM)
+        o9_ctx = target_context if target_context else 32768
+        heavy_ctx = min(target_context, 16384) if target_context else 16384
+        return {
+            "ornith-1.5-35b": {
+                "model": "ornith-1.5-35b",
+                "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+                "service": "opencode-sglang-ornith-35b.service",
+                "max_context": heavy_ctx,
+                "memory_fraction": 0.80,
+                "cpu_offload": True,
+                "cpu_offload_gb": 16,
+                "recommended_cpu_offload_gb": 16,
+                "offload": "cpu-offload",
+            },
+            "qwen3.8-27b": {
+                "model": "qwen3.8-27b",
+                "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+                "service": "opencode-sglang-qwen27b.service",
+                "max_context": heavy_ctx,
+                "memory_fraction": 0.80,
+                "cpu_offload": True,
+                "cpu_offload_gb": 16,
+                "recommended_cpu_offload_gb": 16,
+                "offload": "cpu-offload",
+            },
+            "ornith-1.5-9b": {
+                "model": "ornith-1.5-9b",
+                "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "max_context": o9_ctx,
+                "memory_fraction": 0.80,
+                "cpu_offload": False,
+                "cpu_offload_gb": 0,
+                "recommended_cpu_offload_gb": 0,
+                "offload": "pure-gpu",
+            },
+        }
+
+
 def classify_profile(
     effective_vram_gb: float,
     primary_gpu: Optional[GPUInfo] = None,
@@ -556,6 +934,7 @@ def classify_profile(
     tp_size: int = 1,
     cuda_visible_devices: str = "0",
     tier: str = "unknown",
+    selected_model: Optional[str] = None,
 ) -> ProbedProfile:
     """
     Sizing & Model Selection Matrix:
@@ -577,100 +956,47 @@ def classify_profile(
     gpu_name = primary_gpu.name if primary_gpu else "NVIDIA GPU"
     total_vram_mb = int(round(vram * 1024))
 
+    model_sizing = classify_model_sizing(
+        effective_vram_gb=vram,
+        host_ram_gb=host_ram_gb,
+        target_context=target_context,
+        primary_gpu=primary_gpu,
+    )
+
     if vram >= 100.0 or "spark" in gpu_name.lower():
         profile = "rtx-spark"
-        model = "ornith-1.5-35b"
-        model_path = "ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-        service = "opencode-sglang-ornith-35b.service"
-        max_context = 512000 if ("spark" in gpu_name.lower()) else 262144
-        if target_context:
-            max_context = target_context
-        memory_fraction = 0.92
-        offload = "unified-memory" if "spark" in gpu_name.lower() else "pure-gpu"
-        cpu_offload = False
-        cpu_offload_gb = 0
-
+        default_model = "ornith-1.5-35b"
     elif vram >= 44.0 or "pro 6000" in gpu_name.lower() or "pro-6000" in gpu_name.lower():
         profile = "rtx-pro-6000"
-        model = "ornith-1.5-35b"
-        model_path = "ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-        service = "opencode-sglang-ornith-35b.service"
-        max_context = target_context if target_context else 262144
-        memory_fraction = 0.90
-        offload = "pure-gpu"
-        cpu_offload = False
-        cpu_offload_gb = 0
-
+        default_model = "ornith-1.5-35b"
     elif vram >= 30.0:
-        # e.g. RTX 5090 (32GB)
         profile = "rtx-5090"
-        model = "ornith-1.5-35b"
-        model_path = "ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-        service = "opencode-sglang-ornith-35b.service"
-        max_context = target_context if target_context else 262144
-        memory_fraction = 0.88
-        offload = "pure-gpu"
-        cpu_offload = False
-        cpu_offload_gb = 0
-
+        default_model = "ornith-1.5-35b"
     elif vram >= 20.0:
-        # e.g. RTX 4090 / 3090 (24GB)
         profile = "rtx-4090"
-        model = "ornith-1.5-35b"
-        model_path = "ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-        service = "opencode-sglang-ornith-35b.service"
-        memory_fraction = 0.88
-
-        # Guarded CPU offload check:
-        # If target context is forced/requested 256k AND host RAM >= 32GB
-        if (target_context is not None and target_context >= 262144) and host_ram_gb >= 32.0:
-            max_context = 262144
-            cpu_offload = True
-            cpu_offload_gb = 8
-            offload = "cpu-offload"
-        else:
-            # Pure GPU fits 64k
-            max_context = min(target_context, 65536) if target_context else 65536
-            cpu_offload = False
-            cpu_offload_gb = 0
-            offload = "pure-gpu"
-
+        default_model = "ornith-1.5-35b"
     elif vram >= 14.0:
-        # e.g. 16GB cards
         profile = "rtx-4080"
-        model = "ornith-1.5-9b"
-        model_path = "ornith-ai/Ornith-1.5-9B-NVFP4"
-        service = "ornith-1.5-9b-nvfp4-low-ctx.service"
-        max_context = target_context if target_context else 262144
-        memory_fraction = 0.88
-        offload = "pure-gpu"
-        cpu_offload = False
-        cpu_offload_gb = 0
-
+        default_model = "ornith-1.5-9b"
     elif vram >= 8.0:
-        # e.g. 12GB or 8GB cards
         profile = "rtx-4070"
-        model = "ornith-1.5-9b"
-        model_path = "ornith-ai/Ornith-1.5-9B-NVFP4"
-        service = "ornith-1.5-9b-nvfp4-low-ctx.service"
-        default_ctx = 65536 if vram >= 12.0 else 32768
-        max_context = min(target_context, default_ctx) if target_context else default_ctx
-        memory_fraction = 0.85
-        offload = "pure-gpu"
-        cpu_offload = False
-        cpu_offload_gb = 0
-
+        default_model = "ornith-1.5-9b"
     else:
-        # Fallback profile
         profile = "fallback"
-        model = "ornith-1.5-9b"
-        model_path = "ornith-ai/Ornith-1.5-9B-NVFP4"
-        service = "ornith-1.5-9b-nvfp4-low-ctx.service"
-        max_context = target_context if target_context else 32768
-        memory_fraction = 0.80
-        offload = "pure-gpu"
-        cpu_offload = False
-        cpu_offload_gb = 0
+        default_model = "ornith-1.5-9b"
+
+    norm_model = normalize_model_key(selected_model) if selected_model else default_model
+    chosen = model_sizing[norm_model or default_model]
+
+    model = chosen["model"]
+    model_path = chosen["model_path"]
+    service = chosen["service"]
+    max_context = chosen["max_context"]
+    memory_fraction = chosen["memory_fraction"]
+    offload = chosen["offload"]
+    cpu_offload = chosen["cpu_offload"]
+    cpu_offload_gb = chosen["cpu_offload_gb"]
+    kv_cache_dtype = "fp8_e4m3" if model == "qwen3.8-27b" else "nvfp4"
 
     # Ensure display name has VRAM if not already
     display_gpu = gpu_name
@@ -681,7 +1007,7 @@ def classify_profile(
         profile=profile,
         memory_fraction=memory_fraction,
         max_context=max_context,
-        kv_cache_dtype="nvfp4",
+        kv_cache_dtype=kv_cache_dtype,
         offload=offload,
         gpu=display_gpu,
         model=model,
@@ -696,6 +1022,7 @@ def classify_profile(
         host_ram_gb=host_ram_gb,
         host_cpu_cores=host_cpu_cores,
         detection_tier=tier,
+        model_sizing=model_sizing,
     )
 
 
@@ -716,6 +1043,7 @@ class HardwareProbe:
         self,
         override_gpu: Optional[str] = None,
         target_context: Optional[int] = None,
+        model: Optional[str] = None,
     ) -> ProbedProfile:
         resources = probe_system_resources(self.procfs_root)
         host_ram_gb = resources.ram_total_mb / 1024.0
@@ -723,7 +1051,7 @@ class HardwareProbe:
 
         if override_gpu:
             return self._handle_override(
-                override_gpu, target_context, host_ram_gb, host_cpu_cores
+                override_gpu, target_context, host_ram_gb, host_cpu_cores, model=model
             )
 
         # Tier 1: PyTorch / CUDA
@@ -749,6 +1077,7 @@ class HardwareProbe:
                 host_cpu_cores=host_cpu_cores,
                 target_context=target_context,
                 tier="fallback",
+                selected_model=model,
             )
 
         # Device Filtering
@@ -763,6 +1092,7 @@ class HardwareProbe:
                 host_cpu_cores=host_cpu_cores,
                 target_context=target_context,
                 tier=f"{tier}-filtered",
+                selected_model=model,
             )
 
         # Multi-GPU evaluation
@@ -777,6 +1107,7 @@ class HardwareProbe:
             tp_size=tp_size,
             cuda_visible_devices=cvd,
             tier=tier,
+            selected_model=model,
         )
 
     def _handle_override(
@@ -785,6 +1116,7 @@ class HardwareProbe:
         target_context: Optional[int],
         host_ram_gb: float,
         host_cpu_cores: int,
+        model: Optional[str] = None,
     ) -> ProbedProfile:
         norm = override_gpu.lower()
         if norm in ("rtx-5090", "5090"):
@@ -857,6 +1189,7 @@ class HardwareProbe:
             tp_size=1,
             cuda_visible_devices="0",
             tier="override",
+            selected_model=model,
         )
 
 
@@ -866,13 +1199,14 @@ def probe_hardware(
     procfs_root: str = "/proc",
     sysfs_root: str = "/sys",
     smi_runner: Optional[Callable[[List[str]], str]] = None,
+    model: Optional[str] = None,
 ) -> ProbedProfile:
     prober = HardwareProbe(
         procfs_root=procfs_root,
         sysfs_root=sysfs_root,
         smi_runner=smi_runner,
     )
-    return prober.probe(override_gpu=override_gpu, target_context=target_context)
+    return prober.probe(override_gpu=override_gpu, target_context=target_context, model=model)
 
 
 def main() -> None:
@@ -897,6 +1231,12 @@ def main() -> None:
         default=None,
         help="Requested target context window size (e.g. 262144, 65536).",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Query sizing for a specific model family: ornith-1.5-35b, qwen3.8-27b, ornith-1.5-9b.",
+    )
 
     args = parser.parse_args()
 
@@ -904,6 +1244,7 @@ def main() -> None:
         profile = probe_hardware(
             override_gpu=args.override_gpu,
             target_context=args.target_context,
+            model=args.model,
         )
     except Exception as e:
         sys.stderr.write(f"❌ Error probing hardware: {e}\n")
