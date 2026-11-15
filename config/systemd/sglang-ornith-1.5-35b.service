@@ -6,6 +6,7 @@ After=network.target
 Type=exec
 Environment="SGLANG_BACKEND_PORT=30001"
 EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="SGLANG_UNIT=%n"
 Environment="SGLANG_SERVICE=sglang-ornith-1.5-35b.service"
 Environment="SGLANG_CONTEXT_LENGTH=262144"
 Environment="SGLANG_CPU_OFFLOAD_ARGS="

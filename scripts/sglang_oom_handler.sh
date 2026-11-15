@@ -14,6 +14,10 @@ set -uo pipefail
 SERVICE="sglang-ornith-1.5-35b.service"
 
 detect_service() {
+    if [ -n "${SGLANG_UNIT:-}" ]; then
+        echo "$SGLANG_UNIT"
+        return
+    fi
     if [ -n "${SGLANG_SERVICE:-}" ]; then
         echo "$SGLANG_SERVICE"
         return

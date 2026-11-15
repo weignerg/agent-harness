@@ -236,9 +236,10 @@ class ModelRouter:
         with self.lock:
             self.last_activity_time = time.time()
             current = self.get_currently_running_service()
+            expected_served = self.service_to_served_name.get(target_service)
             if current == target_service:
                 self.active_service = target_service
-                return True
+                return self.wait_for_backend_ready(timeout=timeout, expected_served_model=expected_served)
 
             logger.info("Switching active model service from %s to %s", current, target_service)
 
@@ -271,7 +272,6 @@ class ModelRouter:
                 return False
 
             self.active_service = target_service
-            expected_served = self.service_to_served_name.get(target_service)
             return self.wait_for_backend_ready(timeout=timeout, expected_served_model=expected_served)
 
     def wait_for_backend_ready(self, timeout: float = 60.0, expected_served_model: Optional[str] = None) -> bool:

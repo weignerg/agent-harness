@@ -2010,9 +2010,14 @@ verify_backend_healthchecks() {
     local elapsed=0
     local model_name="${PROBED_MODEL_NAME:-ornith}"
 
+    local sglang_check_url="http://127.0.0.1:30000/v1/models"
+    if curl -s -m 1 "http://127.0.0.1:30000/health" 2>/dev/null | grep -q '"active_service"'; then
+        sglang_check_url="http://127.0.0.1:${SGLANG_BACKEND_PORT:-30001}/v1/models"
+    fi
+
     while [ "$elapsed" -lt "$max_sglang_wait" ]; do
         local sglang_out=""
-        sglang_out="$(curl -s -m 2 -w "\n%{http_code}" "http://127.0.0.1:30000/v1/models" 2>/dev/null || true)"
+        sglang_out="$(curl -s -m 2 -w "\n%{http_code}" "${sglang_check_url}" 2>/dev/null || true)"
         local sglang_code="${sglang_out##*$'\n'}"
         local sglang_resp="${sglang_out%$'\n'*}"
 
