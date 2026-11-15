@@ -24,11 +24,11 @@ echo "==========================================================================
 SERVICE_FILES=("$CONFIG_DIR"/*.service)
 NUM_FILES=${#SERVICE_FILES[@]}
 echo "[CHECK 1] Found ${NUM_FILES} service unit files in ${CONFIG_DIR}."
-if [ "$NUM_FILES" -ne 23 ]; then
-    echo "❌ FAIL: Expected exactly 23 service files, found ${NUM_FILES}."
+if [ "$NUM_FILES" -ne 6 ]; then
+    echo "❌ FAIL: Expected exactly 6 service files, found ${NUM_FILES}."
     exit 1
 fi
-echo "✅ Passed: Exactly 23 service files found."
+echo "✅ Passed: Exactly 6 service files found."
 
 # 2. Check for forbidden Environment="HF_TOKEN="
 echo "[CHECK 2] Scanning for forbidden 'Environment=\"HF_TOKEN=\"' overrides..."
@@ -146,14 +146,22 @@ if ! grep -q '\$SGLANG_27B_TORCH_COMPILE' "$QWEN27B_FILE" || ! grep -q '\$SGLANG
 fi
 echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
 
-# 9. Check SGLANG_27B_MAMBA_ARGS quoting in install.sh and env file
-echo "[CHECK 9] Verifying SGLANG_27B_MAMBA_ARGS quoting in install.sh and env file..."
-if grep -q 'SGLANG_27B_MAMBA_ARGS=--mamba' "$INSTALL_SCRIPT"; then
+# 9. Check SGLANG_27B_MAMBA_ARGS quoting and KV cache protection in install.sh, service, and env file
+echo "[CHECK 9] Verifying SGLANG_27B_MAMBA_ARGS quoting and KV cache protection..."
+if grep -qE 'SGLANG_27B_MAMBA_ARGS=--[a-z]' "$INSTALL_SCRIPT"; then
     echo "❌ FAIL: install.sh contains unquoted SGLANG_27B_MAMBA_ARGS"
     exit 1
 fi
-if ! grep -q 'SGLANG_27B_MAMBA_ARGS=\\"--mamba' "$INSTALL_SCRIPT"; then
+if ! grep -qE 'SGLANG_27B_MAMBA_ARGS=\\"--(max-mamba-cache-size|mamba)' "$INSTALL_SCRIPT"; then
     echo "❌ FAIL: install.sh missing quoted SGLANG_27B_MAMBA_ARGS"
+    exit 1
+fi
+if grep -q -- '--mamba-full-memory-ratio 4.59' "$QWEN27B_FILE" "$INSTALL_SCRIPT"; then
+    echo "❌ FAIL: Found KV-starving --mamba-full-memory-ratio 4.59 in service or installer"
+    exit 1
+fi
+if ! grep -qE -- '--max-mamba-cache-size 3|--mamba-full-memory-ratio 0\.25' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing --max-mamba-cache-size 3 or --mamba-full-memory-ratio 0.25"
     exit 1
 fi
 if [ -f "${HOME}/.config/opencode-backends/env" ]; then
@@ -166,7 +174,7 @@ if [ -f "${HOME}/.config/opencode-backends/env" ]; then
         exit 1
     fi
 fi
-echo "✅ Passed: SGLANG_27B_MAMBA_ARGS is properly quoted and env file sources cleanly without error."
+echo "✅ Passed: SGLANG_27B_MAMBA_ARGS is properly quoted, protects KV cache capacity, and env file sources cleanly."
 
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"

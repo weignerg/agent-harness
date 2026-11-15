@@ -11,7 +11,7 @@
       "models": {
         "qwen-3.8-nvfp4": {
           "name": "qwen 3.8 nvfp4",
-          "context": 131072,
+          "context": 262144,
           "output": 32768,
           "modalities": {
             "input": [
@@ -39,7 +39,7 @@
         },
         "qwen-3.8-q6": {
           "name": "qwen 3.8 q6",
-          "context": 131072,
+          "context": 262144,
           "output": 32768,
           "modalities": {
             "input": [
@@ -123,7 +123,7 @@
         },
         "qwen3.8-27b": {
           "name": "Qwen3.8-27B-NVFP4",
-          "context": 131072,
+          "context": 262144,
           "output": 32768,
           "modalities": {
             "input": [
@@ -151,7 +151,7 @@
         },
         "qwen3.8": {
           "name": "Qwen3.8-27B-NVFP4",
-          "context": 131072,
+          "context": 262144,
           "output": 32768,
           "modalities": {
             "input": [

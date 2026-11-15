@@ -1470,6 +1470,44 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((mock_repo / "GEMINI.md").is_symlink())
             self.assertTrue((mock_repo / "CLAUDE.md").is_symlink())
 
+    def test_issue48_rtx5090_ornith_context_preservation_and_qwen_mamba_args(self):
+        """Test Issue #48: Selecting qwen3.8 on rtx-5090 preserves Ornith 256k context and configures Qwen Mamba cache size."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+
+            proc_inst = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-5090",
+                "--sglang-model", "qwen3.8",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
+
+            # 1. Ornith service must preserve 256k (262144) context on RTX 5090 even when qwen3.8 was selected
+            ornith_unit = systemd_user_dir / "opencode-sglang-ornith-35b.service"
+            self.assertTrue(ornith_unit.is_file())
+            ornith_content = ornith_unit.read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
+
+            # 2. Qwen 27B service must have 262144 context on RTX 5090 and --max-mamba-cache-size 3 (no 4.59 ratio starvation)
+            qwen_unit = systemd_user_dir / "opencode-sglang-qwen27b.service"
+            self.assertTrue(qwen_unit.is_file())
+            qwen_content = qwen_unit.read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
+            self.assertIn("--max-mamba-cache-size 3", qwen_content)
+            self.assertNotIn("--mamba-full-memory-ratio 4.59", qwen_content)
+
 
 if __name__ == "__main__":
     unittest.main()

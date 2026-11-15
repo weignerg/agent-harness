@@ -15,6 +15,7 @@ echo "CUDA out of memory. Tried to allocate" > "$T/log"; OPENCODE_OOM_LOG="$T/lo
 rm -f "$T/calls"; OOM_FORCE=1 "$H" >/dev/null 2>&1; rc=$?; [ $rc -eq 1 ] && [ "$("$H" --status)" = 32768 ] && [ ! -e "$T/calls" ] && pass "floor at 32k, no restart loop" || fail "floor"
 echo "unrelated traceback" > "$T/log"; OPENCODE_OOM_LOG="$T/log" SERVICE_RESULT=exit-code "$H" >/dev/null; [ "$("$H" --status)" = 32768 ] && pass "non-OOM failure ignored" || fail "non-oom log"
 "$H" --reset >/dev/null; [ "$("$H" --status)" = 262144 ] && pass "--reset restores 256k" || fail "reset"
+[ "$(SGLANG_SERVICE=opencode-sglang-qwen27b.service "$H" --status)" = 262144 ] && pass "qwen27b baseline 262144" || fail "qwen27b baseline"
 U="$R/config/systemd/opencode-sglang-ornith-35b.service"
 grep -q 'ExecStopPost=.*sglang_oom_handler.sh' "$U" && grep -q 'context_length.state' "$U" && grep -q -- '--context-length ${SGLANG_CONTEXT_LENGTH}' "$U" && pass "unit wired to state + handler" || fail "unit wiring"
 command -v systemd-analyze >/dev/null && { systemd-analyze --user verify "$U" 2>&1 | grep -qi 'sglang_oom_handler.sh.*not' && pass "verify (path warnings expected on dev host)" || pass "systemd-analyze verify ok"; }

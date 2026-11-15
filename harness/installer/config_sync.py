@@ -253,6 +253,10 @@ def sync_opencode_json(
                 dst_models[m_id] = copy.deepcopy(m_cfg)
             elif isinstance(dst_models[m_id], dict) and isinstance(m_cfg, dict):
                 dst_models[m_id].update(copy.deepcopy(m_cfg))
+        if prov_key == "local-sglang":
+            for q_id in ("qwen3.8-27b", "qwen-3.8-nvfp4", "qwen3.8", "qwen-3.8-q6"):
+                if q_id in dst_models and isinstance(dst_models[q_id], dict):
+                    dst_models[q_id]["context"] = 262144
 
     # Clean up accidental qwen placement under ornith-local provider
     if "ornith-local" in providers and "qwen3.8-27b" in providers["ornith-local"].get("models", {}):
