@@ -1215,6 +1215,8 @@ EOF
         "SGLANG_27B_TORCH_COMPILE="
         "SGLANG_27B_SPECULATIVE_ALGO="
         "SGLANG_27B_SPECULATIVE_ARGS="
+        "SGLANG_CPU_OFFLOAD_ARGS="
+        "SGLANG_27B_CPU_OFFLOAD_ARGS="
         "SGLANG_27B_MAMBA_ARGS=\"--max-mamba-cache-size 3 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
     )
 
@@ -2231,7 +2233,7 @@ deploy_opencode_backend_and_units() {
     local mem_fraction=""
     local max_context=""
     if [ -x "${SCRIPT_DIR}/scripts/gpu_probe.sh" ]; then
-        gpu_profile="$("${SCRIPT_DIR}/scripts/gpu_probe.sh" ${OVERRIDE_GPU:+--override-gpu "$OVERRIDE_GPU"} 2>/dev/null || echo '{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device","model":"ornith-1.5-35b","model_path":"ornith-ai/Ornith-1.5-35B-A3B-NVFP4","service":"opencode-sglang-ornith-35b.service","cpu_offload_gb":0}')"
+        gpu_profile="$("${SCRIPT_DIR}/scripts/gpu_probe.sh" ${OVERRIDE_GPU:+--override-gpu "$OVERRIDE_GPU"} ${TARGET_CONTEXT:+--target-context "$TARGET_CONTEXT"} 2>/dev/null || echo '{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device","model":"ornith-1.5-35b","model_path":"ornith-ai/Ornith-1.5-35B-A3B-NVFP4","service":"opencode-sglang-ornith-35b.service","cpu_offload_gb":0}')"
     else
         gpu_profile='{"profile":"fallback","memory_fraction":0.88,"max_context":262144,"kv_cache_dtype":"nvfp4","offload":"pure-gpu","gpu":"unknown device","model":"ornith-1.5-35b","model_path":"ornith-ai/Ornith-1.5-35B-A3B-NVFP4","service":"opencode-sglang-ornith-35b.service","cpu_offload_gb":0}'
     fi
@@ -2239,13 +2241,22 @@ deploy_opencode_backend_and_units() {
     echo "$gpu_profile" > "${backend_env_dir}/gpu_profile.json"
     mem_fraction="$(printf '%s' "$gpu_profile" | grep -oE '"memory_fraction":[0-9.]+' | grep -oE '[0-9.]+' | head -n1 || echo "0.88")"
     max_context="$(printf '%s' "$gpu_profile" | grep -oE '"max_context":[0-9]+' | grep -oE '[0-9]+' | head -n1 || echo "262144")"
-    local ornith_max_context="$max_context"
-    local ornith_mem_fraction="$mem_fraction"
-    local qwen27b_max_context="${max_context:-262144}"
-    if [ "${qwen27b_max_context:-262144}" -gt 262144 ] 2>/dev/null; then
-        qwen27b_max_context="262144"
+    local ornith_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('max_context', d.get('max_context', 262144)))" "${gpu_profile}" 2>/dev/null || echo "${max_context}")"
+    local ornith_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
+    local ornith_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('cpu_offload_gb', d.get('cpu_offload_gb', 0)))" "${gpu_profile}" 2>/dev/null || echo "0")"
+
+    local qwen27b_default_ctx="${max_context:-262144}"
+    if [ "${qwen27b_default_ctx:-262144}" -gt 262144 ] 2>/dev/null; then
+        qwen27b_default_ctx="262144"
     fi
-    local qwen27b_mem_fraction="$mem_fraction"
+    local qwen27b_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('max_context', ${qwen27b_default_ctx}))" "${gpu_profile}" 2>/dev/null || echo "${qwen27b_default_ctx}")"
+    local qwen27b_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
+    local qwen27b_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
+
+    local ornith9b_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('max_context', d.get('max_context', 262144)))" "${gpu_profile}" 2>/dev/null || echo "${max_context}")"
+    local ornith9b_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
+    local ornith9b_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
+
     local probed_model="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model', 'ornith-1.5-35b'))" "${gpu_profile}" 2>/dev/null || echo "ornith-1.5-35b")"
     local probed_model_path="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model_path', 'ornith-ai/Ornith-1.5-35B-A3B-NVFP4'))" "${gpu_profile}" 2>/dev/null || echo "ornith-ai/Ornith-1.5-35B-A3B-NVFP4")"
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
@@ -2255,22 +2266,40 @@ deploy_opencode_backend_and_units() {
         probed_model="qwen-3.8-nvfp4"
         probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
         probed_service="opencode-sglang-qwen27b.service"
-        max_context="${qwen27b_max_context}"
-        mem_fraction="0.88"
-        qwen27b_mem_fraction="0.88"
+        max_context="$qwen27b_max_context"
+        mem_fraction="$qwen27b_mem_fraction"
+        probed_cpu_offload="$qwen27b_cpu_offload_gb"
     elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         probed_model="qwen-3.8-q6"
         probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
         probed_service="opencode-sglang-qwen27b.service"
-        max_context="${qwen27b_max_context}"
-        mem_fraction="0.88"
-        qwen27b_mem_fraction="0.88"
+        max_context="$qwen27b_max_context"
+        mem_fraction="$qwen27b_mem_fraction"
+        probed_cpu_offload="$qwen27b_cpu_offload_gb"
     elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
         probed_model="ornith-1.5-9b"
         probed_service="opencode-sglang-ornith-35b.service"
+        max_context="$ornith9b_max_context"
+        mem_fraction="$ornith9b_mem_fraction"
+        probed_cpu_offload="$ornith9b_cpu_offload_gb"
+        ornith_max_context="$ornith9b_max_context"
+        ornith_mem_fraction="$ornith9b_mem_fraction"
+        ornith_cpu_offload_gb="$ornith9b_cpu_offload_gb"
     elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
         probed_model="ornith-1.5-35b"
         probed_service="opencode-sglang-ornith-35b.service"
+        max_context="$ornith_max_context"
+        mem_fraction="$ornith_mem_fraction"
+        probed_cpu_offload="$ornith_cpu_offload_gb"
+    fi
+
+    local ornith_offload_args=""
+    if [ "${ornith_cpu_offload_gb:-0}" -gt 0 ] 2>/dev/null; then
+        ornith_offload_args="--cpu-offload-gb ${ornith_cpu_offload_gb}"
+    fi
+    local qwen27b_offload_args=""
+    if [ "${qwen27b_cpu_offload_gb:-0}" -gt 0 ] 2>/dev/null; then
+        qwen27b_offload_args="--cpu-offload-gb ${qwen27b_cpu_offload_gb}"
     fi
 
     # Update gpu_profile.json when SGLANG_MODEL overrides profile parameters
@@ -2294,9 +2323,17 @@ try:
     d['memory_fraction'] = float(sys.argv[6])
 except ValueError:
     d['memory_fraction'] = sys.argv[6]
+try:
+    offload_gb = int(sys.argv[7])
+except ValueError:
+    offload_gb = 0
+d['cpu_offload_gb'] = offload_gb
+d['cpu_offload'] = bool(offload_gb > 0)
+if offload_gb > 0:
+    d['offload'] = 'cpu-offload'
 with open(p, 'w') as f:
     json.dump(d, f, indent=2)
-" "${backend_env_dir}/gpu_profile.json" "${probed_model}" "${probed_model_path}" "${probed_service}" "${max_context}" "${mem_fraction}"
+" "${backend_env_dir}/gpu_profile.json" "${probed_model}" "${probed_model_path}" "${probed_service}" "${max_context}" "${mem_fraction}" "${probed_cpu_offload}"
     fi
 
     PROBED_MODEL_NAME="$probed_model"
@@ -2312,11 +2349,18 @@ with open(p, 'w') as f:
         python3 -c "
 import sys
 path = sys.argv[1]
+ornith_offload = f'\"{sys.argv[7]}\"' if ' ' in sys.argv[7] else sys.argv[7]
+qwen_offload = f'\"{sys.argv[10]}\"' if ' ' in sys.argv[10] else sys.argv[10]
 keys = {
     'PROBED_CONTEXT_LENGTH': sys.argv[2],
     'PROBED_MEM_FRACTION': sys.argv[3],
     'PROBED_MODEL': sys.argv[4],
     'PROBED_CPU_OFFLOAD_GB': sys.argv[5],
+    'SGLANG_CONTEXT_LENGTH': sys.argv[6],
+    'SGLANG_CPU_OFFLOAD_ARGS': ornith_offload,
+    'SGLANG_27B_CONTEXT_LENGTH': sys.argv[8],
+    'SGLANG_27B_MEM_FRACTION': sys.argv[9],
+    'SGLANG_27B_CPU_OFFLOAD_ARGS': qwen_offload,
 }
 lines = []
 try:
@@ -2340,7 +2384,7 @@ for k, v in keys.items():
 
 with open(path, 'w') as f:
     f.writelines(new_lines)
-" "${backend_env_dir}/env" "${max_context}" "${mem_fraction}" "${probed_model}" "${probed_cpu_offload}"
+" "${backend_env_dir}/env" "${max_context}" "${mem_fraction}" "${probed_model}" "${probed_cpu_offload}" "${ornith_max_context}" "${ornith_offload_args}" "${qwen27b_max_context}" "${qwen27b_mem_fraction}" "${qwen27b_offload_args}"
         chmod 0600 "${backend_env_dir}/env"
     fi
 
@@ -2397,6 +2441,15 @@ with open(path, 'w') as f:
                     "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${ornith_mem_fraction}|" \
                     "${dest_dir}/opencode-sglang-ornith-35b.service"
             fi
+            if grep -q 'Environment="SGLANG_CPU_OFFLOAD_ARGS=' "${dest_dir}/opencode-sglang-ornith-35b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_CPU_OFFLOAD_ARGS=[^\"]*\"|Environment=\"SGLANG_CPU_OFFLOAD_ARGS=${ornith_offload_args}\"|" \
+                    "${dest_dir}/opencode-sglang-ornith-35b.service"
+            else
+                sed -i \
+                    "/\\[Service\\]/a Environment=\"SGLANG_CPU_OFFLOAD_ARGS=${ornith_offload_args}\"" \
+                    "${dest_dir}/opencode-sglang-ornith-35b.service"
+            fi
             sed -i \
                 "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
                 "${dest_dir}/opencode-sglang-ornith-35b.service"
@@ -2421,6 +2474,15 @@ with open(path, 'w') as f:
             else
                 sed -i \
                     "/\\[Service\\]/a Environment=\"SGLANG_27B_CONTEXT_LENGTH=${qwen27b_max_context}\"" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            fi
+            if grep -q 'Environment="SGLANG_27B_CPU_OFFLOAD_ARGS=' "${dest_dir}/opencode-sglang-qwen27b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=[^\"]*\"|Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=${qwen27b_offload_args}\"|" \
+                    "${dest_dir}/opencode-sglang-qwen27b.service"
+            else
+                sed -i \
+                    "/\\[Service\\]/a Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=${qwen27b_offload_args}\"" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             fi
             if grep -q '\${SGLANG_27B_MEM_FRACTION}' "${dest_dir}/opencode-sglang-qwen27b.service"; then

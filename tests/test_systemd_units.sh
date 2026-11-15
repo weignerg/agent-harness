@@ -176,6 +176,27 @@ if [ -f "${HOME}/.config/opencode-backends/env" ]; then
 fi
 echo "✅ Passed: SGLANG_27B_MAMBA_ARGS is properly quoted, protects KV cache capacity, and env file sources cleanly."
 
+# 10. Check adaptive CPU offload environment defaults and unbraced flags (Issue #49)
+echo "[CHECK 10] Verifying adaptive CPU offload environment defaults and unbraced flags (Issue #49)..."
+ORNITH_FILE="${CONFIG_DIR}/opencode-sglang-ornith-35b.service"
+if ! grep -q '^Environment="SGLANG_CPU_OFFLOAD_ARGS="$' "$ORNITH_FILE"; then
+    echo "❌ FAIL: opencode-sglang-ornith-35b.service missing default Environment=\"SGLANG_CPU_OFFLOAD_ARGS=\""
+    exit 1
+fi
+if grep -q '\${SGLANG_CPU_OFFLOAD_ARGS}' "$ORNITH_FILE" || ! grep -q '\$SGLANG_CPU_OFFLOAD_ARGS' "$ORNITH_FILE"; then
+    echo "❌ FAIL: opencode-sglang-ornith-35b.service must use unbraced \$SGLANG_CPU_OFFLOAD_ARGS"
+    exit 1
+fi
+if ! grep -q '^Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="$' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service missing default Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=\""
+    exit 1
+fi
+if grep -q '\${SGLANG_27B_CPU_OFFLOAD_ARGS}' "$QWEN27B_FILE" || ! grep -q '\$SGLANG_27B_CPU_OFFLOAD_ARGS' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: opencode-sglang-qwen27b.service must use unbraced \$SGLANG_27B_CPU_OFFLOAD_ARGS"
+    exit 1
+fi
+echo "✅ Passed: Both Ornith 35B and Qwen 27B systemd units define empty default CPU offload args and unbraced ExecStart expansion."
+
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
 echo "================================================================================"
