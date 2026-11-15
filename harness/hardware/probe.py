@@ -718,7 +718,7 @@ def classify_model_sizing(
             "ornith-1.5-35b": {
                 "model": "ornith-1.5-35b",
                 "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
-                "service": "opencode-sglang-ornith-35b.service",
+                "service": "sglang-ornith-1.5-35b.service",
                 "max_context": ornith_35b_ctx,
                 "memory_fraction": ornith_35b_mem,
                 "cpu_offload": False,
@@ -729,7 +729,7 @@ def classify_model_sizing(
             "qwen3.8-27b": {
                 "model": "qwen3.8-27b",
                 "model_path": "nvidia/Qwen3.8-27B-NVFP4",
-                "service": "opencode-sglang-qwen27b.service",
+                "service": "sglang-qwen3.8-27b.service",
                 "max_context": qwen_27b_ctx,
                 "memory_fraction": 0.88,
                 "cpu_offload": False,
@@ -740,7 +740,7 @@ def classify_model_sizing(
             "ornith-1.5-9b": {
                 "model": "ornith-1.5-9b",
                 "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
-                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "service": "sglang-ornith-1.5-9b.service",
                 "max_context": ornith_9b_ctx,
                 "memory_fraction": 0.88,
                 "cpu_offload": False,
@@ -784,19 +784,19 @@ def classify_model_sizing(
             "ornith-1.5-35b": {
                 "model": "ornith-1.5-35b",
                 "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
-                "service": "opencode-sglang-ornith-35b.service",
+                "service": "sglang-ornith-1.5-35b.service",
                 **o35_dyn,
             },
             "qwen3.8-27b": {
                 "model": "qwen3.8-27b",
                 "model_path": "nvidia/Qwen3.8-27B-NVFP4",
-                "service": "opencode-sglang-qwen27b.service",
+                "service": "sglang-qwen3.8-27b.service",
                 **q27_dyn,
             },
             "ornith-1.5-9b": {
                 "model": "ornith-1.5-9b",
                 "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
-                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "service": "sglang-ornith-1.5-9b.service",
                 **o9_dyn,
             },
         }
@@ -827,19 +827,19 @@ def classify_model_sizing(
             "ornith-1.5-35b": {
                 "model": "ornith-1.5-35b",
                 "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
-                "service": "opencode-sglang-ornith-35b.service",
+                "service": "sglang-ornith-1.5-35b.service",
                 **heavy_dyn,
             },
             "qwen3.8-27b": {
                 "model": "qwen3.8-27b",
                 "model_path": "nvidia/Qwen3.8-27B-NVFP4",
-                "service": "opencode-sglang-qwen27b.service",
+                "service": "sglang-qwen3.8-27b.service",
                 **heavy_dyn,
             },
             "ornith-1.5-9b": {
                 "model": "ornith-1.5-9b",
                 "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
-                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "service": "sglang-ornith-1.5-9b.service",
                 **o9_dyn,
             },
         }
@@ -862,19 +862,19 @@ def classify_model_sizing(
             "ornith-1.5-35b": {
                 "model": "ornith-1.5-35b",
                 "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
-                "service": "opencode-sglang-ornith-35b.service",
+                "service": "sglang-ornith-1.5-35b.service",
                 **heavy_dyn,
             },
             "qwen3.8-27b": {
                 "model": "qwen3.8-27b",
                 "model_path": "nvidia/Qwen3.8-27B-NVFP4",
-                "service": "opencode-sglang-qwen27b.service",
+                "service": "sglang-qwen3.8-27b.service",
                 **heavy_dyn,
             },
             "ornith-1.5-9b": {
                 "model": "ornith-1.5-9b",
                 "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
-                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "service": "sglang-ornith-1.5-9b.service",
                 "max_context": o9_ctx,
                 "memory_fraction": 0.85,
                 "cpu_offload": False,
@@ -892,7 +892,7 @@ def classify_model_sizing(
             "ornith-1.5-35b": {
                 "model": "ornith-1.5-35b",
                 "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
-                "service": "opencode-sglang-ornith-35b.service",
+                "service": "sglang-ornith-1.5-35b.service",
                 "max_context": heavy_ctx,
                 "memory_fraction": 0.80,
                 "cpu_offload": True,
@@ -903,7 +903,7 @@ def classify_model_sizing(
             "qwen3.8-27b": {
                 "model": "qwen3.8-27b",
                 "model_path": "nvidia/Qwen3.8-27B-NVFP4",
-                "service": "opencode-sglang-qwen27b.service",
+                "service": "sglang-qwen3.8-27b.service",
                 "max_context": heavy_ctx,
                 "memory_fraction": 0.80,
                 "cpu_offload": True,
@@ -914,7 +914,7 @@ def classify_model_sizing(
             "ornith-1.5-9b": {
                 "model": "ornith-1.5-9b",
                 "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
-                "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+                "service": "sglang-ornith-1.5-9b.service",
                 "max_context": o9_ctx,
                 "memory_fraction": 0.80,
                 "cpu_offload": False,
@@ -1175,6 +1175,36 @@ class HardwareProbe:
                 compute_cap=0.0,
             )
             vram = 0.0
+        elif "," in override_gpu:
+            parts = [p.strip() for p in override_gpu.split(",")]
+            g_name = parts[0] if parts and parts[0] else "NVIDIA GPU"
+            try:
+                vram_mb = int(float(parts[1])) if len(parts) >= 2 and parts[1] else estimate_vram_from_name(g_name)
+            except ValueError:
+                vram_mb = estimate_vram_from_name(g_name)
+            try:
+                cc = float(parts[2]) if len(parts) >= 3 and parts[2] else estimate_compute_cap_from_name(g_name)
+            except ValueError:
+                cc = estimate_compute_cap_from_name(g_name)
+            if cc < 8.0:
+                return classify_profile(
+                    effective_vram_gb=0.0,
+                    primary_gpu=None,
+                    host_ram_gb=host_ram_gb,
+                    host_cpu_cores=host_cpu_cores,
+                    target_context=target_context,
+                    tp_size=1,
+                    cuda_visible_devices="0",
+                    tier="override-filtered",
+                    selected_model=model,
+                )
+            primary = GPUInfo(
+                index=0,
+                name=g_name,
+                memory_total_mb=vram_mb,
+                compute_cap=cc,
+            )
+            vram = vram_mb / 1024.0
         else:
             raise ValueError(
                 f"Unknown --override-gpu value: {override_gpu} (valid: rtx-5090, rtx-pro-6000, rtx-spark, rtx-4090, rtx-4080, rtx-4070, fallback)"

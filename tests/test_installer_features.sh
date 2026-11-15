@@ -671,7 +671,7 @@ chmod 0755 "${MOCK_FAIL_BIN}/curl"
 cat << 'EOF' > "${MOCK_FAIL_BIN}/systemctl"
 #!/bin/sh
 if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then
-    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then
+    if [ "$3" = "sglang-ornith-1.5-35b.service" ] || [ "$4" = "sglang-ornith-1.5-35b.service" ]; then
         echo "failed"
         exit 1
     fi
@@ -686,7 +686,7 @@ FAIL_START_TIME=$(date +%s)
 HC_FAIL_OUT="$(PATH="${MOCK_FAIL_BIN}:${PATH}" USER_HOME="${SANDBOX_HC_FAIL}" HOME="${SANDBOX_HC_FAIL}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
 FAIL_DURATION=$(( $(date +%s) - FAIL_START_TIME ))
 
-if echo "$HC_FAIL_OUT" | grep -q "SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait." && \
+if echo "$HC_FAIL_OUT" | grep -q "SGLang service (sglang-ornith-1.5-35b.service) status is failed; aborting wait." && \
    echo "$HC_FAIL_OUT" | grep -q "SGLang inference engine failed healthcheck." && \
    [ "$FAIL_DURATION" -lt 15 ]; then
     pass "SGLang healthcheck aborted immediately upon failed unit state without waiting full timeout"
@@ -1094,7 +1094,7 @@ GPU_PROF="${SANDBOX_PROF}/.config/opencode-backends/gpu_profile.json"
 
 if [ -f "$ENV_FILE" ] && \
    grep -qE "SGLANG_PRIMARY_MODEL=local-sglang/(qwen-3\.8-nvfp4|qwen3\.8-27b)" "$ENV_FILE" && \
-   grep -q "SGLANG_SERVICE=opencode-sglang-qwen27b.service" "$ENV_FILE" && \
+   grep -q "SGLANG_SERVICE=sglang-qwen3.8-27b.service" "$ENV_FILE" && \
    grep -q "SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4" "$ENV_FILE" && \
    grep -q "SGLANG_27B_QUANTIZATION=modelopt" "$ENV_FILE" && \
    ! grep -q "Qwen/Qwen3.8-27B-FP4" "$ENV_FILE" && \
@@ -1102,14 +1102,14 @@ if [ -f "$ENV_FILE" ] && \
    [ -f "$GPU_PROF" ] && \
    grep -q '"model_path": "nvidia/Qwen3.8-27B-NVFP4"' "$GPU_PROF" && \
    ! grep -q "Qwen/Qwen3.8-27B-FP4" "$GPU_PROF" && \
-   [ -f "${REPO_DIR}/config/systemd/opencode-sglang-qwen27b.service" ] && \
-   [ -f "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" ] && \
-   ! grep -q "0.880.88" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
-   ! grep -q -- "--mem-fraction-static 0.88\${SGLANG_27B_MEM_FRACTION}" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
-   grep -q -- "--mem-fraction-static \${SGLANG_27B_MEM_FRACTION}" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
-   grep -q 'Environment="SGLANG_27B_MEM_FRACTION=0.88"' "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
-   grep -q -- "--disable-prefill-cuda-graph" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service" && \
-   ! grep -q -- "^ *--enable-torch-compile" "${SANDBOX_PROF}/.config/systemd/user/opencode-sglang-qwen27b.service"; then
+   [ -f "${REPO_DIR}/config/systemd/sglang-qwen3.8-27b.service" ] && \
+   [ -f "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service" ] && \
+   ! grep -q "0.880.88" "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service" && \
+   ! grep -q -- "--mem-fraction-static 0.88\${SGLANG_27B_MEM_FRACTION}" "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service" && \
+   grep -q -- "--mem-fraction-static \${SGLANG_27B_MEM_FRACTION}" "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service" && \
+   grep -q 'Environment="SGLANG_27B_MEM_FRACTION=0.88"' "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service" && \
+   grep -q -- "--disable-prefill-cuda-graph" "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service" && \
+   ! grep -q -- "^ *--enable-torch-compile" "${SANDBOX_PROF}/.config/systemd/user/sglang-qwen3.8-27b.service"; then
     pass "Installer provisions Qwen 3.8 27B NVFP4 selectable profile, environment, and units without sed corruption"
 else
     fail "Installer failed to provision Qwen 3.8 27B profile configuration"
@@ -1139,7 +1139,7 @@ if [ -f "$QS_FILE" ] && [ -f "$README_FILE" ] && \
    grep -q "claude --bg -n" "$QS_FILE" && \
    grep -q "agy remote-control" "$QS_FILE" && \
    grep -q "t3-serve.service" "$QS_FILE" && \
-   grep -q "opencode-sglang-qwen27b.service" "$QS_FILE" && \
+   grep -q "sglang-qwen3.8-27b.service" "$QS_FILE" && \
    grep -q "qwen3.8-27b" "$QS_FILE" && \
    grep -q "nvidia/Qwen3.8-27B-NVFP4" "$QS_FILE" && \
    ! grep -q "qwen3.5" "$QS_FILE"; then
@@ -1153,8 +1153,8 @@ echo "[Test 34] Verifying SGLang warmup disables CUDA graphs and enforces mutual
 if grep -q -- "--disable-cuda-graph" "${INSTALL_SCRIPT}" && \
    grep -q 'SGLANG_WARMUP_TIMEOUT:-300' "${INSTALL_SCRIPT}" && \
    grep -q 'SGLANG_HEALTHCHECK_RETRIES:-240' "${INSTALL_SCRIPT}" && \
-   grep -q 'disable --now opencode-sglang-ornith-35b.service' "${INSTALL_SCRIPT}" && \
-   grep -q 'disable --now opencode-sglang-qwen27b.service' "${INSTALL_SCRIPT}"; then
+   grep -q 'disable --now sglang-ornith-1.5-35b.service' "${INSTALL_SCRIPT}" && \
+   grep -q 'disable --now sglang-qwen3.8-27b.service' "${INSTALL_SCRIPT}"; then
     pass "install.sh implements fast warmup without throwaway CUDA graphs and mutually exclusive port 30000 switching"
 else
     fail "install.sh missing warmup --disable-cuda-graph or mutually exclusive port 30000 service switching"

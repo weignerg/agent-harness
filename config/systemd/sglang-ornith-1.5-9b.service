@@ -1,27 +1,31 @@
 [Unit]
-Description=SGLang Ornith-1.5-35B-A3B Stack on Port 30000 (256k Context)
+Description=SGLang Ornith-1.5-9B Fast Atomic Worker Stack (256k Context)
 After=network.target
 
 [Service]
 Type=exec
+Environment="SGLANG_BACKEND_PORT=30001"
 EnvironmentFile=-%h/.config/opencode-backends/env
-Environment="SGLANG_CONTEXT_LENGTH=262144"
-Environment="SGLANG_CPU_OFFLOAD_ARGS="
+Environment="SGLANG_UNIT=%n"
+Environment="SGLANG_SERVICE=sglang-ornith-1.5-9b.service"
+Environment="SGLANG_9B_CONTEXT_LENGTH=262144"
+Environment="SGLANG_9B_MEM_FRACTION=0.88"
+Environment="SGLANG_9B_CPU_OFFLOAD_ARGS="
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
 Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
 Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
 ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
-  --model-path ornith-ai/Ornith-1.5-35B-A3B-NVFP4 \
-  --served-model-name ornith-1.5-35b \
+  --model-path ornith-ai/Ornith-1.5-9B-NVFP4 \
+  --served-model-name ornith-1.5-9b \
   --tool-call-parser qwen3_coder \
   --reasoning-parser qwen3 \
-  --mem-fraction-static 0.88 \
-  --context-length ${SGLANG_CONTEXT_LENGTH} \
-  $SGLANG_CPU_OFFLOAD_ARGS \
+  --mem-fraction-static ${SGLANG_9B_MEM_FRACTION} \
+  --context-length ${SGLANG_9B_CONTEXT_LENGTH} \
+  $SGLANG_9B_CPU_OFFLOAD_ARGS \
   --chunked-prefill-size 2048 \
   --max-running-requests 1 \
-  --port 30000 \
+  --port ${SGLANG_BACKEND_PORT} \
   --host 127.0.0.1
 
 ExecStopPost=%h/.local/share/opencode-sglang-stack/sglang_oom_handler.sh

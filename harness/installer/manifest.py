@@ -17,8 +17,10 @@ SYSTEMD_UNITS: List[str] = [
     "opencode-agent.slice",
     "opencode-colbert-reindex.service",
     "opencode-colbert-reindex.timer",
-    "opencode-sglang-ornith-35b.service",
-    "opencode-sglang-qwen27b.service",
+    "opencode-model-proxy.service",
+    "sglang-ornith-1.5-35b.service",
+    "sglang-qwen3.8-27b.service",
+    "sglang-ornith-1.5-9b.service",
     "t3-serve.service",
 ]
 

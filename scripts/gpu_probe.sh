@@ -197,16 +197,32 @@ TP_SIZE=1
 CVD="0"
 
 if [ -n "$OVERRIDE_GPU" ]; then
-    case "$OVERRIDE_GPU" in
-        rtx-5090) GPU_NAME="NVIDIA GeForce RTX 5090 (32GB)"; VRAM_MB=32768; CC="12.0" ;;
-        rtx-pro-6000) GPU_NAME="NVIDIA RTX PRO 6000"; VRAM_MB=49152; CC="8.9" ;;
-        rtx-spark) GPU_NAME="NVIDIA RTX Spark 128GB Unified Memory"; VRAM_MB=131072; CC="12.0" ;;
-        rtx-4090) GPU_NAME="NVIDIA GeForce RTX 4090 (24GB)"; VRAM_MB=24576; CC="8.9" ;;
-        rtx-4080) GPU_NAME="NVIDIA GeForce RTX 4080 (16GB)"; VRAM_MB=16384; CC="8.9" ;;
-        rtx-4070) GPU_NAME="NVIDIA GeForce RTX 4070 (12GB)"; VRAM_MB=12288; CC="8.9" ;;
-        fallback) GPU_NAME="unknown GPU device"; VRAM_MB=0; CC="0.0" ;;
-        *) echo "❌ Unknown --override-gpu value: $OVERRIDE_GPU" >&2; exit 1 ;;
-    esac
+    if [[ "$OVERRIDE_GPU" == *","* ]]; then
+        if command -v python3 >/dev/null 2>&1; then
+            py_args=(--format "$FORMAT" --override-gpu "$OVERRIDE_GPU")
+            [ -n "$TARGET_CONTEXT" ] && py_args+=(--target-context "$TARGET_CONTEXT")
+            [ -n "$SELECTED_MODEL" ] && py_args+=(--model "$SELECTED_MODEL")
+            if PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}" python3 -m harness.hardware.probe "${py_args[@]}"; then
+                exit 0
+            fi
+        fi
+        IFS=',' read -r csv_name csv_vram csv_cc _ <<< "$OVERRIDE_GPU"
+        GPU_NAME="$(echo "${csv_name:-NVIDIA GPU}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        VRAM_MB="$(echo "${csv_vram:-0}" | tr -cd '0-9')"
+        VRAM_MB="${VRAM_MB:-0}"
+        CC="$(echo "${csv_cc:-8.0}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    else
+        case "$OVERRIDE_GPU" in
+            rtx-5090|5090) GPU_NAME="NVIDIA GeForce RTX 5090 (32GB)"; VRAM_MB=32768; CC="12.0" ;;
+            rtx-pro-6000|pro-6000|6000) GPU_NAME="NVIDIA RTX PRO 6000"; VRAM_MB=49152; CC="8.9" ;;
+            rtx-spark|spark) GPU_NAME="NVIDIA RTX Spark 128GB Unified Memory"; VRAM_MB=131072; CC="12.0" ;;
+            rtx-4090|4090) GPU_NAME="NVIDIA GeForce RTX 4090 (24GB)"; VRAM_MB=24576; CC="8.9" ;;
+            rtx-4080|4080) GPU_NAME="NVIDIA GeForce RTX 4080 (16GB)"; VRAM_MB=16384; CC="8.9" ;;
+            rtx-4070|4070) GPU_NAME="NVIDIA GeForce RTX 4070 (12GB)"; VRAM_MB=12288; CC="8.9" ;;
+            fallback) GPU_NAME="unknown GPU device"; VRAM_MB=0; CC="0.0" ;;
+            *) echo "❌ Unknown --override-gpu value: $OVERRIDE_GPU" >&2; exit 1 ;;
+        esac
+    fi
 else
     mapfile -t detected < <(detect_procfs_gpus)
     if [ "${#detected[@]}" -gt 0 ]; then
@@ -227,7 +243,7 @@ VRAM_GB=$(( VRAM_MB / 1024 ))
 PROFILE="fallback"
 MODEL="ornith-1.5-9b"
 MODEL_PATH="ornith-ai/Ornith-1.5-9B-NVFP4"
-SERVICE="ornith-1.5-9b-nvfp4-low-ctx.service"
+SERVICE="sglang-ornith-1.5-9b.service"
 MAX_CTX=32768
 MEM_FRACTION=0.80
 OFFLOAD="pure-gpu"
@@ -329,17 +345,17 @@ fi
 case "$MODEL" in
     ornith-1.5-35b)
         MODEL_PATH="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-        SERVICE="opencode-sglang-ornith-35b.service"
+        SERVICE="sglang-ornith-1.5-35b.service"
         MAX_CTX="$O35_CTX"; MEM_FRACTION="$O35_MEM"; OFFLOAD="$O35_MODE"; CPU_OFFLOAD="$O35_OFFLOAD"; CPU_OFFLOAD_GB="$O35_OFFLOAD_GB"; KV_DTYPE="nvfp4"
         ;;
     qwen3.8-27b)
         MODEL_PATH="nvidia/Qwen3.8-27B-NVFP4"
-        SERVICE="opencode-sglang-qwen27b.service"
+        SERVICE="sglang-qwen3.8-27b.service"
         MAX_CTX="$Q27_CTX"; MEM_FRACTION="$Q27_MEM"; OFFLOAD="$Q27_MODE"; CPU_OFFLOAD="$Q27_OFFLOAD"; CPU_OFFLOAD_GB="$Q27_OFFLOAD_GB"; KV_DTYPE="fp8_e4m3"
         ;;
     ornith-1.5-9b)
         MODEL_PATH="ornith-ai/Ornith-1.5-9B-NVFP4"
-        SERVICE="ornith-1.5-9b-nvfp4-low-ctx.service"
+        SERVICE="sglang-ornith-1.5-9b.service"
         MAX_CTX="$O9_CTX"; MEM_FRACTION="$O9_MEM"; OFFLOAD="$O9_MODE"; CPU_OFFLOAD="$O9_OFFLOAD"; CPU_OFFLOAD_GB="$O9_OFFLOAD_GB"; KV_DTYPE="nvfp4"
         ;;
 esac
@@ -375,7 +391,7 @@ if [ "$FORMAT" = "json" ]; then
     "ornith-1.5-35b": {
       "model": "ornith-1.5-35b",
       "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
-      "service": "opencode-sglang-ornith-35b.service",
+      "service": "sglang-ornith-1.5-35b.service",
       "max_context": ${O35_CTX},
       "memory_fraction": ${O35_MEM},
       "cpu_offload": ${O35_OFFLOAD},
@@ -386,7 +402,7 @@ if [ "$FORMAT" = "json" ]; then
     "qwen3.8-27b": {
       "model": "qwen3.8-27b",
       "model_path": "nvidia/Qwen3.8-27B-NVFP4",
-      "service": "opencode-sglang-qwen27b.service",
+      "service": "sglang-qwen3.8-27b.service",
       "max_context": ${Q27_CTX},
       "memory_fraction": ${Q27_MEM},
       "cpu_offload": ${Q27_OFFLOAD},
@@ -397,7 +413,7 @@ if [ "$FORMAT" = "json" ]; then
     "ornith-1.5-9b": {
       "model": "ornith-1.5-9b",
       "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
-      "service": "ornith-1.5-9b-nvfp4-low-ctx.service",
+      "service": "sglang-ornith-1.5-9b.service",
       "max_context": ${O9_CTX},
       "memory_fraction": ${O9_MEM},
       "cpu_offload": ${O9_OFFLOAD},

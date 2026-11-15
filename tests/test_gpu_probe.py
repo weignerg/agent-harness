@@ -57,7 +57,7 @@ class TestGPUProfileClassification(unittest.TestCase):
         self.assertEqual(p.profile, "rtx-5090")
         self.assertEqual(p.model, "ornith-1.5-35b")
         self.assertEqual(p.model_path, "ornith-ai/Ornith-1.5-35B-A3B-NVFP4")
-        self.assertEqual(p.service, "opencode-sglang-ornith-35b.service")
+        self.assertEqual(p.service, "sglang-ornith-1.5-35b.service")
         self.assertEqual(p.max_context, 262144)
         self.assertEqual(p.memory_fraction, 0.88)
         self.assertFalse(p.cpu_offload)
@@ -213,7 +213,7 @@ class TestGPUProfileClassification(unittest.TestCase):
         self.assertEqual(p.profile, "rtx-4080")
         self.assertEqual(p.model, "ornith-1.5-9b")
         self.assertEqual(p.model_path, "ornith-ai/Ornith-1.5-9B-NVFP4")
-        self.assertEqual(p.service, "ornith-1.5-9b-nvfp4-low-ctx.service")
+        self.assertEqual(p.service, "sglang-ornith-1.5-9b.service")
         self.assertEqual(p.max_context, 262144)
         self.assertEqual(p.memory_fraction, 0.88)
         self.assertFalse(p.cpu_offload)
@@ -787,7 +787,7 @@ class TestPerModelHardwareSizingIssue49(unittest.TestCase):
         # 1. Python API with model="qwen3.8-27b" on rtx-4090
         p = probe_hardware(override_gpu="rtx-4090", model="qwen3.8-27b")
         self.assertEqual(p.model, "qwen3.8-27b")
-        self.assertEqual(p.service, "opencode-sglang-qwen27b.service")
+        self.assertEqual(p.service, "sglang-qwen3.8-27b.service")
         self.assertEqual(p.max_context, 65536)
         self.assertTrue(p.cpu_offload)
         self.assertEqual(p.cpu_offload_gb, 6)
@@ -803,10 +803,24 @@ class TestPerModelHardwareSizingIssue49(unittest.TestCase):
         )
         data = json.loads(proc.stdout)
         self.assertEqual(data["model"], "qwen3.8-27b")
+        self.assertEqual(data["service"], "sglang-qwen3.8-27b.service")
         self.assertEqual(data["max_context"], 65536)
         self.assertTrue(data["cpu_offload"])
         self.assertEqual(data["cpu_offload_gb"], 6)
         self.assertIn("model_sizing", data)
+
+        # 3. Shell CLI wrapper supports raw CSV --override-gpu strings
+        proc_csv = subprocess.run(
+            [str(gpu_probe_sh), "--override-gpu", "NVIDIA GeForce RTX 5090, 32768, 12.0"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data_csv = json.loads(proc_csv.stdout)
+        self.assertEqual(data_csv["profile"], "rtx-5090")
+        self.assertEqual(data_csv["service"], "sglang-ornith-1.5-35b.service")
+        self.assertEqual(data_csv["max_context"], 262144)
 
 
 if __name__ == "__main__":

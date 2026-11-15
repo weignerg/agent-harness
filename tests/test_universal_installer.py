@@ -495,10 +495,13 @@ class TestUniversalInstaller(unittest.TestCase):
             # Verify deployed systemd user units
             expected_units = [
                 "opencode-server.service",
+                "opencode-model-proxy.service",
                 "opencode-agent.slice",
                 "opencode-colbert-reindex.service",
                 "opencode-colbert-reindex.timer",
-                "opencode-sglang-ornith-35b.service",
+                "sglang-ornith-1.5-35b.service",
+                "sglang-ornith-1.5-9b.service",
+                "sglang-qwen3.8-27b.service",
                 "t3-serve.service",
             ]
             for unit in expected_units:
@@ -594,10 +597,13 @@ class TestUniversalInstaller(unittest.TestCase):
 
             # Verify systemd units deployed
             self.assertTrue((systemd_user_dir / "opencode-server.service").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-model-proxy.service").is_file())
             self.assertTrue((systemd_user_dir / "opencode-agent.slice").is_file())
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.service").is_file())
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.timer").is_file())
-            self.assertTrue((systemd_user_dir / "opencode-sglang-ornith-35b.service").is_file())
+            self.assertTrue((systemd_user_dir / "sglang-ornith-1.5-35b.service").is_file())
+            self.assertTrue((systemd_user_dir / "sglang-ornith-1.5-9b.service").is_file())
+            self.assertTrue((systemd_user_dir / "sglang-qwen3.8-27b.service").is_file())
             self.assertTrue((systemd_user_dir / "t3-serve.service").is_file())
 
             # Manifest in local repo tracks them
@@ -606,6 +612,7 @@ class TestUniversalInstaller(unittest.TestCase):
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             recorded_file_paths = [f["path"] for f in manifest_data.get("files", [])]
             self.assertIn(str((systemd_user_dir / "opencode-server.service").resolve()), recorded_file_paths)
+            self.assertIn(str((systemd_user_dir / "opencode-model-proxy.service").resolve()), recorded_file_paths)
             self.assertIn(str((systemd_user_dir / "t3-serve.service").resolve()), recorded_file_paths)
 
             # Verify integrity
@@ -617,6 +624,7 @@ class TestUniversalInstaller(unittest.TestCase):
             proc_uninst = self.run_installer("--uninstall", "--mode", "local", str(repo_dir), "--non-interactive", env=env)
             self.assertEqual(proc_uninst.returncode, 0)
             self.assertFalse((systemd_user_dir / "opencode-server.service").exists())
+            self.assertFalse((systemd_user_dir / "opencode-model-proxy.service").exists())
             self.assertFalse((systemd_user_dir / "opencode-agent.slice").exists())
             self.assertFalse((systemd_user_dir / "t3-serve.service").exists())
 
@@ -645,7 +653,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(proc_inst.returncode, 0)
 
             # Check service file tuning
-            unit_file = systemd_user_dir / "opencode-sglang-ornith-35b.service"
+            unit_file = systemd_user_dir / "sglang-ornith-1.5-35b.service"
             self.assertTrue(unit_file.is_file())
             unit_content = unit_file.read_text(encoding="utf-8")
             self.assertIn("--mem-fraction-static 0.88", unit_content)
@@ -800,8 +808,8 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn("Backend healthchecks skipped (--no-healthcheck)", proc_skip.stdout)
 
     def test_issue7_sglang_context_length_service_fallback(self):
-        """Test Issue #7: opencode-sglang-ornith-35b.service defines guaranteed SGLANG_CONTEXT_LENGTH fallback."""
-        service_file = REPO_ROOT / "config" / "systemd" / "opencode-sglang-ornith-35b.service"
+        """Test Issue #7: sglang-ornith-1.5-35b.service defines guaranteed SGLANG_CONTEXT_LENGTH fallback."""
+        service_file = REPO_ROOT / "config" / "systemd" / "sglang-ornith-1.5-35b.service"
         self.assertTrue(service_file.is_file())
         content = service_file.read_text(encoding="utf-8")
         self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', content)
@@ -823,7 +831,7 @@ class TestUniversalInstaller(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
-            deployed_service = sandbox / ".config" / "systemd" / "user" / "opencode-sglang-ornith-35b.service"
+            deployed_service = sandbox / ".config" / "systemd" / "user" / "sglang-ornith-1.5-35b.service"
             self.assertTrue(deployed_service.is_file())
             deployed_content = deployed_service.read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=', deployed_content)
@@ -1057,7 +1065,7 @@ class TestUniversalInstaller(unittest.TestCase):
             mock_systemctl.write_text(
                 '#!/bin/sh\n'
                 'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
-                '    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then\n'
+                '    if [ "$3" = "sglang-ornith-1.5-35b.service" ] || [ "$4" = "sglang-ornith-1.5-35b.service" ]; then\n'
                 '        echo "failed"\n'
                 '        exit 1\n'
                 '    fi\n'
@@ -1086,7 +1094,7 @@ class TestUniversalInstaller(unittest.TestCase):
             duration = time.time() - start_time
             self.assertNotEqual(proc.returncode, 0)
             self.assertLess(duration, 15.0, "Early failure should abort immediately, not wait 120s")
-            self.assertIn("SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait.", proc.stdout)
+            self.assertIn("SGLang service (sglang-ornith-1.5-35b.service) status is failed; aborting wait.", proc.stdout)
             self.assertIn("SGLang inference engine failed healthcheck.", proc.stdout)
             self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
 
@@ -1495,13 +1503,13 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
 
             # 1. Ornith service must preserve 256k (262144) context on RTX 5090 even when qwen3.8 was selected
-            ornith_unit = systemd_user_dir / "opencode-sglang-ornith-35b.service"
+            ornith_unit = systemd_user_dir / "sglang-ornith-1.5-35b.service"
             self.assertTrue(ornith_unit.is_file())
             ornith_content = ornith_unit.read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
 
             # 2. Qwen 27B service must have 262144 context on RTX 5090 and --max-mamba-cache-size 3 (no 4.59 ratio starvation)
-            qwen_unit = systemd_user_dir / "opencode-sglang-qwen27b.service"
+            qwen_unit = systemd_user_dir / "sglang-qwen3.8-27b.service"
             self.assertTrue(qwen_unit.is_file())
             qwen_content = qwen_unit.read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
@@ -1530,14 +1538,17 @@ class TestUniversalInstaller(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
 
-            ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
-            qwen_content = (systemd_user_dir / "opencode-sglang-qwen27b.service").read_text(encoding="utf-8")
+            ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+            qwen_content = (systemd_user_dir / "sglang-qwen3.8-27b.service").read_text(encoding="utf-8")
+            ornith9b_content = (systemd_user_dir / "sglang-ornith-1.5-9b.service").read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
             self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS="', ornith_content)
             self.assertIn("$SGLANG_CPU_OFFLOAD_ARGS", ornith_content)
             self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
             self.assertIn('Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="', qwen_content)
             self.assertIn("$SGLANG_27B_CPU_OFFLOAD_ARGS", qwen_content)
+            self.assertIn('Environment="SGLANG_9B_CONTEXT_LENGTH=262144"', ornith9b_content)
+            self.assertIn('Environment="SGLANG_9B_CPU_OFFLOAD_ARGS="', ornith9b_content)
 
         # 2. RTX 4090 (24 GB VRAM, host RAM >= 32 GB): Ornith 35B at 64k pure-GPU, Qwen 27B at 64k with 6 GB CPU offload
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1560,8 +1571,8 @@ class TestUniversalInstaller(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
 
-            ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
-            qwen_content = (systemd_user_dir / "opencode-sglang-qwen27b.service").read_text(encoding="utf-8")
+            ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+            qwen_content = (systemd_user_dir / "sglang-qwen3.8-27b.service").read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=65536"', ornith_content)
             self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS="', ornith_content)
             self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=65536"', qwen_content)
@@ -1592,7 +1603,7 @@ class TestUniversalInstaller(unittest.TestCase):
             )
             self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
 
-            ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
+            ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
             self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb 8"', ornith_content)
 
@@ -1620,8 +1631,8 @@ class TestUniversalInstaller(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 0, f"Installer failed for {gpu_override}: {proc.stderr}\n{proc.stdout}")
 
-                ornith_content = (systemd_user_dir / "opencode-sglang-ornith-35b.service").read_text(encoding="utf-8")
-                qwen_content = (systemd_user_dir / "opencode-sglang-qwen27b.service").read_text(encoding="utf-8")
+                ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+                qwen_content = (systemd_user_dir / "sglang-qwen3.8-27b.service").read_text(encoding="utf-8")
                 self.assertIn(f'Environment="SGLANG_CONTEXT_LENGTH={expected_ctx}"', ornith_content)
                 self.assertIn(f'Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', ornith_content)
                 self.assertIn(f'Environment="SGLANG_27B_CONTEXT_LENGTH={expected_ctx}"', qwen_content)

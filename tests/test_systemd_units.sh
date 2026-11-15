@@ -20,15 +20,15 @@ echo "==========================================================================
 echo "🧪 Running Systemd Service Unit Tests (Issue #1 Regression Suite)"
 echo "================================================================================"
 
-# 1. Check service files count
+## 1. Check service files count
 SERVICE_FILES=("$CONFIG_DIR"/*.service)
 NUM_FILES=${#SERVICE_FILES[@]}
 echo "[CHECK 1] Found ${NUM_FILES} service unit files in ${CONFIG_DIR}."
-if [ "$NUM_FILES" -ne 6 ]; then
-    echo "❌ FAIL: Expected exactly 6 service files, found ${NUM_FILES}."
+if [ "$NUM_FILES" -ne 7 ]; then
+    echo "❌ FAIL: Expected exactly 7 service files, found ${NUM_FILES}."
     exit 1
 fi
-echo "✅ Passed: Exactly 6 service files found."
+echo "✅ Passed: Exactly 7 service files found."
 
 # 2. Check for forbidden Environment="HF_TOKEN="
 echo "[CHECK 2] Scanning for forbidden 'Environment=\"HF_TOKEN=\"' overrides..."
@@ -38,7 +38,7 @@ if grep -rn 'Environment="HF_TOKEN="' "$CONFIG_DIR" "$INSTALL_SCRIPT"; then
 fi
 echo "✅ Passed: Zero occurrences of 'Environment=\"HF_TOKEN=\"' found."
 
-# 3. Check for EnvironmentFile in all 14 service units
+# 3. Check for EnvironmentFile in all service units
 echo "[CHECK 3] Verifying 'EnvironmentFile=-%h/.config/opencode-backends/env' in all service units..."
 MISSING_ENVFILE=0
 for svc in "${SERVICE_FILES[@]}"; do
@@ -90,61 +90,61 @@ fi
 echo "✅ Passed: opencode-colbert-reindex.timer configured with OnBootSec=2min, OnUnitActiveSec=5min, RandomizedDelaySec=15."
 
 # 7. Check Qwen 3.8 27B service model repo ID and CLI flags (Issue #20)
-echo "[CHECK 7] Verifying opencode-sglang-qwen27b.service model repo ID and quantization flags (Issue #20)..."
-QWEN27B_FILE="${CONFIG_DIR}/opencode-sglang-qwen27b.service"
+echo "[CHECK 7] Verifying sglang-qwen3.8-27b.service model repo ID and quantization flags (Issue #20)..."
+QWEN27B_FILE="${CONFIG_DIR}/sglang-qwen3.8-27b.service"
 if grep -q "Qwen/Qwen3.8-27B-FP4" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service contains invalid repo ID Qwen/Qwen3.8-27B-FP4"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service contains invalid repo ID Qwen/Qwen3.8-27B-FP4"
     exit 1
 fi
 if ! grep -q "SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing SGLANG_27B_MODEL_PATH=nvidia/Qwen3.8-27B-NVFP4"
     exit 1
 fi
 if grep -q "SGLANG_27B_QUANTIZATION=fp4" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service contains invalid quantization fp4"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service contains invalid quantization fp4"
     exit 1
 fi
 if ! grep -q "SGLANG_27B_QUANTIZATION=modelopt" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_QUANTIZATION=modelopt"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing SGLANG_27B_QUANTIZATION=modelopt"
     exit 1
 fi
 if grep -q -- "--cuda-graph-max-bs " "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service contains ambiguous flag --cuda-graph-max-bs"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service contains ambiguous flag --cuda-graph-max-bs"
     exit 1
 fi
-echo "✅ Passed: opencode-sglang-qwen27b.service correctly specifies nvidia/Qwen3.8-27B-NVFP4, modelopt, and valid SGLang flags."
+echo "✅ Passed: sglang-qwen3.8-27b.service correctly specifies nvidia/Qwen3.8-27B-NVFP4, modelopt, and valid SGLang flags."
 
 # 8. Check Qwen 3.8 27B fast startup and CUDA graph settings (Issue #23)
-echo "[CHECK 8] Verifying opencode-sglang-qwen27b.service fast startup and CUDA graph optimizations (Issue #23)..."
+echo "[CHECK 8] Verifying sglang-qwen3.8-27b.service fast startup and CUDA graph optimizations (Issue #23)..."
 if ! grep -q -- "--disable-prefill-cuda-graph" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing --disable-prefill-cuda-graph"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing --disable-prefill-cuda-graph"
     exit 1
 fi
 if grep -q -- "^ *--enable-torch-compile" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service hardcodes --enable-torch-compile in ExecStart"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service hardcodes --enable-torch-compile in ExecStart"
     exit 1
 fi
 if ! grep -qE "SGLANG_27B_KV_CACHE_DTYPE=(fp8_e4m3|nvfp4)" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3 or nvfp4"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing SGLANG_27B_KV_CACHE_DTYPE=fp8_e4m3 or nvfp4"
     exit 1
 fi
 if grep -q -- "--mem-fraction-static [0-9.]*0.88" "$QWEN27B_FILE" || grep -q "0.880.88" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service contains corrupted mem-fraction-static"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service contains corrupted mem-fraction-static"
     exit 1
 fi
 if grep -q '\${SGLANG_27B_TORCH_COMPILE}' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service uses braced \${SGLANG_27B_TORCH_COMPILE} instead of unbraced \$SGLANG_27B_TORCH_COMPILE"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service uses braced \${SGLANG_27B_TORCH_COMPILE} instead of unbraced \$SGLANG_27B_TORCH_COMPILE"
     exit 1
 fi
 if grep -q '\${SGLANG_27B_SPECULATIVE_ARGS}' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service uses braced \${SGLANG_27B_SPECULATIVE_ARGS} instead of unbraced \$SGLANG_27B_SPECULATIVE_ARGS"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service uses braced \${SGLANG_27B_SPECULATIVE_ARGS} instead of unbraced \$SGLANG_27B_SPECULATIVE_ARGS"
     exit 1
 fi
 if ! grep -q '\$SGLANG_27B_TORCH_COMPILE' "$QWEN27B_FILE" || ! grep -q '\$SGLANG_27B_SPECULATIVE_ARGS' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing unbraced \$SGLANG_27B_TORCH_COMPILE or \$SGLANG_27B_SPECULATIVE_ARGS"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing unbraced \$SGLANG_27B_TORCH_COMPILE or \$SGLANG_27B_SPECULATIVE_ARGS"
     exit 1
 fi
-echo "✅ Passed: opencode-sglang-qwen27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
+echo "✅ Passed: sglang-qwen3.8-27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
 
 # 9. Check SGLANG_27B_MAMBA_ARGS quoting and KV cache protection in install.sh, service, and env file
 echo "[CHECK 9] Verifying SGLANG_27B_MAMBA_ARGS quoting and KV cache protection..."
@@ -161,7 +161,7 @@ if grep -q -- '--mamba-full-memory-ratio 4.59' "$QWEN27B_FILE" "$INSTALL_SCRIPT"
     exit 1
 fi
 if ! grep -qE -- '--max-mamba-cache-size 3|--mamba-full-memory-ratio 0\.25' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing --max-mamba-cache-size 3 or --mamba-full-memory-ratio 0.25"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing --max-mamba-cache-size 3 or --mamba-full-memory-ratio 0.25"
     exit 1
 fi
 if [ -f "${HOME}/.config/opencode-backends/env" ]; then
@@ -178,24 +178,38 @@ echo "✅ Passed: SGLANG_27B_MAMBA_ARGS is properly quoted, protects KV cache ca
 
 # 10. Check adaptive CPU offload environment defaults and unbraced flags (Issue #49)
 echo "[CHECK 10] Verifying adaptive CPU offload environment defaults and unbraced flags (Issue #49)..."
-ORNITH_FILE="${CONFIG_DIR}/opencode-sglang-ornith-35b.service"
+ORNITH_FILE="${CONFIG_DIR}/sglang-ornith-1.5-35b.service"
+ORNITH9B_FILE="${CONFIG_DIR}/sglang-ornith-1.5-9b.service"
+PROXY_FILE="${CONFIG_DIR}/opencode-model-proxy.service"
 if ! grep -q '^Environment="SGLANG_CPU_OFFLOAD_ARGS="$' "$ORNITH_FILE"; then
-    echo "❌ FAIL: opencode-sglang-ornith-35b.service missing default Environment=\"SGLANG_CPU_OFFLOAD_ARGS=\""
+    echo "❌ FAIL: sglang-ornith-1.5-35b.service missing default Environment=\"SGLANG_CPU_OFFLOAD_ARGS=\""
     exit 1
 fi
 if grep -q '\${SGLANG_CPU_OFFLOAD_ARGS}' "$ORNITH_FILE" || ! grep -q '\$SGLANG_CPU_OFFLOAD_ARGS' "$ORNITH_FILE"; then
-    echo "❌ FAIL: opencode-sglang-ornith-35b.service must use unbraced \$SGLANG_CPU_OFFLOAD_ARGS"
+    echo "❌ FAIL: sglang-ornith-1.5-35b.service must use unbraced \$SGLANG_CPU_OFFLOAD_ARGS"
     exit 1
 fi
 if ! grep -q '^Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="$' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service missing default Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=\""
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing default Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=\""
     exit 1
 fi
 if grep -q '\${SGLANG_27B_CPU_OFFLOAD_ARGS}' "$QWEN27B_FILE" || ! grep -q '\$SGLANG_27B_CPU_OFFLOAD_ARGS' "$QWEN27B_FILE"; then
-    echo "❌ FAIL: opencode-sglang-qwen27b.service must use unbraced \$SGLANG_27B_CPU_OFFLOAD_ARGS"
+    echo "❌ FAIL: sglang-qwen3.8-27b.service must use unbraced \$SGLANG_27B_CPU_OFFLOAD_ARGS"
     exit 1
 fi
-echo "✅ Passed: Both Ornith 35B and Qwen 27B systemd units define empty default CPU offload args and unbraced ExecStart expansion."
+if ! grep -q '^Environment="SGLANG_9B_CPU_OFFLOAD_ARGS="$' "$ORNITH9B_FILE"; then
+    echo "❌ FAIL: sglang-ornith-1.5-9b.service missing default Environment=\"SGLANG_9B_CPU_OFFLOAD_ARGS=\""
+    exit 1
+fi
+if ! grep -q 'SGLANG_BACKEND_PORT=30001' "$ORNITH_FILE" || ! grep -q 'SGLANG_BACKEND_PORT=30001' "$QWEN27B_FILE" || ! grep -q 'SGLANG_BACKEND_PORT=30001' "$ORNITH9B_FILE"; then
+    echo "❌ FAIL: One or more SGLang units missing SGLANG_BACKEND_PORT=30001"
+    exit 1
+fi
+if ! grep -q 'harness.orchestrator.model_proxy' "$PROXY_FILE" || ! grep -q -- '--listen-port 30000' "$PROXY_FILE" || ! grep -q -- '--backend-port 30001' "$PROXY_FILE"; then
+    echo "❌ FAIL: opencode-model-proxy.service missing expected ExecStart flags"
+    exit 1
+fi
+echo "✅ Passed: Standardized SGLang units (35B, 27B, 9B) and opencode-model-proxy.service validated."
 
 echo "================================================================================"
 echo "🎉 ALL SYSTEMD UNIT VERIFICATION TESTS PASSED (100%)"
