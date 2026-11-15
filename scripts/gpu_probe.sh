@@ -17,7 +17,7 @@
 #   fallback      any <8 GB     memory_fraction 0.80  max_ctx 32768
 #
 # Usage:
-#   scripts/gpu_probe.sh [--format json|env|flags] [--override-gpu <type>] [--target-context <int>]
+#   scripts/gpu_probe.sh [--format json|env|flags] [--override-gpu <type>] [--target-context <int>] [--model <model>]
 # ==============================================================================
 set -uo pipefail
 
@@ -37,6 +37,7 @@ fi
 FORMAT="json"
 OVERRIDE_GPU=""
 TARGET_CONTEXT=""
+SELECTED_MODEL=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -64,9 +65,17 @@ while [[ $# -gt 0 ]]; do
             TARGET_CONTEXT="${1#*=}"
             shift
             ;;
+        --model)
+            SELECTED_MODEL="${2:-}"
+            shift 2
+            ;;
+        --model=*)
+            SELECTED_MODEL="${1#*=}"
+            shift
+            ;;
         -h|--help)
             cat << EOF
-Usage: gpu_probe.sh [--format json|env|flags] [--override-gpu <type>] [--target-context <int>]
+Usage: gpu_probe.sh [--format json|env|flags] [--override-gpu <type>] [--target-context <int>] [--model <model>]
 
 Detects the host GPU and prints an SGLang/OpenCode profile.
 
@@ -74,6 +83,7 @@ Options:
   --format <fmt>         Output format: json (default), env, or flags
   --override-gpu <type>  Force profile: rtx-5090 | rtx-pro-6000 | rtx-spark | rtx-4090 | rtx-4080 | rtx-4070 | fallback
   --target-context <int> Desired target context window size
+  --model <model>        Query sizing for model: ornith-1.5-35b | qwen3.8-27b | ornith-1.5-9b
   -h, --help             Show this help
 EOF
             exit 0
@@ -187,16 +197,32 @@ TP_SIZE=1
 CVD="0"
 
 if [ -n "$OVERRIDE_GPU" ]; then
-    case "$OVERRIDE_GPU" in
-        rtx-5090) GPU_NAME="NVIDIA GeForce RTX 5090 (32GB)"; VRAM_MB=32768; CC="12.0" ;;
-        rtx-pro-6000) GPU_NAME="NVIDIA RTX PRO 6000"; VRAM_MB=49152; CC="8.9" ;;
-        rtx-spark) GPU_NAME="NVIDIA RTX Spark 128GB Unified Memory"; VRAM_MB=131072; CC="12.0" ;;
-        rtx-4090) GPU_NAME="NVIDIA GeForce RTX 4090 (24GB)"; VRAM_MB=24576; CC="8.9" ;;
-        rtx-4080) GPU_NAME="NVIDIA GeForce RTX 4080 (16GB)"; VRAM_MB=16384; CC="8.9" ;;
-        rtx-4070) GPU_NAME="NVIDIA GeForce RTX 4070 (12GB)"; VRAM_MB=12288; CC="8.9" ;;
-        fallback) GPU_NAME="unknown GPU device"; VRAM_MB=0; CC="0.0" ;;
-        *) echo "❌ Unknown --override-gpu value: $OVERRIDE_GPU" >&2; exit 1 ;;
-    esac
+    if [[ "$OVERRIDE_GPU" == *","* ]]; then
+        if command -v python3 >/dev/null 2>&1; then
+            py_args=(--format "$FORMAT" --override-gpu "$OVERRIDE_GPU")
+            [ -n "$TARGET_CONTEXT" ] && py_args+=(--target-context "$TARGET_CONTEXT")
+            [ -n "$SELECTED_MODEL" ] && py_args+=(--model "$SELECTED_MODEL")
+            if PYTHONPATH="${REPO_DIR}:${PYTHONPATH:-}" python3 -m harness.hardware.probe "${py_args[@]}"; then
+                exit 0
+            fi
+        fi
+        IFS=',' read -r csv_name csv_vram csv_cc _ <<< "$OVERRIDE_GPU"
+        GPU_NAME="$(echo "${csv_name:-NVIDIA GPU}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        VRAM_MB="$(echo "${csv_vram:-0}" | tr -cd '0-9')"
+        VRAM_MB="${VRAM_MB:-0}"
+        CC="$(echo "${csv_cc:-8.0}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    else
+        case "$OVERRIDE_GPU" in
+            rtx-5090|5090) GPU_NAME="NVIDIA GeForce RTX 5090 (32GB)"; VRAM_MB=32768; CC="12.0" ;;
+            rtx-pro-6000|pro-6000|6000) GPU_NAME="NVIDIA RTX PRO 6000"; VRAM_MB=49152; CC="8.9" ;;
+            rtx-spark|spark) GPU_NAME="NVIDIA RTX Spark 128GB Unified Memory"; VRAM_MB=131072; CC="12.0" ;;
+            rtx-4090|4090) GPU_NAME="NVIDIA GeForce RTX 4090 (24GB)"; VRAM_MB=24576; CC="8.9" ;;
+            rtx-4080|4080) GPU_NAME="NVIDIA GeForce RTX 4080 (16GB)"; VRAM_MB=16384; CC="8.9" ;;
+            rtx-4070|4070) GPU_NAME="NVIDIA GeForce RTX 4070 (12GB)"; VRAM_MB=12288; CC="8.9" ;;
+            fallback) GPU_NAME="unknown GPU device"; VRAM_MB=0; CC="0.0" ;;
+            *) echo "❌ Unknown --override-gpu value: $OVERRIDE_GPU" >&2; exit 1 ;;
+        esac
+    fi
 else
     mapfile -t detected < <(detect_procfs_gpus)
     if [ "${#detected[@]}" -gt 0 ]; then
@@ -213,79 +239,126 @@ fi
 
 VRAM_GB=$(( VRAM_MB / 1024 ))
 
-# Profile and sizing decision
+# Profile and per-model sizing decision
 PROFILE="fallback"
 MODEL="ornith-1.5-9b"
 MODEL_PATH="ornith-ai/Ornith-1.5-9B-NVFP4"
-SERVICE="ornith-1.5-9b-nvfp4-low-ctx.service"
+SERVICE="sglang-ornith-1.5-9b.service"
 MAX_CTX=32768
 MEM_FRACTION=0.80
 OFFLOAD="pure-gpu"
 CPU_OFFLOAD=false
 CPU_OFFLOAD_GB=0
+KV_DTYPE="nvfp4"
+
+O35_CTX=16384; O35_MEM=0.80; O35_OFFLOAD=true; O35_OFFLOAD_GB=16; O35_REC_GB=16; O35_MODE="cpu-offload"
+Q27_CTX=16384; Q27_MEM=0.80; Q27_OFFLOAD=true; Q27_OFFLOAD_GB=16; Q27_REC_GB=16; Q27_MODE="cpu-offload"
+O9_CTX=32768;  O9_MEM=0.80;  O9_OFFLOAD=false; O9_OFFLOAD_GB=0;   O9_REC_GB=0;   O9_MODE="pure-gpu"
 
 name_lower="${GPU_NAME,,}"
 if [[ "$VRAM_GB" -ge 100 || "$name_lower" == *"spark"* ]]; then
     PROFILE="rtx-spark"
+    O35_CTX=262144
+    [[ "$name_lower" == *"spark"* ]] && O35_CTX=512000
+    [ -n "$TARGET_CONTEXT" ] && O35_CTX="$TARGET_CONTEXT"
+    O35_MEM=0.92; O35_OFFLOAD=false; O35_OFFLOAD_GB=0; O35_REC_GB=0
+    O35_MODE="pure-gpu"; [[ "$name_lower" == *"spark"* ]] && O35_MODE="unified-memory"
+    Q27_CTX=262144; [ -n "$TARGET_CONTEXT" ] && Q27_CTX="$TARGET_CONTEXT"
+    Q27_MEM=0.88; Q27_OFFLOAD=false; Q27_OFFLOAD_GB=0; Q27_REC_GB=0; Q27_MODE="$O35_MODE"
+    O9_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O9_CTX="$TARGET_CONTEXT"
+    O9_MEM=0.88; O9_OFFLOAD=false; O9_OFFLOAD_GB=0; O9_REC_GB=0; O9_MODE="$O35_MODE"
     MODEL="ornith-1.5-35b"
-    MODEL_PATH="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-    SERVICE="opencode-sglang-ornith-35b.service"
-    MAX_CTX=262144
-    [[ "$name_lower" == *"spark"* ]] && MAX_CTX=512000
-    [ -n "$TARGET_CONTEXT" ] && MAX_CTX="$TARGET_CONTEXT"
-    MEM_FRACTION=0.92
-    OFFLOAD="pure-gpu"
-    [[ "$name_lower" == *"spark"* ]] && OFFLOAD="unified-memory"
 elif [[ "$VRAM_GB" -ge 44 || "$name_lower" == *"pro 6000"* || "$name_lower" == *"pro-6000"* ]]; then
     PROFILE="rtx-pro-6000"
+    O35_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O35_CTX="$TARGET_CONTEXT"
+    O35_MEM=0.90; O35_OFFLOAD=false; O35_OFFLOAD_GB=0; O35_REC_GB=0; O35_MODE="pure-gpu"
+    Q27_CTX=262144; [ -n "$TARGET_CONTEXT" ] && Q27_CTX="$TARGET_CONTEXT"
+    Q27_MEM=0.88; Q27_OFFLOAD=false; Q27_OFFLOAD_GB=0; Q27_REC_GB=0; Q27_MODE="pure-gpu"
+    O9_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O9_CTX="$TARGET_CONTEXT"
+    O9_MEM=0.88; O9_OFFLOAD=false; O9_OFFLOAD_GB=0; O9_REC_GB=0; O9_MODE="pure-gpu"
     MODEL="ornith-1.5-35b"
-    MODEL_PATH="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-    SERVICE="opencode-sglang-ornith-35b.service"
-    MAX_CTX=262144
-    [ -n "$TARGET_CONTEXT" ] && MAX_CTX="$TARGET_CONTEXT"
-    MEM_FRACTION=0.90
 elif [[ "$VRAM_GB" -ge 30 ]]; then
     PROFILE="rtx-5090"
+    O35_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O35_CTX="$TARGET_CONTEXT"
+    O35_MEM=0.88; O35_OFFLOAD=false; O35_OFFLOAD_GB=0; O35_REC_GB=0; O35_MODE="pure-gpu"
+    Q27_CTX=262144; [ -n "$TARGET_CONTEXT" ] && Q27_CTX="$TARGET_CONTEXT"
+    Q27_MEM=0.88; Q27_OFFLOAD=false; Q27_OFFLOAD_GB=0; Q27_REC_GB=0; Q27_MODE="pure-gpu"
+    O9_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O9_CTX="$TARGET_CONTEXT"
+    O9_MEM=0.88; O9_OFFLOAD=false; O9_OFFLOAD_GB=0; O9_REC_GB=0; O9_MODE="pure-gpu"
     MODEL="ornith-1.5-35b"
-    MODEL_PATH="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-    SERVICE="opencode-sglang-ornith-35b.service"
-    MAX_CTX=262144
-    [ -n "$TARGET_CONTEXT" ] && MAX_CTX="$TARGET_CONTEXT"
-    MEM_FRACTION=0.88
 elif [[ "$VRAM_GB" -ge 20 ]]; then
     PROFILE="rtx-4090"
-    MODEL="ornith-1.5-35b"
-    MODEL_PATH="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-    SERVICE="opencode-sglang-ornith-35b.service"
-    MEM_FRACTION=0.88
+    O35_MEM=0.88
     if [[ -n "$TARGET_CONTEXT" && "$TARGET_CONTEXT" -ge 262144 && "$HOST_RAM_GB" -ge 32 ]]; then
-        MAX_CTX=262144
-        CPU_OFFLOAD=true
-        CPU_OFFLOAD_GB=8
-        OFFLOAD="cpu-offload"
+        O35_CTX=262144; O35_OFFLOAD=true; O35_OFFLOAD_GB=8; O35_REC_GB=8; O35_MODE="cpu-offload"
+    elif [[ "$HOST_RAM_GB" -ge 32 ]]; then
+        O35_CTX=65536; [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt 65536 ] && O35_CTX="$TARGET_CONTEXT"
+        O35_OFFLOAD=false; O35_OFFLOAD_GB=0; O35_REC_GB=8; O35_MODE="pure-gpu"
     else
-        MAX_CTX=65536
-        [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt 65536 ] && MAX_CTX="$TARGET_CONTEXT"
-        OFFLOAD="pure-gpu"
+        O35_CTX=65536; [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt 65536 ] && O35_CTX="$TARGET_CONTEXT"
+        O35_OFFLOAD=false; O35_OFFLOAD_GB=0; O35_REC_GB=0; O35_MODE="pure-gpu"
     fi
+    Q27_MEM=0.88
+    if [[ "$HOST_RAM_GB" -ge 32 ]]; then
+        Q27_CTX=65536; [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt 65536 ] && Q27_CTX="$TARGET_CONTEXT"
+        Q27_OFFLOAD=true; Q27_OFFLOAD_GB=6; Q27_REC_GB=6; Q27_MODE="cpu-offload"
+    else
+        Q27_CTX=32768; [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt 32768 ] && Q27_CTX="$TARGET_CONTEXT"
+        Q27_OFFLOAD=false; Q27_OFFLOAD_GB=0; Q27_REC_GB=0; Q27_MODE="pure-gpu"
+    fi
+    O9_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O9_CTX="$TARGET_CONTEXT"
+    O9_MEM=0.88; O9_OFFLOAD=false; O9_OFFLOAD_GB=0; O9_REC_GB=0; O9_MODE="pure-gpu"
+    MODEL="ornith-1.5-35b"
 elif [[ "$VRAM_GB" -ge 14 ]]; then
     PROFILE="rtx-4080"
+    if [[ "$HOST_RAM_GB" -ge 48 ]]; then
+        O35_CTX=32768; O35_OFFLOAD_GB=14; O35_REC_GB=14
+    else
+        O35_CTX=16384; O35_OFFLOAD_GB=12; O35_REC_GB=12
+    fi
+    [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt "$O35_CTX" ] && O35_CTX="$TARGET_CONTEXT"
+    O35_MEM=0.88; O35_OFFLOAD=true; O35_MODE="cpu-offload"
+    Q27_CTX="$O35_CTX"; Q27_MEM=0.88; Q27_OFFLOAD=true; Q27_OFFLOAD_GB="$O35_OFFLOAD_GB"; Q27_REC_GB="$O35_REC_GB"; Q27_MODE="cpu-offload"
+    O9_CTX=262144; [ -n "$TARGET_CONTEXT" ] && O9_CTX="$TARGET_CONTEXT"
+    O9_MEM=0.88; O9_OFFLOAD=false; O9_OFFLOAD_GB=0; O9_REC_GB=0; O9_MODE="pure-gpu"
     MODEL="ornith-1.5-9b"
-    MODEL_PATH="ornith-ai/Ornith-1.5-9B-NVFP4"
-    SERVICE="ornith-1.5-9b-nvfp4-low-ctx.service"
-    MAX_CTX=262144
-    [ -n "$TARGET_CONTEXT" ] && MAX_CTX="$TARGET_CONTEXT"
-    MEM_FRACTION=0.88
 elif [[ "$VRAM_GB" -ge 8 ]]; then
     PROFILE="rtx-4070"
+    O35_CTX=16384; [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt 16384 ] && O35_CTX="$TARGET_CONTEXT"
+    O35_MEM=0.85; O35_OFFLOAD=true; O35_OFFLOAD_GB=16; O35_REC_GB=16; O35_MODE="cpu-offload"
+    Q27_CTX="$O35_CTX"; Q27_MEM=0.85; Q27_OFFLOAD=true; Q27_OFFLOAD_GB=16; Q27_REC_GB=16; Q27_MODE="cpu-offload"
+    O9_CTX=32768; [[ "$VRAM_GB" -ge 12 ]] && O9_CTX=65536
+    [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt "$O9_CTX" ] && O9_CTX="$TARGET_CONTEXT"
+    O9_MEM=0.85; O9_OFFLOAD=false; O9_OFFLOAD_GB=0; O9_REC_GB=0; O9_MODE="pure-gpu"
     MODEL="ornith-1.5-9b"
-    MODEL_PATH="ornith-ai/Ornith-1.5-9B-NVFP4"
-    SERVICE="ornith-1.5-9b-nvfp4-low-ctx.service"
-    MAX_CTX=32768
-    [[ "$VRAM_GB" -ge 12 ]] && MAX_CTX=65536
-    [ -n "$TARGET_CONTEXT" ] && [ "$TARGET_CONTEXT" -lt "$MAX_CTX" ] && MAX_CTX="$TARGET_CONTEXT"
-    MEM_FRACTION=0.85
 fi
+
+if [ -n "$SELECTED_MODEL" ]; then
+    case "${SELECTED_MODEL,,}" in
+        *ornith-1.5-35b*|*ornith-35b*|35b) MODEL="ornith-1.5-35b" ;;
+        *qwen3.8*|*qwen-3.8*|*27b*) MODEL="qwen3.8-27b" ;;
+        *ornith-1.5-9b*|*ornith-9b*|9b) MODEL="ornith-1.5-9b" ;;
+        *) echo "❌ Unknown --model value: $SELECTED_MODEL" >&2; exit 1 ;;
+    esac
+fi
+
+case "$MODEL" in
+    ornith-1.5-35b)
+        MODEL_PATH="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
+        SERVICE="sglang-ornith-1.5-35b.service"
+        MAX_CTX="$O35_CTX"; MEM_FRACTION="$O35_MEM"; OFFLOAD="$O35_MODE"; CPU_OFFLOAD="$O35_OFFLOAD"; CPU_OFFLOAD_GB="$O35_OFFLOAD_GB"; KV_DTYPE="nvfp4"
+        ;;
+    qwen3.8-27b)
+        MODEL_PATH="nvidia/Qwen3.8-27B-NVFP4"
+        SERVICE="sglang-qwen3.8-27b.service"
+        MAX_CTX="$Q27_CTX"; MEM_FRACTION="$Q27_MEM"; OFFLOAD="$Q27_MODE"; CPU_OFFLOAD="$Q27_OFFLOAD"; CPU_OFFLOAD_GB="$Q27_OFFLOAD_GB"; KV_DTYPE="fp8_e4m3"
+        ;;
+    ornith-1.5-9b)
+        MODEL_PATH="ornith-ai/Ornith-1.5-9B-NVFP4"
+        SERVICE="sglang-ornith-1.5-9b.service"
+        MAX_CTX="$O9_CTX"; MEM_FRACTION="$O9_MEM"; OFFLOAD="$O9_MODE"; CPU_OFFLOAD="$O9_OFFLOAD"; CPU_OFFLOAD_GB="$O9_OFFLOAD_GB"; KV_DTYPE="nvfp4"
+        ;;
+esac
 
 # Ensure display name includes VRAM if not present
 DISPLAY_GPU="$GPU_NAME"
@@ -299,7 +372,7 @@ if [ "$FORMAT" = "json" ]; then
   "profile": "${PROFILE}",
   "memory_fraction": ${MEM_FRACTION},
   "max_context": ${MAX_CTX},
-  "kv_cache_dtype": "nvfp4",
+  "kv_cache_dtype": "${KV_DTYPE}",
   "offload": "${OFFLOAD}",
   "gpu": "${DISPLAY_GPU}",
   "model": "${MODEL}",
@@ -313,7 +386,42 @@ if [ "$FORMAT" = "json" ]; then
   "total_vram_mb": ${VRAM_MB},
   "host_ram_gb": ${HOST_RAM_GB}.0,
   "host_cpu_cores": ${HOST_CPU_CORES},
-  "detection_tier": "procfs-fallback"
+  "detection_tier": "procfs-fallback",
+  "model_sizing": {
+    "ornith-1.5-35b": {
+      "model": "ornith-1.5-35b",
+      "model_path": "ornith-ai/Ornith-1.5-35B-A3B-NVFP4",
+      "service": "sglang-ornith-1.5-35b.service",
+      "max_context": ${O35_CTX},
+      "memory_fraction": ${O35_MEM},
+      "cpu_offload": ${O35_OFFLOAD},
+      "cpu_offload_gb": ${O35_OFFLOAD_GB},
+      "recommended_cpu_offload_gb": ${O35_REC_GB},
+      "offload": "${O35_MODE}"
+    },
+    "qwen3.8-27b": {
+      "model": "qwen3.8-27b",
+      "model_path": "nvidia/Qwen3.8-27B-NVFP4",
+      "service": "sglang-qwen3.8-27b.service",
+      "max_context": ${Q27_CTX},
+      "memory_fraction": ${Q27_MEM},
+      "cpu_offload": ${Q27_OFFLOAD},
+      "cpu_offload_gb": ${Q27_OFFLOAD_GB},
+      "recommended_cpu_offload_gb": ${Q27_REC_GB},
+      "offload": "${Q27_MODE}"
+    },
+    "ornith-1.5-9b": {
+      "model": "ornith-1.5-9b",
+      "model_path": "ornith-ai/Ornith-1.5-9B-NVFP4",
+      "service": "sglang-ornith-1.5-9b.service",
+      "max_context": ${O9_CTX},
+      "memory_fraction": ${O9_MEM},
+      "cpu_offload": ${O9_OFFLOAD},
+      "cpu_offload_gb": ${O9_OFFLOAD_GB},
+      "recommended_cpu_offload_gb": ${O9_REC_GB},
+      "offload": "${O9_MODE}"
+    }
+  }
 }
 EOF
 elif [ "$FORMAT" = "env" ]; then

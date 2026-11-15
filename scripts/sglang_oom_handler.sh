@@ -11,9 +11,13 @@
 # ==============================================================================
 set -uo pipefail
 
-SERVICE="opencode-sglang-ornith-35b.service"
+SERVICE="sglang-ornith-1.5-35b.service"
 
 detect_service() {
+    if [ -n "${SGLANG_UNIT:-}" ]; then
+        echo "$SGLANG_UNIT"
+        return
+    fi
     if [ -n "${SGLANG_SERVICE:-}" ]; then
         echo "$SGLANG_SERVICE"
         return
@@ -27,11 +31,14 @@ detect_service() {
         fi
         local env_primary
         env_primary="$(grep -s '^SGLANG_PRIMARY_MODEL=' "${HOME}/.config/opencode-backends/env" | head -n1 | cut -d'=' -f2- | tr -d '"\047')"
-        if [[ "$env_primary" == *"27b"* ]]; then
-            echo "opencode-sglang-qwen27b.service"
+        if [[ "$env_primary" == *"27b"* || "$env_primary" == *"qwen"* ]]; then
+            echo "sglang-qwen3.8-27b.service"
+            return
+        elif [[ "$env_primary" == *"9b"* ]]; then
+            echo "sglang-ornith-1.5-9b.service"
             return
         elif [[ "$env_primary" == *"35b"* ]]; then
-            echo "opencode-sglang-ornith-35b.service"
+            echo "sglang-ornith-1.5-35b.service"
             return
         fi
     fi
@@ -42,36 +49,37 @@ SERVICE="$(detect_service)"
 STATE_DIR="${HOME}/.config/opencode-backends"
 STATE="${STATE_DIR}/context_length.state"
 
-if [[ "$SERVICE" == *"27b"* ]]; then
-    LADDER=(65536 32768 16384)
-else
-    LADDER=(262144 131072 65536 32768)
-fi
+LADDER=(262144 131072 65536 32768)
+
+state_key() {
+    if [[ "$SERVICE" == *"27b"* || "$SERVICE" == *"qwen"* ]]; then
+        echo "SGLANG_27B_CONTEXT_LENGTH"
+    elif [[ "$SERVICE" == *"9b"* ]]; then
+        echo "SGLANG_9B_CONTEXT_LENGTH"
+    else
+        echo "SGLANG_CONTEXT_LENGTH"
+    fi
+}
 
 current() {
     local v=""
+    local key
+    key="$(state_key)"
     if [ -r "$STATE" ]; then
-        if [[ "$SERVICE" == *"27b"* ]]; then
-            v="$(sed -n 's/^SGLANG_27B_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
-        fi
-        if [ -z "$v" ]; then
-            v="$(sed -n 's/^SGLANG_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
-        fi
+        v="$(sed -n "s/^${key}=\\([0-9]\\+\\)$/\\1/p" "$STATE" | tail -1)"
     fi
     echo "${v:-${LADDER[0]}}"
 }
 
 write_state() {
     mkdir -p "$STATE_DIR"
-    local t; t="$(mktemp "${STATE}.XXXXXX")"
-    if [[ "$SERVICE" == *"27b"* ]]; then
-        cat << EOF > "$t"
-SGLANG_CONTEXT_LENGTH=$1
-SGLANG_27B_CONTEXT_LENGTH=$1
-EOF
-    else
-        echo "SGLANG_CONTEXT_LENGTH=$1" > "$t"
+    local key t
+    key="$(state_key)"
+    t="$(mktemp "${STATE}.XXXXXX")"
+    if [ -r "$STATE" ]; then
+        grep -v "^${key}=" "$STATE" > "$t" || true
     fi
+    echo "${key}=$1" >> "$t"
     mv "$t" "$STATE"
 }
 case "${1:-}" in
@@ -85,12 +93,25 @@ is_oom() {
     [ "${OOM_FORCE:-0}" = 1 ] && return 0
     [ "${SERVICE_RESULT:-}" = "oom-kill" ] && return 0
     if [ -n "${OPENCODE_OOM_LOG:-}" ] && [ -r "${OPENCODE_OOM_LOG}" ]; then
-        tail -n 200 "$OPENCODE_OOM_LOG" | grep -qiE 'CUDA out of memory|torch\.OutOfMemoryError|out of memory' && return 0
+        local log_tail
+        log_tail="$(tail -n 200 "$OPENCODE_OOM_LOG")"
+        if printf '%s\n' "$log_tail" | grep -qiE 'SIGTERM received|Draining requests and shutting down'; then
+            return 1
+        fi
+        printf '%s\n' "$log_tail" | grep -qiE 'CUDA out of memory|torch\.OutOfMemoryError|out of memory' && return 0
         return 1
     fi
     if [ "${SERVICE_RESULT:-}" != "success" ] && command -v journalctl >/dev/null 2>&1; then
-        journalctl --user -u "$SERVICE" -n 200 --no-pager 2>/dev/null \
-            | grep -qiE 'CUDA out of memory|torch\.OutOfMemoryError' && return 0
+        local jlog=""
+        if [ -n "${INVOCATION_ID:-}" ]; then
+            jlog="$(journalctl --user _SYSTEMD_INVOCATION_ID="$INVOCATION_ID" -n 200 --no-pager 2>/dev/null || true)"
+        else
+            jlog="$(journalctl --user -u "$SERVICE" -n 200 --no-pager 2>/dev/null || true)"
+        fi
+        if printf '%s\n' "$jlog" | grep -qiE 'SIGTERM received|Draining requests and shutting down'; then
+            return 1
+        fi
+        printf '%s\n' "$jlog" | grep -qiE 'CUDA out of memory|torch\.OutOfMemoryError' && return 0
     fi
     return 1
 }

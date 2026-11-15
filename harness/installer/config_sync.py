@@ -232,31 +232,64 @@ def sync_opencode_json(
     if "$schema" in template_cfg and "$schema" not in data:
         data["$schema"] = template_cfg["$schema"]
 
-    # 1. Sync SGLang and fallback providers from canonical template
+    # 1. Sync SGLang provider dynamically from models_catalog.json and prune legacy duplicate provider
     providers = data.setdefault("provider", {})
+    providers.pop("ornith-local", None)
     tpl_providers = template_cfg.get("provider", {})
 
-    for prov_key in ("local-sglang", "ornith-local"):
-        tpl_prov = tpl_providers.get(prov_key, {})
-        dst_prov = providers.setdefault(prov_key, {})
-        if "name" in tpl_prov:
-            dst_prov["name"] = tpl_prov["name"]
-        if "npm" in tpl_prov:
-            dst_prov["npm"] = tpl_prov["npm"]
-        if "options" in tpl_prov:
-            dst_prov["options"] = copy.deepcopy(tpl_prov["options"])
+    tpl_prov = tpl_providers.get("local-sglang", {})
+    tpl_models = tpl_prov.get("models", {}) if isinstance(tpl_prov.get("models"), dict) else {}
+    dst_prov = providers.setdefault("local-sglang", {})
+    dst_prov["name"] = tpl_prov.get("name", "Local SGLang")
+    dst_prov["npm"] = tpl_prov.get("npm", "@ai-sdk/openai-compatible")
+    dst_prov["options"] = copy.deepcopy(
+        tpl_prov.get(
+            "options",
+            {
+                "baseURL": "http://127.0.0.1:30000/v1",
+                "apiKey": "EMPTY",
+            },
+        )
+    )
 
-        dst_models = dst_prov.setdefault("models", {})
-        tpl_models = tpl_prov.get("models", {})
-        for m_id, m_cfg in tpl_models.items():
-            if m_id not in dst_models:
-                dst_models[m_id] = copy.deepcopy(m_cfg)
-            elif isinstance(dst_models[m_id], dict) and isinstance(m_cfg, dict):
-                dst_models[m_id].update(copy.deepcopy(m_cfg))
+    default_modalities = {"input": ["text", "image"], "output": ["text"]}
+    default_variants = {
+        "high": {"reasoningEffort": "high", "thinkingBudget": 16384},
+        "medium": {"reasoningEffort": "medium", "thinkingBudget": 8192},
+        "low": {"reasoningEffort": "low", "thinkingBudget": 4096},
+    }
 
-    # Clean up accidental qwen placement under ornith-local provider
-    if "ornith-local" in providers and "qwen3.8-27b" in providers["ornith-local"].get("models", {}):
-        del providers["ornith-local"]["models"]["qwen3.8-27b"]
+    synced_models: Dict[str, Any] = {}
+    catalog_file = repo_p / "config" / "models" / "models_catalog.json"
+    if catalog_file.is_file():
+        try:
+            with open(catalog_file, "r", encoding="utf-8") as f:
+                catalog_data = json.load(f)
+            if isinstance(catalog_data, dict):
+                for model_key, cat_entry in catalog_data.items():
+                    if not isinstance(cat_entry, dict):
+                        continue
+                    served = str(cat_entry.get("served_model_name") or cat_entry.get("name") or model_key)
+                    tpl_meta = (
+                        copy.deepcopy(tpl_models[served])
+                        if isinstance(tpl_models.get(served), dict)
+                        else {}
+                    )
+                    entry = dict(tpl_meta)
+                    entry["name"] = cat_entry.get("display_name") or tpl_meta.get("name") or served
+                    entry["context"] = cat_entry.get("context", tpl_meta.get("context", 262144))
+                    entry["output"] = cat_entry.get("output", tpl_meta.get("output", 32768))
+                    entry.setdefault("modalities", copy.deepcopy(default_modalities))
+                    entry.setdefault("variants", copy.deepcopy(default_variants))
+                    synced_models[served] = entry
+        except Exception:
+            synced_models = {}
+
+    if not synced_models:
+        synced_models = copy.deepcopy(tpl_models)
+
+    # Replace/prune stale or removed models completely
+    dst_prov["models"] = synced_models
 
     for fb_key in ("anthropic", "google"):
         if fb_key in tpl_providers:
@@ -285,28 +318,43 @@ def sync_opencode_json(
     for stale_key in ("temperature", "top_p", "presence_penalty"):
         data.pop(stale_key, None)
 
-    # 2c. Defaults for permissions, subagent_depth, small_model
+    # 2c. Defaults for permissions, subagent_depth, small_model, and stale reference migration
     if "permission" in template_cfg and "permission" not in data:
         data["permission"] = copy.deepcopy(template_cfg["permission"])
     data.setdefault("subagent_depth", 3)
+
+    stale_model_map = {
+        "ornith-local/ornith-1.5-35b": "local-sglang/ornith-1.5-35b",
+        "ornith-local/ornith-1.5-9b": "local-sglang/ornith-1.5-9b",
+        "local-sglang/qwen-3.8-nvfp4": "local-sglang/qwen3.8-27b",
+        "local-sglang/qwen-3.8-q6": "local-sglang/qwen3.8-27b",
+        "local-sglang/qwen3.8": "local-sglang/qwen3.8-27b",
+    }
+    if isinstance(data.get("model"), str) and data["model"] in stale_model_map:
+        data["model"] = stale_model_map[data["model"]]
+    if isinstance(data.get("small_model"), str) and data["small_model"] in stale_model_map:
+        data["small_model"] = stale_model_map[data["small_model"]]
     data["small_model"] = "local-sglang/ornith-1.5-9b"
 
     # 3. Model selection and agent routing
     primary_model: Optional[str] = None
     if sglang_model and sglang_model.strip():
         sm = sglang_model.lower().strip()
-        if sm in ("qwen-3.8-nvfp4", "27b-nvfp4", "qwen3.8-27b", "qwen27b"):
-            primary_model = "local-sglang/qwen-3.8-nvfp4"
-        elif sm in ("qwen-3.8-q6", "27b-q6"):
-            primary_model = "local-sglang/qwen-3.8-q6"
+        if sm in ("qwen-3.8-nvfp4", "qwen3.8", "27b-nvfp4", "qwen3.8-27b", "qwen27b", "qwen-3.8-q6", "27b-q6"):
+            primary_model = "local-sglang/qwen3.8-27b"
         elif sm in ("ornith-1.5-9b", "ornith-9b"):
             primary_model = "local-sglang/ornith-1.5-9b"
         elif sm in ("ornith-35b", "ornith-1.5-35b"):
             primary_model = "local-sglang/ornith-1.5-35b"
         else:
-            primary_model = "local-sglang/qwen-3.8-nvfp4"
+            primary_model = "local-sglang/qwen3.8-27b"
 
     agent_routing = data.setdefault("agent", {})
+    for role_cfg in agent_routing.values():
+        if isinstance(role_cfg, dict) and isinstance(role_cfg.get("model"), str):
+            if role_cfg["model"] in stale_model_map:
+                role_cfg["model"] = stale_model_map[role_cfg["model"]]
+
     tpl_agents = template_cfg.get("agent", {})
     for role, role_def in tpl_agents.items():
         if role not in agent_routing:
@@ -318,7 +366,7 @@ def sync_opencode_json(
             role_cfg = agent_routing.setdefault(role, {})
             role_cfg["model"] = primary_model
     else:
-        data.setdefault("model", "local-sglang/qwen-3.8-nvfp4")
+        data.setdefault("model", "local-sglang/ornith-1.5-35b")
         for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
             role_cfg = agent_routing.setdefault(role, {})
             role_cfg.setdefault("model", data["model"])

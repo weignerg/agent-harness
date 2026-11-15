@@ -637,7 +637,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.core_dir = REPO_ROOT / "core"
         self.opencode_json_path = REPO_ROOT / "config" / "opencode" / "opencode.json"
         self.manifest_path = self.core_dir / "manifest.json"
-        self.qwen27b_service_path = REPO_ROOT / "config" / "systemd" / "opencode-sglang-qwen27b.service"
+        self.qwen27b_service_path = REPO_ROOT / "config" / "systemd" / "sglang-qwen3.8-27b.service"
         self.install_sh_path = REPO_ROOT / "install.sh"
 
         with open(self.manifest_path, "r", encoding="utf-8") as f:
@@ -648,33 +648,25 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         os.environ.update(self.orig_env)
 
     def test_opencode_json_defines_selectable_sglang_models(self) -> None:
-        """Verify config/opencode/opencode.json registers both ornith-local and local-sglang with 27B models."""
+        """Verify config/opencode/opencode.json registers local-sglang with canonical catalog models only."""
         self.assertTrue(self.opencode_json_path.exists(), "opencode.json must exist")
         with open(self.opencode_json_path, "r", encoding="utf-8") as f:
             cfg = json.load(f)
 
         providers = cfg.get("provider", {})
-        self.assertIn("ornith-local", providers, "provider ornith-local must be registered")
+        self.assertNotIn("ornith-local", providers, "Duplicate ornith-local provider must be removed")
         self.assertIn("local-sglang", providers, "provider local-sglang must be registered")
 
-        # Baseline ornith-local provider preserved
-        ornith_prov = providers["ornith-local"]
-        ornith_models = ornith_prov.get("models", {})
-        self.assertIn("ornith-1.5-35b", ornith_models)
-        self.assertIn("ornith-1.5-9b", ornith_models)
-
-        # local-sglang provider models
+        # local-sglang provider models (canonical served_model_names only, no stale aliases)
         sglang_prov = providers["local-sglang"]
         sglang_models = sglang_prov.get("models", {})
-        self.assertIn("qwen3.8-27b", sglang_models)
-        self.assertIn("qwen-3.8-nvfp4", sglang_models)
-        self.assertIn("qwen-3.8-q6", sglang_models)
-        self.assertIn("ornith-1.5-35b", sglang_models)
-        self.assertIn("ornith-1.5-9b", sglang_models)
+        self.assertEqual(set(sglang_models.keys()), {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"})
 
         qwen38_27b = sglang_models["qwen3.8-27b"]
-        self.assertTrue("qwen 3.8" in qwen38_27b.get("name", "").lower())
-        self.assertGreaterEqual(qwen38_27b.get("context", 0), 131072)
+        self.assertEqual(qwen38_27b.get("name"), "Qwen3.8-27B-NVFP4")
+        self.assertEqual(qwen38_27b.get("context", 0), 262144)
+        self.assertEqual(sglang_models["ornith-1.5-35b"].get("context", 0), 262144)
+        self.assertEqual(sglang_models["ornith-1.5-9b"].get("context", 0), 262144)
         self.assertGreaterEqual(qwen38_27b.get("output", 0), 32768)
         self.assertEqual(qwen38_27b.get("modalities"), {"input": ["text", "image"], "output": ["text"]})
         self.assertIn("high", qwen38_27b.get("variants", {}))
@@ -691,18 +683,17 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
 
         # Baseline tier defaults
         tiers = self.manifest.get("model_tiers", {})
-        self.assertEqual(tiers.get("heavy", {}).get("opencode"), "ornith-local/ornith-1.5-35b")
-        self.assertEqual(tiers.get("workhorse", {}).get("opencode"), "ornith-local/ornith-1.5-35b")
-        self.assertEqual(tiers.get("fast", {}).get("opencode"), "ornith-local/ornith-1.5-9b")
+        self.assertEqual(tiers.get("heavy", {}).get("opencode"), "local-sglang/ornith-1.5-35b")
+        self.assertEqual(tiers.get("workhorse", {}).get("opencode"), "local-sglang/ornith-1.5-35b")
+        self.assertEqual(tiers.get("fast", {}).get("opencode"), "local-sglang/ornith-1.5-9b")
 
         # Selectable profiles definition
         self.assertEqual(profiles["qwen3.8-27b"].get("workhorse"), "local-sglang/qwen3.8-27b")
-        self.assertEqual(profiles["qwen3.8-27b"].get("workhorse"), "local-sglang/qwen3.8-27b")
-        self.assertEqual(profiles["ornith-1.5-35b"].get("workhorse"), "ornith-local/ornith-1.5-35b")
+        self.assertEqual(profiles["ornith-1.5-35b"].get("workhorse"), "local-sglang/ornith-1.5-35b")
 
     def test_qwen27b_service_unit_configuration(self) -> None:
-        """Verify opencode-sglang-qwen27b.service parameters meet Issue #16 criteria."""
-        self.assertTrue(self.qwen27b_service_path.exists(), "opencode-sglang-qwen27b.service must exist")
+        """Verify sglang-qwen3.8-27b.service parameters meet Issue #16 and Issue #52 criteria."""
+        self.assertTrue(self.qwen27b_service_path.exists(), "sglang-qwen3.8-27b.service must exist")
         content = self.qwen27b_service_path.read_text(encoding="utf-8")
 
         # 100% VRAM residency / quantization flags
@@ -712,13 +703,14 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         )
         self.assertIn("--kv-cache-dtype", content, "Service must specify --kv-cache-dtype")
         self.assertIn("flashinfer", content, "Attention backend must be flashinfer")
-        self.assertIn("--disable-prefill-cuda-graph", content, "Service must specify --disable-prefill-cuda-graph")
+        self.assertIn("--disable-prefill-cuda-graph", content, "Service must disable prefill CUDA graph for fast startup")
         self.assertNotIn("\n  --enable-torch-compile", content, "Service must not hardcode --enable-torch-compile in default ExecStart")
         self.assertIn("--tool-call-parser qwen3_coder", content, "Tool-call parser must be qwen3_coder")
         self.assertIn("--reasoning-parser qwen3", content, "Reasoning parser must be qwen3")
-        self.assertIn("--port 30000", content, "Port must be 30000")
+        self.assertIn('Environment="SGLANG_BACKEND_PORT=30001"', content, "Default backend port must be 30001")
+        self.assertIn("--port ${SGLANG_BACKEND_PORT}", content, "Port must use ${SGLANG_BACKEND_PORT}")
         self.assertIn("--host 127.0.0.1", content, "Host must be 127.0.0.1")
-        self.assertIn("SGLANG_SERVICE=opencode-sglang-qwen27b.service", content)
+        self.assertIn("SGLANG_SERVICE=sglang-qwen3.8-27b.service", content)
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", content, "Service must specify nvidia/Qwen3.8-27B-NVFP4")
         self.assertNotIn("Qwen/Qwen3.8-27B-FP4", content, "Service must not reference non-existent Qwen/Qwen3.8-27B-FP4")
         self.assertIn("SGLANG_27B_QUANTIZATION=modelopt", content, "Service must specify modelopt quantization")
@@ -750,23 +742,24 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
         self.assertIn("SGLANG_WARMUP_TIMEOUT:-300", install_sh_content, "warmup timeout must default to 300s")
         self.assertIn("SGLANG_HEALTHCHECK_RETRIES:-240", install_sh_content, "max_sglang_wait must default to 240s")
-        self.assertIn("opencode-sglang-ornith-35b.service 2>/dev/null || true", install_sh_content)
-        self.assertIn("opencode-sglang-qwen27b.service 2>/dev/null || true", install_sh_content)
+        self.assertRegex(install_sh_content, r"for _legacy_u in .*sglang-ornith-1\.5-35b\.service")
+        self.assertRegex(install_sh_content, r"for _legacy_u in .*sglang-qwen3\.8-27b\.service")
+        self.assertIn('systemctl --user disable --now "$_legacy_u"', install_sh_content)
 
         # Verify sed tuning idempotency and absence of 0.880.88 corruption
         with tempfile.TemporaryDirectory() as tmp_dir:
-            test_svc = Path(tmp_dir) / "opencode-sglang-qwen27b.service"
+            test_svc = Path(tmp_dir) / "sglang-qwen3.8-27b.service"
             test_svc.write_text(service_content, encoding="utf-8")
             # Run bash sed script matching install.sh
             bash_cmd = f"""
             mem_fraction="0.88"
             max_context="65536"
             dest_dir="{tmp_dir}"
-            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
-                sed -i "s|Environment=\\"SGLANG_27B_MEM_FRACTION=[0-9.]*\\"|Environment=\\"SGLANG_27B_MEM_FRACTION=${{mem_fraction}}\\"|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${{dest_dir}}/sglang-qwen3.8-27b.service"; then
+                sed -i "s|Environment=\\"SGLANG_27B_MEM_FRACTION=[0-9.]*\\"|Environment=\\"SGLANG_27B_MEM_FRACTION=${{mem_fraction}}\\"|" "${{dest_dir}}/sglang-qwen3.8-27b.service"
             fi
-            if grep -q '\\${{SGLANG_27B_MEM_FRACTION}}' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
-                sed -i "s|--mem-fraction-static [0-9.]*\\${{SGLANG_27B_MEM_FRACTION}}|--mem-fraction-static \\${{SGLANG_27B_MEM_FRACTION}}|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            if grep -q '\\${{SGLANG_27B_MEM_FRACTION}}' "${{dest_dir}}/sglang-qwen3.8-27b.service"; then
+                sed -i "s|--mem-fraction-static [0-9.]*\\${{SGLANG_27B_MEM_FRACTION}}|--mem-fraction-static \\${{SGLANG_27B_MEM_FRACTION}}|" "${{dest_dir}}/sglang-qwen3.8-27b.service"
             fi
             """
             res = subprocess.run(["bash", "-c", bash_cmd], check=True, capture_output=True)
@@ -798,7 +791,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
 
         # Default behavior: preserves baseline ornith-1.5-35b model
         fm_worker_default = compile_opencode_frontmatter("worker", roles["worker"], tier_models)
-        self.assertIn("ornith-local/ornith-1.5-35b", fm_worker_default)
+        self.assertIn("local-sglang/ornith-1.5-35b", fm_worker_default)
 
         # Explicit primary_model override (qwen3.8-27b)
         fm_worker_qwen38 = compile_opencode_frontmatter(
@@ -809,25 +802,25 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         )
         self.assertIn("local-sglang/qwen3.8-27b", fm_worker_qwen38)
 
-        # Leaf roles remain fast model (ornith-local/ornith-1.5-9b) regardless of primary override
+        # Leaf roles remain fast model (local-sglang/ornith-1.5-9b) regardless of primary override
         fm_grunt = compile_opencode_frontmatter(
             "grunt",
             roles["grunt"],
             tier_models,
             primary_model="local-sglang/qwen3.8-27b",
         )
-        self.assertIn("ornith-local/ornith-1.5-9b", fm_grunt)
+        self.assertIn("local-sglang/ornith-1.5-9b", fm_grunt)
 
     def test_compile_agents_writes_custom_profiles_and_baseline_default(self) -> None:
         """Verify compile_agents emits agent markdown with baseline default and selectable profiles."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             base_dir = Path(tmp_dir)
 
-            # 1. Default compile (no profile passed) -> ornith-local/ornith-1.5-35b
+            # 1. Default compile (no profile passed) -> local-sglang/ornith-1.5-35b
             out_default = base_dir / "agents_default"
             compile_agents(core_dir=self.core_dir, target_runtime="opencode", output_dir=out_default)
             worker_def = (out_default / "worker.md").read_text(encoding="utf-8")
-            self.assertIn("model: ornith-local/ornith-1.5-35b", worker_def)
+            self.assertIn("model: local-sglang/ornith-1.5-35b", worker_def)
 
             # 2. model_profile="qwen3.8-27b"
             out_qwen38 = base_dir / "agents_qwen38"
@@ -839,13 +832,13 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
             out_nvfp4 = base_dir / "agents_nvfp4"
             compile_agents(core_dir=self.core_dir, target_runtime="opencode", output_dir=out_nvfp4, model_profile="27b-nvfp4")
             worker_nvfp4 = (out_nvfp4 / "worker.md").read_text(encoding="utf-8")
-            self.assertTrue("27b" in worker_nvfp4)
+            self.assertIn("model: local-sglang/qwen3.8-27b", worker_nvfp4)
 
             # 5. model_profile="27b-q6"
             out_q6 = base_dir / "agents_q6"
             compile_agents(core_dir=self.core_dir, target_runtime="opencode", output_dir=out_q6, model_profile="27b-q6")
             worker_q6 = (out_q6 / "worker.md").read_text(encoding="utf-8")
-            self.assertTrue("27b" in worker_q6)
+            self.assertIn("model: local-sglang/qwen3.8-27b", worker_q6)
 
     def test_install_sh_help_documents_sglang_model_flag(self) -> None:
         """Verify install.sh --help exposes --sglang-model flag and profile options."""
@@ -881,7 +874,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("t3-serve.service", qs_text)
         self.assertIn("t3 pair", qs_text)
         self.assertIn("t3 pair", readme_text)
-        self.assertIn("opencode-sglang-qwen27b.service", qs_text)
+        self.assertIn("sglang-qwen3.8-27b.service", qs_text)
         self.assertIn("qwen3.8-27b", qs_text)
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", qs_text)
         self.assertNotIn("qwen3.5", qs_text)

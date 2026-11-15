@@ -8,14 +8,15 @@ description: Monitor local SGLang inference engine, manage KV-cache memory fract
 Use this skill to inspect and maintain the local high-performance SGLang inference service.
 
 ## Core Services
-- **Port 30000**: Served by systemd user unit `opencode-sglang-ornith-35b.service` (or `ornith-30000.service`).
+- **Port 30000**: Dynamic router & idle unloader proxy (`opencode-model-proxy.service`) forwarding to backend port `30001`.
+- **Port 30001 (Backends)**: `sglang-ornith-1.5-35b.service`, `sglang-qwen3.8-27b.service`, `sglang-ornith-1.5-9b.service`.
 - Endpoint: `http://127.0.0.1:30000/v1`
 
 ## Health Check
 Inspect live backend inference health:
 ```bash
 curl -s http://127.0.0.1:30000/v1/models | jq .
-systemctl --user status opencode-sglang-ornith-35b.service
+systemctl --user status opencode-model-proxy.service sglang-ornith-1.5-35b.service
 ```
 
 ## OOM Watchdog & Context Recovery

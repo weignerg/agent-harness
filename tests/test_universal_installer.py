@@ -495,10 +495,13 @@ class TestUniversalInstaller(unittest.TestCase):
             # Verify deployed systemd user units
             expected_units = [
                 "opencode-server.service",
+                "opencode-model-proxy.service",
                 "opencode-agent.slice",
                 "opencode-colbert-reindex.service",
                 "opencode-colbert-reindex.timer",
-                "opencode-sglang-ornith-35b.service",
+                "sglang-ornith-1.5-35b.service",
+                "sglang-ornith-1.5-9b.service",
+                "sglang-qwen3.8-27b.service",
                 "t3-serve.service",
             ]
             for unit in expected_units:
@@ -594,10 +597,13 @@ class TestUniversalInstaller(unittest.TestCase):
 
             # Verify systemd units deployed
             self.assertTrue((systemd_user_dir / "opencode-server.service").is_file())
+            self.assertTrue((systemd_user_dir / "opencode-model-proxy.service").is_file())
             self.assertTrue((systemd_user_dir / "opencode-agent.slice").is_file())
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.service").is_file())
             self.assertTrue((systemd_user_dir / "opencode-colbert-reindex.timer").is_file())
-            self.assertTrue((systemd_user_dir / "opencode-sglang-ornith-35b.service").is_file())
+            self.assertTrue((systemd_user_dir / "sglang-ornith-1.5-35b.service").is_file())
+            self.assertTrue((systemd_user_dir / "sglang-ornith-1.5-9b.service").is_file())
+            self.assertTrue((systemd_user_dir / "sglang-qwen3.8-27b.service").is_file())
             self.assertTrue((systemd_user_dir / "t3-serve.service").is_file())
 
             # Manifest in local repo tracks them
@@ -606,6 +612,7 @@ class TestUniversalInstaller(unittest.TestCase):
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             recorded_file_paths = [f["path"] for f in manifest_data.get("files", [])]
             self.assertIn(str((systemd_user_dir / "opencode-server.service").resolve()), recorded_file_paths)
+            self.assertIn(str((systemd_user_dir / "opencode-model-proxy.service").resolve()), recorded_file_paths)
             self.assertIn(str((systemd_user_dir / "t3-serve.service").resolve()), recorded_file_paths)
 
             # Verify integrity
@@ -617,6 +624,7 @@ class TestUniversalInstaller(unittest.TestCase):
             proc_uninst = self.run_installer("--uninstall", "--mode", "local", str(repo_dir), "--non-interactive", env=env)
             self.assertEqual(proc_uninst.returncode, 0)
             self.assertFalse((systemd_user_dir / "opencode-server.service").exists())
+            self.assertFalse((systemd_user_dir / "opencode-model-proxy.service").exists())
             self.assertFalse((systemd_user_dir / "opencode-agent.slice").exists())
             self.assertFalse((systemd_user_dir / "t3-serve.service").exists())
 
@@ -645,7 +653,7 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertEqual(proc_inst.returncode, 0)
 
             # Check service file tuning
-            unit_file = systemd_user_dir / "opencode-sglang-ornith-35b.service"
+            unit_file = systemd_user_dir / "sglang-ornith-1.5-35b.service"
             self.assertTrue(unit_file.is_file())
             unit_content = unit_file.read_text(encoding="utf-8")
             self.assertIn("--mem-fraction-static 0.88", unit_content)
@@ -800,8 +808,8 @@ class TestUniversalInstaller(unittest.TestCase):
         self.assertIn("Backend healthchecks skipped (--no-healthcheck)", proc_skip.stdout)
 
     def test_issue7_sglang_context_length_service_fallback(self):
-        """Test Issue #7: opencode-sglang-ornith-35b.service defines guaranteed SGLANG_CONTEXT_LENGTH fallback."""
-        service_file = REPO_ROOT / "config" / "systemd" / "opencode-sglang-ornith-35b.service"
+        """Test Issue #7: sglang-ornith-1.5-35b.service defines guaranteed SGLANG_CONTEXT_LENGTH fallback."""
+        service_file = REPO_ROOT / "config" / "systemd" / "sglang-ornith-1.5-35b.service"
         self.assertTrue(service_file.is_file())
         content = service_file.read_text(encoding="utf-8")
         self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', content)
@@ -823,7 +831,7 @@ class TestUniversalInstaller(unittest.TestCase):
                 env=env,
             )
             self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
-            deployed_service = sandbox / ".config" / "systemd" / "user" / "opencode-sglang-ornith-35b.service"
+            deployed_service = sandbox / ".config" / "systemd" / "user" / "sglang-ornith-1.5-35b.service"
             self.assertTrue(deployed_service.is_file())
             deployed_content = deployed_service.read_text(encoding="utf-8")
             self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=', deployed_content)
@@ -1057,7 +1065,7 @@ class TestUniversalInstaller(unittest.TestCase):
             mock_systemctl.write_text(
                 '#!/bin/sh\n'
                 'if [ "$1" = "--user" ] && [ "$2" = "is-active" ]; then\n'
-                '    if [ "$3" = "opencode-sglang-ornith-35b.service" ] || [ "$4" = "opencode-sglang-ornith-35b.service" ]; then\n'
+                '    if [ "$3" = "sglang-ornith-1.5-35b.service" ] || [ "$4" = "sglang-ornith-1.5-35b.service" ]; then\n'
                 '        echo "failed"\n'
                 '        exit 1\n'
                 '    fi\n'
@@ -1086,7 +1094,7 @@ class TestUniversalInstaller(unittest.TestCase):
             duration = time.time() - start_time
             self.assertNotEqual(proc.returncode, 0)
             self.assertLess(duration, 15.0, "Early failure should abort immediately, not wait 120s")
-            self.assertIn("SGLang service (opencode-sglang-ornith-35b.service) status is failed; aborting wait.", proc.stdout)
+            self.assertIn("SGLang service (sglang-ornith-1.5-35b.service) status is failed; aborting wait.", proc.stdout)
             self.assertIn("SGLang inference engine failed healthcheck.", proc.stdout)
             self.assertIn("INSTALLATION INCOMPLETE: SERVICE HEALTHCHECK FAILED", proc.stderr)
 
@@ -1320,27 +1328,25 @@ class TestUniversalInstaller(unittest.TestCase):
                 sglang_model="27b-nvfp4",
             )
 
-            # Assert custom provider and models are preserved
+            # Assert custom provider is preserved, while duplicate ornith-local is pruned
             self.assertIn("custom-provider", synced["provider"])
-            self.assertIn("legacy-model", synced["provider"]["ornith-local"]["models"])
+            self.assertNotIn("ornith-local", synced["provider"])
 
-            # Assert local-sglang and ornith-local were synced
+            # Assert local-sglang was synced dynamically with canonical models only
             self.assertIn("local-sglang", synced["provider"])
             sglang_models = synced["provider"]["local-sglang"]["models"]
-            self.assertIn("qwen3.8-27b", sglang_models)
-            self.assertIn("ornith-1.5-35b", sglang_models)
-            self.assertIn("ornith-1.5-9b", sglang_models)
+            self.assertEqual(set(sglang_models.keys()), {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"})
 
             # Assert clean, concise display names without prefix or parenthetical bloat
-            self.assertIn(sglang_models["qwen3.8-27b"]["name"], ("qwen 3.8 nvfp4", "Qwen 3.8 27B"))
-            self.assertIn(sglang_models["ornith-1.5-35b"]["name"], ("ornith 1.5 35b", "Ornith 1.5 35B-A3B"))
-            self.assertIn(sglang_models["ornith-1.5-9b"]["name"], ("ornith 1.5 9b", "Ornith 1.5 9B"))
+            self.assertEqual(sglang_models["qwen3.8-27b"]["name"], "Qwen3.8-27B-NVFP4")
+            self.assertEqual(sglang_models["ornith-1.5-35b"]["name"], "ornith 1.5 35b")
+            self.assertEqual(sglang_models["ornith-1.5-9b"]["name"], "ornith 1.5 9b")
             self.assertNotIn("[SGLang", sglang_models["qwen3.8-27b"]["name"])
 
-            # Assert primary model and role models updated to local-sglang/qwen-3.8-nvfp4 (or legacy local-sglang/qwen3.8-27b)
-            self.assertIn(synced["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
+            # Assert primary model and role models updated to canonical local-sglang/qwen3.8-27b
+            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertIn(synced["agent"][role]["model"], ("local-sglang/qwen-3.8-nvfp4", "local-sglang/qwen3.8-27b"))
+                self.assertEqual(synced["agent"][role]["model"], "local-sglang/qwen3.8-27b")
 
             # 2. Sync again with sglang_model="ornith-35b"
             synced_ornith = sync_opencode_json(
@@ -1351,11 +1357,11 @@ class TestUniversalInstaller(unittest.TestCase):
                 opencode_dir=opencode_dir,
                 sglang_model="ornith-35b",
             )
-            self.assertIn(synced_ornith["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+            self.assertEqual(synced_ornith["model"], "local-sglang/ornith-1.5-35b")
             for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
-                self.assertIn(synced_ornith["agent"][role]["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+                self.assertEqual(synced_ornith["agent"][role]["model"], "local-sglang/ornith-1.5-35b")
 
-            # 3. Sync without specifying sglang_model (preserving active model)
+            # 3. Sync without specifying sglang_model (preserving active canonical model)
             synced_default = sync_opencode_json(
                 opencode_json_path=opencode_json,
                 repo_dir=REPO_ROOT,
@@ -1363,7 +1369,152 @@ class TestUniversalInstaller(unittest.TestCase):
                 orch_dir=sandbox / ".orchestration",
                 opencode_dir=opencode_dir,
             )
-            self.assertIn(synced_default["model"], ("local-sglang/ornith-1.5-35b", "ornith-local/ornith-1.5-35b"))
+            self.assertEqual(synced_default["model"], "local-sglang/ornith-1.5-35b")
+
+    def _sync_once(self, sandbox, sglang_model):
+        """Helper: run sync_opencode_json against a fresh sandbox and return the synced dict."""
+        from harness.installer.config_sync import sync_opencode_json
+        opencode_dir = sandbox / ".config" / "opencode"
+        opencode_dir.mkdir(parents=True, exist_ok=True)
+        opencode_json = opencode_dir / "opencode.json"
+        opencode_json.write_text(
+            json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "provider": {},
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return sync_opencode_json(
+            opencode_json_path=opencode_json,
+            repo_dir=REPO_ROOT,
+            py_bin=sys.executable,
+            orch_dir=sandbox / ".orchestration",
+            opencode_dir=opencode_dir,
+            sglang_model=sglang_model,
+        )
+
+    def test_issue43_qwen38_alias_and_designated_fallback_routing(self):
+        """Test Issue #43 / #56: qwen3.8 alias routes to canonical qwen3.8-27b, leaves stay ornith-1.5-9b, and only canonical models are advertised."""
+        heavy = ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer")
+        leaves = ("scout", "grunt", "summary", "compaction", "title")
+
+        # 1. Clean `qwen3.8` alias routes heavy/workhorse roles to canonical local-sglang/qwen3.8-27b.
+        with tempfile.TemporaryDirectory() as tmp:
+            q = self._sync_once(Path(tmp) / "q", "qwen3.8")
+            self.assertEqual(q["model"], "local-sglang/qwen3.8-27b")
+            for role in heavy:
+                self.assertEqual(q["agent"][role]["model"], "local-sglang/qwen3.8-27b", role)
+            # Leaves and the small_model are NOT re-routed to the 27b-class qwen 3.8.
+            for role in leaves:
+                self.assertEqual(q["agent"][role]["model"], "local-sglang/ornith-1.5-9b", role)
+            self.assertEqual(q["small_model"], "local-sglang/ornith-1.5-9b")
+            # Only canonical served_model_names appear under local-sglang (no stale alias clutter).
+            self.assertEqual(
+                set(q["provider"]["local-sglang"]["models"].keys()),
+                {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"},
+            )
+
+        # 2. qwen3.8-27b resolves to the same canonical target.
+        with tempfile.TemporaryDirectory() as tmp:
+            q2 = self._sync_once(Path(tmp) / "q2", "qwen3.8-27b")
+            self.assertEqual(q2["model"], "local-sglang/qwen3.8-27b")
+            for role in heavy:
+                self.assertEqual(q2["agent"][role]["model"], "local-sglang/qwen3.8-27b", role)
+            self.assertEqual(q2["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
+
+        # 3. Default route (no --sglang-model) on a fresh config defaults to canonical ornith-1.5-35b.
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self._sync_once(Path(tmp) / "d", None)
+            self.assertEqual(d["model"], "local-sglang/ornith-1.5-35b")
+
+        # 4. Explicit ornith-35b selection routes heavy/workhorse to ornith-1.5-35b.
+        with tempfile.TemporaryDirectory() as tmp:
+            o = self._sync_once(Path(tmp) / "o", "ornith-35b")
+            self.assertEqual(o["model"], "local-sglang/ornith-1.5-35b")
+            for role in heavy:
+                self.assertEqual(o["agent"][role]["model"], "local-sglang/ornith-1.5-35b", role)
+            self.assertEqual(o["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
+
+    def test_issue56_prunes_stale_models_and_migrates_legacy_refs(self):
+        """Test Issue #56: sync_opencode_json prunes stale models on catalog changes and migrates legacy model strings."""
+        from harness.installer.config_sync import sync_opencode_json
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sandbox = Path(tmp) / "home"
+            opencode_dir = sandbox / ".config" / "opencode"
+            opencode_dir.mkdir(parents=True)
+            opencode_json = opencode_dir / "opencode.json"
+            opencode_json.write_text(
+                json.dumps(
+                    {
+                        "$schema": "https://opencode.ai/config.json",
+                        "provider": {
+                            "custom-provider": {"name": "Custom", "models": {"m1": {"name": "M1"}}},
+                            "ornith-local": {"name": "Ornith", "models": {"ornith-1.5-35b": {"name": "old"}}},
+                            "local-sglang": {
+                                "name": "Local SGLang",
+                                "models": {
+                                    "qwen-3.8-nvfp4": {"name": "stale"},
+                                    "qwen-3.8-q6": {"name": "stale"},
+                                    "qwen3.8": {"name": "stale"},
+                                    "deleted-old-model": {"name": "removed"},
+                                },
+                            },
+                        },
+                        "model": "local-sglang/qwen-3.8-nvfp4",
+                        "small_model": "ornith-local/ornith-1.5-9b",
+                        "agent": {
+                            "worker": {"model": "ornith-local/ornith-1.5-35b"},
+                            "scout": {"model": "ornith-local/ornith-1.5-9b"},
+                        },
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            synced = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=REPO_ROOT,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+            )
+            self.assertNotIn("ornith-local", synced["provider"])
+            self.assertIn("custom-provider", synced["provider"])
+            self.assertEqual(
+                set(synced["provider"]["local-sglang"]["models"].keys()),
+                {"qwen3.8-27b", "ornith-1.5-35b", "ornith-1.5-9b"},
+            )
+            self.assertEqual(synced["model"], "local-sglang/qwen3.8-27b")
+            self.assertEqual(synced["small_model"], "local-sglang/ornith-1.5-9b")
+            self.assertEqual(synced["agent"]["worker"]["model"], "local-sglang/ornith-1.5-35b")
+            self.assertEqual(synced["agent"]["scout"]["model"], "local-sglang/ornith-1.5-9b")
+
+            # Also verify removing a model from models_catalog.json prunes it immediately
+            mini_repo = Path(tmp) / "repo"
+            (mini_repo / "config" / "models").mkdir(parents=True)
+            (mini_repo / "config" / "opencode").mkdir(parents=True)
+            shutil.copy(REPO_ROOT / "config" / "opencode" / "opencode.json", mini_repo / "config" / "opencode" / "opencode.json")
+            catalog = json.loads((REPO_ROOT / "config" / "models" / "models_catalog.json").read_text(encoding="utf-8"))
+            catalog.pop("sglang-qwen3.8-27b", None)
+            (mini_repo / "config" / "models" / "models_catalog.json").write_text(json.dumps(catalog), encoding="utf-8")
+
+            resynced = sync_opencode_json(
+                opencode_json_path=opencode_json,
+                repo_dir=mini_repo,
+                py_bin=sys.executable,
+                orch_dir=sandbox / ".orchestration",
+                opencode_dir=opencode_dir,
+            )
+            self.assertEqual(
+                set(resynced["provider"]["local-sglang"]["models"].keys()),
+                {"ornith-1.5-35b", "ornith-1.5-9b"},
+            )
 
     def test_issue37_t3_antigravity_provider_sync_and_workspace_entrypoints(self):
         """Test Issue #37: T3 Code Antigravity provider sync and workspace instruction entrypoints."""
@@ -1403,6 +1554,185 @@ class TestUniversalInstaller(unittest.TestCase):
             self.assertTrue((mock_repo / "AGENTS.md").is_symlink())
             self.assertTrue((mock_repo / "GEMINI.md").is_symlink())
             self.assertTrue((mock_repo / "CLAUDE.md").is_symlink())
+
+    def test_issue48_rtx5090_ornith_context_preservation_and_qwen_mamba_args(self):
+        """Test Issue #48: Selecting qwen3.8 on rtx-5090 preserves Ornith 256k context and configures Qwen Mamba cache size."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "user_home"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+
+            proc_inst = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-5090",
+                "--sglang-model", "qwen3.8",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc_inst.returncode, 0, f"Installer failed: {proc_inst.stderr}\n{proc_inst.stdout}")
+
+            # 1. Ornith service must preserve 256k (262144) context on RTX 5090 even when qwen3.8 was selected
+            ornith_unit = systemd_user_dir / "sglang-ornith-1.5-35b.service"
+            self.assertTrue(ornith_unit.is_file())
+            ornith_content = ornith_unit.read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
+
+            # 2. Qwen 27B service must have 262144 context on RTX 5090 and --max-mamba-cache-size 5 (no 4.59 ratio starvation)
+            qwen_unit = systemd_user_dir / "sglang-qwen3.8-27b.service"
+            self.assertTrue(qwen_unit.is_file())
+            qwen_content = qwen_unit.read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
+            self.assertIn("--max-mamba-cache-size 5", qwen_content)
+            self.assertNotIn("--mamba-full-memory-ratio 4.59", qwen_content)
+
+    def test_issue49_adaptive_hardware_sizing_and_cpu_offload(self):
+        """Test Issue #49: Adaptive per-model GPU/RAM sizing, context scaling, and CPU offload in install.sh."""
+        # 1. RTX 5090 (32 GB VRAM): 100% in VRAM (empty offload args) for both Ornith 35B (256k) and Qwen 27B (256k)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home_5090"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-5090",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+            qwen_content = (systemd_user_dir / "sglang-qwen3.8-27b.service").read_text(encoding="utf-8")
+            ornith9b_content = (systemd_user_dir / "sglang-ornith-1.5-9b.service").read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
+            self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS="', ornith_content)
+            self.assertIn("$SGLANG_CPU_OFFLOAD_ARGS", ornith_content)
+            self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=262144"', qwen_content)
+            self.assertIn('Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="', qwen_content)
+            self.assertIn("$SGLANG_27B_CPU_OFFLOAD_ARGS", qwen_content)
+            self.assertIn('Environment="SGLANG_9B_CONTEXT_LENGTH=262144"', ornith9b_content)
+            self.assertIn('Environment="SGLANG_9B_CPU_OFFLOAD_ARGS="', ornith9b_content)
+
+        # 2. RTX 4090 (24 GB VRAM, host RAM >= 32 GB): Ornith 35B at 64k pure-GPU, Qwen 27B at 64k with 6 GB CPU offload
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home_4090"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+            }
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-4090",
+                "--sglang-model", "qwen3.8",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+            qwen_content = (systemd_user_dir / "sglang-qwen3.8-27b.service").read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=65536"', ornith_content)
+            self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS="', ornith_content)
+            self.assertIn('Environment="SGLANG_27B_CONTEXT_LENGTH=65536"', qwen_content)
+            self.assertIn('Environment="SGLANG_27B_CPU_OFFLOAD_ARGS=--cpu-offload-gb 6"', qwen_content)
+
+            env_content = (sandbox / ".config" / "opencode-backends" / "env").read_text(encoding="utf-8")
+            self.assertIn('SGLANG_27B_CPU_OFFLOAD_ARGS="--cpu-offload-gb 6"', env_content)
+            self.assertIn("PROBED_CPU_OFFLOAD_GB=6", env_content)
+
+        # 3. RTX 4090 with TARGET_CONTEXT=262144: Ornith 35B enables 8 GB CPU offload for 256k context
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sandbox = Path(tmp_dir) / "home_4090_256k"
+            sandbox.mkdir()
+            systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+            env = {
+                "USER_HOME": str(sandbox),
+                "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+                "TARGET_CONTEXT": "262144",
+            }
+            proc = self.run_installer(
+                "--target", "opencode",
+                "--mode", "global",
+                "--override-gpu", "rtx-4090",
+                "--non-interactive",
+                env=env,
+            )
+            self.assertEqual(proc.returncode, 0, f"Installer failed: {proc.stderr}\n{proc.stdout}")
+
+            ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+            self.assertIn('Environment="SGLANG_CONTEXT_LENGTH=262144"', ornith_content)
+            self.assertIn('Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb 8"', ornith_content)
+
+        # 4. RTX 4080 (16 GB VRAM) and RTX 4070 (12 GB VRAM) profiles
+        for gpu_override, expected_ctx, expected_offload in [
+            ("rtx-4080", "32768", "14"),
+            ("rtx-4070", "16384", "16"),
+        ]:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                sandbox = Path(tmp_dir) / f"home_{gpu_override}"
+                sandbox.mkdir()
+                systemd_user_dir = sandbox / ".config" / "systemd" / "user"
+                env = {
+                    "USER_HOME": str(sandbox),
+                    "SYSTEMD_USER_DIR": str(systemd_user_dir),
+                    "BACKEND_DIR": str(sandbox / ".config" / "opencode-backends"),
+                    "OPENCODE_HOME_DIR": str(sandbox / ".config" / "opencode"),
+                }
+                proc = self.run_installer(
+                    "--target", "opencode",
+                    "--mode", "global",
+                    "--override-gpu", gpu_override,
+                    "--non-interactive",
+                    env=env,
+                )
+                self.assertEqual(proc.returncode, 0, f"Installer failed for {gpu_override}: {proc.stderr}\n{proc.stdout}")
+
+                ornith_content = (systemd_user_dir / "sglang-ornith-1.5-35b.service").read_text(encoding="utf-8")
+                qwen_content = (systemd_user_dir / "sglang-qwen3.8-27b.service").read_text(encoding="utf-8")
+                self.assertIn(f'Environment="SGLANG_CONTEXT_LENGTH={expected_ctx}"', ornith_content)
+                self.assertIn(f'Environment="SGLANG_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', ornith_content)
+                self.assertIn(f'Environment="SGLANG_27B_CONTEXT_LENGTH={expected_ctx}"', qwen_content)
+                self.assertIn(f'Environment="SGLANG_27B_CPU_OFFLOAD_ARGS=--cpu-offload-gb {expected_offload}"', qwen_content)
+
+    def test_issue54_per_unit_systemctl_disable_loop(self):
+        """Test Issue #54: install.sh loops per unit rather than passing multiple units to systemctl --user disable --now."""
+        import re
+
+        install_text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("for _legacy_u in", install_text)
+        joined = re.sub(r"\\\n\s*", " ", install_text)
+        disable_lines = [line for line in joined.splitlines() if "systemctl --user disable --now" in line]
+        self.assertGreater(len(disable_lines), 0)
+        for line in disable_lines:
+            after = line.split("disable --now", 1)[1]
+            after = re.split(r"[|;&>]|2>/dev/null", after)[0].strip()
+            args = [a for a in after.split() if a]
+            self.assertEqual(
+                len(args),
+                1,
+                f"Expected single unit per systemctl --user disable --now call, got {args}: {line.strip()}",
+            )
 
 
 if __name__ == "__main__":

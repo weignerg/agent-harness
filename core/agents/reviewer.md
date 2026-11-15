@@ -1,7 +1,7 @@
 ---
 description: "Adversarial code reviewer and security gatekeeper; calls scout only for searches"
 mode: subagent
-model: local-sglang/qwen-3.8-nvfp4
+model: local-sglang/ornith-1.5-35b
 tools:
     write: false
     edit: false

@@ -161,7 +161,7 @@ class TestAgyHarnessStructure(unittest.TestCase):
 
         oom_script = REPO_ROOT / "scripts" / "sglang_oom_handler.sh"
         self.assertIn(
-            'SERVICE="opencode-sglang-ornith-35b.service"',
+            'SERVICE="sglang-ornith-1.5-35b.service"',
             oom_script.read_text(encoding="utf-8"),
         )
 

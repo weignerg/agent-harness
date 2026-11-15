@@ -105,12 +105,13 @@ When a request matches a scenario below, load the skill before proceeding:
 
 ## ⚡ Zero-Warmup Session Context & Host Ground Truth
 - **Workstation & GPU Profile**: NVIDIA GeForce RTX 5090 (32 GB Blackwell VRAM, Compute Capability `12.0` / `sm_120`), 125 GB Host RAM, 48 CPU threads on CachyOS Linux.
-- **Authoritative Local Model Checkpoints & Services (Port `30000`)**:
-  - **Workhorse MoE (`ornith-1.5-35b`)**: `ornith-ai/Ornith-1.5-35B-A3B-NVFP4` via `opencode-sglang-ornith-35b.service` (`262144` context, `--mem-fraction-static 0.88`).
-  - **Dense 27B (`qwen3.8-27b` / `27b-nvfp4`)**: `nvidia/Qwen3.8-27B-NVFP4` via `opencode-sglang-qwen27b.service` (`65536` context, `--quantization modelopt --disable-prefill-cuda-graph --cuda-graph-max-bs-decode 8`). Never use legacy `qwen3.5` or non-nvidia FP4 checkpoints.
-  - **Fast 9B Leaf (`ornith-1.5-9b`)**: `ornith-ai/Ornith-1.5-9B-NVFP4`.
+- **Authoritative Local Model Checkpoints & Services (`opencode-model-proxy.service` on Port `30000` -> SGLang Backends on Port `30001`)**:
+  - **Workhorse MoE (`ornith-1.5-35b`)**: `ornith-ai/Ornith-1.5-35B-A3B-NVFP4` via `sglang-ornith-1.5-35b.service` (`262144` context, `--mem-fraction-static 0.88`).
+  - **Dense 27B (`qwen3.8-27b` / `27b-nvfp4` / clean `qwen3.8` alias)**: `nvidia/Qwen3.8-27B-NVFP4` via `sglang-qwen3.8-27b.service` (`262144` context, `--quantization modelopt --disable-prefill-cuda-graph --cuda-graph-max-bs-decode 8`). Never use legacy `qwen3.5` or non-nvidia FP4 checkpoints. Selecting `qwen3.8` routes heavy/workhorse roles to this model.
+  - **Designated Fallback Target**: `local-sglang/qwen-3.8-nvfp4` (`Qwen3.8-27B-NVFP4`) is the designated fallback target for any unmatched `--sglang-model` selection; the clean `qwen3.8` alias resolves here. Fast leaf roles (`scout`/`grunt`/`summary`/`compaction`) stay on `ornith-1.5-9b` regardless of selection.
+  - **Fast 9B Leaf (`ornith-1.5-9b`)**: `ornith-ai/Ornith-1.5-9B-NVFP4` via `sglang-ornith-1.5-9b.service` (`262144` context, `--mem-fraction-static 0.88`).
 - **Unified Server Endpoints**:
-  - Local SGLang Inference API: `http://127.0.0.1:30000/v1`
+  - Local SGLang Inference API (Dynamic Proxy): `http://127.0.0.1:30000/v1` (`opencode-model-proxy.service` routing to backend `127.0.0.1:30001`)
   - OpenCode Headless Server: `http://0.0.0.0:4096` (`opencode-server.service`)
   - T3 Code Unified Web/API Server: `http://0.0.0.0:3773` (`t3-serve.service`; mint pairing tokens via 't3 pair' or 't3 pair --ttl 1h')
 - **Fast Operational Shortcuts & CLI Gotchas**:

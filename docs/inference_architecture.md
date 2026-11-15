@@ -1,12 +1,12 @@
 # Inference Architecture: Native MoE Decode, No Speculative Decoding
 
 Target: Ornith-1.5-35B-A3B on modern NVIDIA GPU hardware (e.g. RTX 5090 32 GB), served by SGLang
-on `127.0.0.1:30000` with continuous batching and RadixAttention at a 256k (262,144-token) context.
+on backend `127.0.0.1:30001` behind `opencode-model-proxy.service` (`127.0.0.1:30000`) with continuous batching and RadixAttention at a 256k (262,144-token) context.
 
 ## Decision
 
 Speculative decoding (`d-flash`, `eagle-3`, any draft model) is **unsupported and prohibited in
-`config/systemd/opencode-sglang-ornith-35b.service`**. `tests/test_sglang_service.sh` enforces this.
+`config/systemd/sglang-ornith-1.5-35b.service`**. `tests/test_sglang_service.sh` enforces this.
 
 ## Rationale
 

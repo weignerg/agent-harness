@@ -65,13 +65,14 @@ python3 -c "
 import json
 with open('${REPO_DIR}/config/opencode/opencode.json') as f:
     cfg = json.load(f)
-assert cfg.get('model') in ('local-sglang/qwen-3.8-nvfp4', 'local-sglang/qwen3.8-27b', 'ornith-local/ornith-1.5-35b'), f'Default model wrong: {cfg.get(\"model\")}'
-assert cfg.get('small_model') in ('local-sglang/ornith-1.5-9b', 'ornith-local/ornith-1.5-9b'), f'Small model wrong: {cfg.get(\"small_model\")}'
+assert 'ornith-local' not in cfg.get('provider', {}), 'Duplicate ornith-local provider must be removed'
+assert cfg.get('model') in ('local-sglang/ornith-1.5-35b', 'local-sglang/qwen3.8-27b'), f'Default model wrong: {cfg.get(\"model\")}'
+assert cfg.get('small_model') == 'local-sglang/ornith-1.5-9b', f'Small model wrong: {cfg.get(\"small_model\")}'
 agents = cfg.get('agent', {})
 for role in ['supreme-orchestrator', 'team-orchestrator', 'architect', 'worker', 'tester', 'reviewer']:
-    assert agents.get(role, {}).get('model') in ('local-sglang/qwen-3.8-nvfp4', 'local-sglang/qwen3.8-27b', 'ornith-local/ornith-1.5-35b'), f'{role} model wrong'
+    assert agents.get(role, {}).get('model') in ('local-sglang/ornith-1.5-35b', 'local-sglang/qwen3.8-27b'), f'{role} model wrong'
 for role in ['scout', 'grunt', 'summary', 'compaction']:
-    assert agents.get(role, {}).get('model') in ('local-sglang/ornith-1.5-9b', 'ornith-local/ornith-1.5-9b'), f'{role} model wrong'
+    assert agents.get(role, {}).get('model') == 'local-sglang/ornith-1.5-9b', f'{role} model wrong'
 " && pass "opencode.json defines native in-session agent model dispatch" || fail "opencode.json agent definitions invalid"
 
 # --- Test 4: Zero-bloat guards -------------------------------------------------
