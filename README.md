@@ -28,6 +28,9 @@
 
 # Or install with Qwen 3.8 27B Dense (100% VRAM NVFP4 + NEXTN Speculative Decoding, nvidia/Qwen3.8-27B-NVFP4):
 ./install.sh --sglang-model qwen3.8-27b
+# The clean `qwen3.8` alias resolves to the same model; local-sglang/qwen-3.8-nvfp4
+# (Qwen3.8-27B-NVFP4) is the designated fallback target for any unmatched selection:
+./install.sh --sglang-model qwen3.8
 
 # Install with T3 Code (t3 serve) web UI server on port 3773:
 ./install.sh --with-t3

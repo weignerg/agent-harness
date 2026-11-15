@@ -42,11 +42,7 @@ SERVICE="$(detect_service)"
 STATE_DIR="${HOME}/.config/opencode-backends"
 STATE="${STATE_DIR}/context_length.state"
 
-if [[ "$SERVICE" == *"27b"* ]]; then
-    LADDER=(65536 32768 16384)
-else
-    LADDER=(262144 131072 65536 32768)
-fi
+LADDER=(262144 131072 65536 32768)
 
 current() {
     local v=""

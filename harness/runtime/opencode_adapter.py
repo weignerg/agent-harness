@@ -34,42 +34,42 @@ class OpenCodeRuntimeAdapter(BaseRuntimeAdapter):
     def model_tiers(self) -> Dict[str, Any]:
         return {
             "supreme-orchestrator": {
-                "model": "llama-3.3-70b-instruct-nvfp4",
+                "model": "ornith-1.5-35b",
                 "tier": "High / Precision",
                 "sglang_port": 30000,
             },
             "team-orchestrator": {
-                "model": "llama-3.3-70b-instruct-nvfp4",
+                "model": "ornith-1.5-35b",
                 "tier": "High / Precision",
                 "sglang_port": 30000,
             },
             "architect": {
-                "model": "llama-3.3-70b-instruct-nvfp4",
+                "model": "ornith-1.5-35b",
                 "tier": "High / Precision",
                 "sglang_port": 30000,
             },
             "worker": {
-                "model": "gemma-4-31b-it-nvfp4",
+                "model": "ornith-1.5-35b",
                 "tier": "Medium / Workhorse",
                 "sglang_port": 30000,
             },
             "reviewer": {
-                "model": "gemma-4-31b-it-nvfp4",
+                "model": "ornith-1.5-35b",
                 "tier": "Medium / Workhorse",
                 "sglang_port": 30000,
             },
             "tester": {
-                "model": "gemma-4-31b-it-nvfp4",
+                "model": "ornith-1.5-35b",
                 "tier": "Medium / Workhorse",
                 "sglang_port": 30000,
             },
             "scout": {
-                "model": "gemma-4-26b-a4b-it-nvfp4",
+                "model": "ornith-1.5-9b",
                 "tier": "Low / Fast",
                 "sglang_port": 30000,
             },
             "grunt": {
-                "model": "gemma-4-26b-a4b-it-nvfp4",
+                "model": "ornith-1.5-9b",
                 "tier": "Low / Fast",
                 "sglang_port": 30000,
             },

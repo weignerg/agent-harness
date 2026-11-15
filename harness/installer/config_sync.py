@@ -253,6 +253,10 @@ def sync_opencode_json(
                 dst_models[m_id] = copy.deepcopy(m_cfg)
             elif isinstance(dst_models[m_id], dict) and isinstance(m_cfg, dict):
                 dst_models[m_id].update(copy.deepcopy(m_cfg))
+        if prov_key == "local-sglang":
+            for q_id in ("qwen3.8-27b", "qwen-3.8-nvfp4", "qwen3.8", "qwen-3.8-q6"):
+                if q_id in dst_models and isinstance(dst_models[q_id], dict):
+                    dst_models[q_id]["context"] = 262144
 
     # Clean up accidental qwen placement under ornith-local provider
     if "ornith-local" in providers and "qwen3.8-27b" in providers["ornith-local"].get("models", {}):
@@ -295,7 +299,10 @@ def sync_opencode_json(
     primary_model: Optional[str] = None
     if sglang_model and sglang_model.strip():
         sm = sglang_model.lower().strip()
-        if sm in ("qwen-3.8-nvfp4", "27b-nvfp4", "qwen3.8-27b", "qwen27b"):
+        # The local-sglang/qwen-3.8-nvfp4 arm is the DESIGNATED FALLBACK TARGET: any Qwen 3.8
+        # NVFP4 selection (including the clean `qwen3.8` alias) resolves here. `qwen3.8-27b` is
+        # intentionally folded in so the profile and alias names both map to the served NVFP4 model.
+        if sm in ("qwen-3.8-nvfp4", "qwen3.8", "27b-nvfp4", "qwen3.8-27b", "qwen27b"):
             primary_model = "local-sglang/qwen-3.8-nvfp4"
         elif sm in ("qwen-3.8-q6", "27b-q6"):
             primary_model = "local-sglang/qwen-3.8-q6"
@@ -304,6 +311,8 @@ def sync_opencode_json(
         elif sm in ("ornith-35b", "ornith-1.5-35b"):
             primary_model = "local-sglang/ornith-1.5-35b"
         else:
+            # DESIGNATED FALLBACK TARGET: local-sglang/qwen-3.8-nvfp4 (Qwen3.8-27B-NVFP4) is used
+            # for any unmatched --sglang-model selection.
             primary_model = "local-sglang/qwen-3.8-nvfp4"
 
     agent_routing = data.setdefault("agent", {})
@@ -318,6 +327,8 @@ def sync_opencode_json(
             role_cfg = agent_routing.setdefault(role, {})
             role_cfg["model"] = primary_model
     else:
+        # No --sglang-model selection: fall back to the DESIGNATED FALLBACK TARGET
+        # local-sglang/qwen-3.8-nvfp4 (Qwen3.8-27B-NVFP4) for the default role models.
         data.setdefault("model", "local-sglang/qwen-3.8-nvfp4")
         for role in ("supreme-orchestrator", "team-orchestrator", "architect", "worker", "tester", "reviewer"):
             role_cfg = agent_routing.setdefault(role, {})

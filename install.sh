@@ -141,7 +141,7 @@ Actions:
   --uninstall                          Safely roll back installed files using install manifest
 
 Parity & Modules:
-  --sglang-model <ornith-35b|qwen3.8-27b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: ornith-35b)
+  --sglang-model <ornith-35b|qwen3.8|qwen3.8-27b|27b-nvfp4|27b-q6> Select SGLang primary model profile (default: ornith-35b)
   --with-obsidian / --no-obsidian      Toggle Obsidian detection & pacman install (default: with)
   --with-vault / --no-vault            Toggle ~/Vaults/home starter scaffolding (default: with)
   --firewall, --with-firewall / --no-firewall Toggle UFW/iptables rules for ports 4096, 4097, 3773 & 30000 (default: with)
@@ -1177,7 +1177,7 @@ EOF
     local active_service="opencode-sglang-ornith-35b.service"
     local qwen27b_quant="modelopt"
     local qwen27b_path="nvidia/Qwen3.8-27B-NVFP4"
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         primary_model="local-sglang/qwen-3.8-nvfp4"
         active_service="opencode-sglang-qwen27b.service"
         qwen27b_quant="modelopt"
@@ -1208,14 +1208,14 @@ EOF
         "SGLANG_27B_QUANTIZATION=${qwen27b_quant}"
         "SGLANG_27B_KV_CACHE_DTYPE=${qwen27b_kv_dtype}"
         "SGLANG_27B_MEM_FRACTION=0.88"
-        "SGLANG_27B_CONTEXT_LENGTH=65536"
+        "SGLANG_27B_CONTEXT_LENGTH=262144"
         "SGLANG_27B_CHUNKED_PREFILL=2048"
         "SGLANG_27B_ATTENTION_BACKEND=flashinfer"
         "SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
         "SGLANG_27B_TORCH_COMPILE="
         "SGLANG_27B_SPECULATIVE_ALGO="
         "SGLANG_27B_SPECULATIVE_ARGS="
-        "SGLANG_27B_MAMBA_ARGS=\"--mamba-full-memory-ratio 4.59 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
+        "SGLANG_27B_MAMBA_ARGS=\"--max-mamba-cache-size 3 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
     )
 
     for kv in "${sglang_vars[@]}"; do
@@ -2239,23 +2239,32 @@ deploy_opencode_backend_and_units() {
     echo "$gpu_profile" > "${backend_env_dir}/gpu_profile.json"
     mem_fraction="$(printf '%s' "$gpu_profile" | grep -oE '"memory_fraction":[0-9.]+' | grep -oE '[0-9.]+' | head -n1 || echo "0.88")"
     max_context="$(printf '%s' "$gpu_profile" | grep -oE '"max_context":[0-9]+' | grep -oE '[0-9]+' | head -n1 || echo "262144")"
+    local ornith_max_context="$max_context"
+    local ornith_mem_fraction="$mem_fraction"
+    local qwen27b_max_context="${max_context:-262144}"
+    if [ "${qwen27b_max_context:-262144}" -gt 262144 ] 2>/dev/null; then
+        qwen27b_max_context="262144"
+    fi
+    local qwen27b_mem_fraction="$mem_fraction"
     local probed_model="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model', 'ornith-1.5-35b'))" "${gpu_profile}" 2>/dev/null || echo "ornith-1.5-35b")"
     local probed_model_path="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model_path', 'ornith-ai/Ornith-1.5-35B-A3B-NVFP4'))" "${gpu_profile}" 2>/dev/null || echo "ornith-ai/Ornith-1.5-35B-A3B-NVFP4")"
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'opencode-sglang-ornith-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "opencode-sglang-ornith-35b.service")"
 
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         probed_model="qwen-3.8-nvfp4"
         probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
         probed_service="opencode-sglang-qwen27b.service"
-        max_context="65536"
+        max_context="${qwen27b_max_context}"
         mem_fraction="0.88"
+        qwen27b_mem_fraction="0.88"
     elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         probed_model="qwen-3.8-q6"
         probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
         probed_service="opencode-sglang-qwen27b.service"
-        max_context="65536"
+        max_context="${qwen27b_max_context}"
         mem_fraction="0.88"
+        qwen27b_mem_fraction="0.88"
     elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
         probed_model="ornith-1.5-9b"
         probed_service="opencode-sglang-ornith-35b.service"
@@ -2343,7 +2352,17 @@ with open(path, 'w') as f:
         sed "s|__USER_HOME__|${USER_HOME}|g" "${SCRIPT_DIR}/config/models/models_catalog.json" > "${backend_env_dir}/models_catalog.json"
     fi
 
-    # 3. Deploy systemd service profiles into backend_env_dir
+    # 3. Remove stale legacy model service files from backend_env_dir and systemd_dest
+    for stale_dir in "${backend_env_dir}" "${systemd_dest}"; do
+        rm -f "${stale_dir}"/gemma-4-*.service \
+              "${stale_dir}"/llama-3.3-*.service \
+              "${stale_dir}"/qwen3-32b-*.service \
+              "${stale_dir}"/qwen-3.8-flash-next-*.service \
+              "${stale_dir}/ornith-1.5-35b-a3b-nvfp4.service" \
+              "${stale_dir}/qwen-3.8-27b-nvfp4-med-ctx.service" 2>/dev/null || true
+    done
+
+    # Deploy systemd service profiles into backend_env_dir
     if compgen -G "${SCRIPT_DIR}/config/systemd/*.service" > /dev/null; then
         cp -f "${SCRIPT_DIR}"/config/systemd/*.service "${backend_env_dir}/"
     fi
@@ -2363,43 +2382,45 @@ with open(path, 'w') as f:
         fi
     done
 
-    # Tune primary SGLang service with probed parameters
-    if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${systemd_dest}/opencode-sglang-ornith-35b.service" ]; then
-        if grep -q 'Environment="SGLANG_CONTEXT_LENGTH=' "${systemd_dest}/opencode-sglang-ornith-35b.service"; then
+    # Tune Ornith SGLang service with probed Ornith hardware parameters (preserving 256k context on RTX 5090+)
+    for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+        if [ -n "$ornith_mem_fraction" ] && [ -n "$ornith_max_context" ] && [ -f "${dest_dir}/opencode-sglang-ornith-35b.service" ]; then
+            if grep -q 'Environment="SGLANG_CONTEXT_LENGTH=' "${dest_dir}/opencode-sglang-ornith-35b.service"; then
+                sed -i \
+                    "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${ornith_mem_fraction}|;s|Environment=\"SGLANG_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_CONTEXT_LENGTH=${ornith_max_context}\"|" \
+                    "${dest_dir}/opencode-sglang-ornith-35b.service"
+            else
+                sed -i \
+                    "/\\[Service\\]/a Environment=\"SGLANG_CONTEXT_LENGTH=${ornith_max_context}\"" \
+                    "${dest_dir}/opencode-sglang-ornith-35b.service"
+                sed -i \
+                    "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${ornith_mem_fraction}|" \
+                    "${dest_dir}/opencode-sglang-ornith-35b.service"
+            fi
             sed -i \
-                "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|;s|Environment=\"SGLANG_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_CONTEXT_LENGTH=${max_context}\"|" \
-                "${systemd_dest}/opencode-sglang-ornith-35b.service"
-        else
-            sed -i \
-                "/\[Service\]/a Environment=\"SGLANG_CONTEXT_LENGTH=${max_context}\"" \
-                "${systemd_dest}/opencode-sglang-ornith-35b.service"
-            sed -i \
-                "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|" \
-                "${systemd_dest}/opencode-sglang-ornith-35b.service"
+                "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
+                "${dest_dir}/opencode-sglang-ornith-35b.service"
         fi
-        sed -i \
-            "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
-            "${systemd_dest}/opencode-sglang-ornith-35b.service"
-    fi
+    done
 
     for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
-        if [ -n "$mem_fraction" ] && [ -n "$max_context" ] && [ -f "${dest_dir}/opencode-sglang-qwen27b.service" ]; then
+        if [ -n "$qwen27b_mem_fraction" ] && [ -n "$qwen27b_max_context" ] && [ -f "${dest_dir}/opencode-sglang-qwen27b.service" ]; then
             if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${dest_dir}/opencode-sglang-qwen27b.service"; then
                 sed -i \
-                    "s|Environment=\"SGLANG_27B_MEM_FRACTION=[0-9.]*\"|Environment=\"SGLANG_27B_MEM_FRACTION=${mem_fraction}\"|" \
+                    "s|Environment=\"SGLANG_27B_MEM_FRACTION=[0-9.]*\"|Environment=\"SGLANG_27B_MEM_FRACTION=${qwen27b_mem_fraction}\"|" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             else
                 sed -i \
-                    "/\[Service\]/a Environment=\"SGLANG_27B_MEM_FRACTION=${mem_fraction}\"" \
+                    "/\\[Service\\]/a Environment=\"SGLANG_27B_MEM_FRACTION=${qwen27b_mem_fraction}\"" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             fi
             if grep -q 'Environment="SGLANG_27B_CONTEXT_LENGTH=' "${dest_dir}/opencode-sglang-qwen27b.service"; then
                 sed -i \
-                    "s|Environment=\"SGLANG_27B_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_27B_CONTEXT_LENGTH=${max_context}\"|" \
+                    "s|Environment=\"SGLANG_27B_CONTEXT_LENGTH=[0-9]*\"|Environment=\"SGLANG_27B_CONTEXT_LENGTH=${qwen27b_max_context}\"|" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             else
                 sed -i \
-                    "/\[Service\]/a Environment=\"SGLANG_27B_CONTEXT_LENGTH=${max_context}\"" \
+                    "/\\[Service\\]/a Environment=\"SGLANG_27B_CONTEXT_LENGTH=${qwen27b_max_context}\"" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             fi
             if grep -q '\${SGLANG_27B_MEM_FRACTION}' "${dest_dir}/opencode-sglang-qwen27b.service"; then
@@ -2408,7 +2429,7 @@ with open(path, 'w') as f:
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             else
                 sed -i \
-                    "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${mem_fraction}|" \
+                    "s|--mem-fraction-static [0-9.]*|--mem-fraction-static ${qwen27b_mem_fraction}|" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             fi
             if grep -q '\${SGLANG_27B_CONTEXT_LENGTH}' "${dest_dir}/opencode-sglang-qwen27b.service"; then
@@ -2417,7 +2438,7 @@ with open(path, 'w') as f:
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             else
                 sed -i \
-                    "s|--context-length [0-9]*|--context-length ${max_context}|" \
+                    "s|--context-length [0-9]*|--context-length ${qwen27b_max_context}|" \
                     "${dest_dir}/opencode-sglang-qwen27b.service"
             fi
         fi
@@ -2552,7 +2573,7 @@ install_opencode_global() {
     rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
     elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         model_profile_arg=(--model-profile "qwen-3.8-q6")
@@ -2838,7 +2859,7 @@ install_opencode_local() {
     rm -f "${dest_opencode}/agents/compaction.md" "${dest_opencode}/agents/summary.md"
 
     local model_profile_arg=()
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
         model_profile_arg=(--model-profile "qwen-3.8-nvfp4")
     elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
         model_profile_arg=(--model-profile "qwen-3.8-q6")

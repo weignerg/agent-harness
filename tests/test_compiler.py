@@ -667,14 +667,20 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         sglang_prov = providers["local-sglang"]
         sglang_models = sglang_prov.get("models", {})
         self.assertIn("qwen3.8-27b", sglang_models)
+        self.assertIn("qwen3.8", sglang_models)
         self.assertIn("qwen-3.8-nvfp4", sglang_models)
         self.assertIn("qwen-3.8-q6", sglang_models)
         self.assertIn("ornith-1.5-35b", sglang_models)
         self.assertIn("ornith-1.5-9b", sglang_models)
 
         qwen38_27b = sglang_models["qwen3.8-27b"]
-        self.assertTrue("qwen 3.8" in qwen38_27b.get("name", "").lower())
-        self.assertGreaterEqual(qwen38_27b.get("context", 0), 131072)
+        # Issue #43: display name normalized to the canonical Qwen3.8-27B-NVFP4 (distinct from the
+        # qwen-3.8-nvfp4 alias, which previously duplicated this display name).
+        self.assertEqual(qwen38_27b.get("name"), "Qwen3.8-27B-NVFP4")
+        self.assertEqual(qwen38_27b.get("context", 0), 262144)
+        self.assertEqual(sglang_models["qwen-3.8-nvfp4"].get("context", 0), 262144)
+        self.assertEqual(sglang_models["qwen3.8"].get("context", 0), 262144)
+        self.assertEqual(sglang_models["qwen-3.8-q6"].get("context", 0), 262144)
         self.assertGreaterEqual(qwen38_27b.get("output", 0), 32768)
         self.assertEqual(qwen38_27b.get("modalities"), {"input": ["text", "image"], "output": ["text"]})
         self.assertIn("high", qwen38_27b.get("variants", {}))
@@ -750,8 +756,8 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
         self.assertIn("SGLANG_WARMUP_TIMEOUT:-300", install_sh_content, "warmup timeout must default to 300s")
         self.assertIn("SGLANG_HEALTHCHECK_RETRIES:-240", install_sh_content, "max_sglang_wait must default to 240s")
-        self.assertIn("opencode-sglang-ornith-35b.service 2>/dev/null || true", install_sh_content)
-        self.assertIn("opencode-sglang-qwen27b.service 2>/dev/null || true", install_sh_content)
+        self.assertIn("disable --now opencode-sglang-ornith-35b.service", install_sh_content)
+        self.assertIn("disable --now opencode-sglang-qwen27b.service", install_sh_content)
 
         # Verify sed tuning idempotency and absence of 0.880.88 corruption
         with tempfile.TemporaryDirectory() as tmp_dir:
