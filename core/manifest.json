@@ -2,19 +2,19 @@
   "version": "1.0.0",
   "model_tiers": {
     "heavy": {
-      "opencode": "ornith-local/ornith-1.5-35b",
+      "opencode": "local-sglang/ornith-1.5-35b",
       "claude": "opus",
       "agy": "pro",
       "agy_model_id": "gemini-3.8-flash-high"
     },
     "workhorse": {
-      "opencode": "ornith-local/ornith-1.5-35b",
+      "opencode": "local-sglang/ornith-1.5-35b",
       "claude": "sonnet",
       "agy": "flash",
       "agy_model_id": "gemini-3.8-flash-medium"
     },
     "fast": {
-      "opencode": "ornith-local/ornith-1.5-9b",
+      "opencode": "local-sglang/ornith-1.5-9b",
       "claude": "haiku",
       "agy": "flash_lite",
       "agy_model_id": "gemini-3.8-flash-low"
@@ -22,9 +22,9 @@
   },
   "model_profiles": {
     "ornith-1.5-35b": {
-      "heavy": "ornith-local/ornith-1.5-35b",
-      "workhorse": "ornith-local/ornith-1.5-35b",
-      "fast": "ornith-local/ornith-1.5-9b"
+      "heavy": "local-sglang/ornith-1.5-35b",
+      "workhorse": "local-sglang/ornith-1.5-35b",
+      "fast": "local-sglang/ornith-1.5-9b"
     },
     "qwen3.8-27b": {
       "heavy": "local-sglang/qwen3.8-27b",
@@ -32,18 +32,18 @@
       "fast": "local-sglang/ornith-1.5-9b"
     },
     "qwen-3.8-nvfp4": {
-      "heavy": "local-sglang/qwen-3.8-nvfp4",
-      "workhorse": "local-sglang/qwen-3.8-nvfp4",
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
       "fast": "local-sglang/ornith-1.5-9b"
     },
     "qwen3.8": {
-      "heavy": "local-sglang/qwen-3.8-nvfp4",
-      "workhorse": "local-sglang/qwen-3.8-nvfp4",
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
       "fast": "local-sglang/ornith-1.5-9b"
     },
     "qwen-3.8-q6": {
-      "heavy": "local-sglang/qwen-3.8-q6",
-      "workhorse": "local-sglang/qwen-3.8-q6",
+      "heavy": "local-sglang/qwen3.8-27b",
+      "workhorse": "local-sglang/qwen3.8-27b",
       "fast": "local-sglang/ornith-1.5-9b"
     },
     "ornith-1.5-9b": {

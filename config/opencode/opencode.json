@@ -9,90 +9,6 @@
         "apiKey": "EMPTY"
       },
       "models": {
-        "qwen-3.8-nvfp4": {
-          "name": "qwen 3.8 nvfp4",
-          "context": 262144,
-          "output": 32768,
-          "modalities": {
-            "input": [
-              "text",
-              "image"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        },
-        "qwen-3.8-q6": {
-          "name": "qwen 3.8 q6",
-          "context": 262144,
-          "output": 32768,
-          "modalities": {
-            "input": [
-              "text",
-              "image"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        },
-        "ornith-1.5-9b": {
-          "name": "ornith 1.5 9b",
-          "context": 262144,
-          "output": 32768,
-          "modalities": {
-            "input": [
-              "text",
-              "image"
-            ],
-            "output": [
-              "text"
-            ]
-          },
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        },
         "ornith-1.5-35b": {
           "name": "ornith 1.5 35b",
           "context": 262144,
@@ -149,8 +65,8 @@
             }
           }
         },
-        "qwen3.8": {
-          "name": "Qwen3.8-27B-NVFP4",
+        "ornith-1.5-9b": {
+          "name": "ornith 1.5 9b",
           "context": 262144,
           "output": 32768,
           "modalities": {
@@ -162,54 +78,6 @@
               "text"
             ]
           },
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        }
-      }
-    },
-    "ornith-local": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Ornith Local",
-      "options": {
-        "baseURL": "http://127.0.0.1:30000/v1",
-        "apiKey": "EMPTY"
-      },
-      "models": {
-        "ornith-1.5-35b": {
-          "name": "ornith 1.5 35b",
-          "context": 262144,
-          "output": 32768,
-          "variants": {
-            "high": {
-              "reasoningEffort": "high",
-              "thinkingBudget": 16384
-            },
-            "medium": {
-              "reasoningEffort": "medium",
-              "thinkingBudget": 8192
-            },
-            "low": {
-              "reasoningEffort": "low",
-              "thinkingBudget": 4096
-            }
-          }
-        },
-        "ornith-1.5-9b": {
-          "name": "ornith 1.5 9b",
-          "context": 262144,
-          "output": 32768,
           "variants": {
             "high": {
               "reasoningEffort": "high",
@@ -289,7 +157,7 @@
   "instructions": [
     ".opencode/rules/*.md"
   ],
-  "model": "local-sglang/qwen-3.8-nvfp4",
+  "model": "local-sglang/ornith-1.5-35b",
   "default_agent": "supreme-orchestrator",
   "subagent_depth": 3,
   "small_model": "local-sglang/ornith-1.5-9b",
@@ -321,7 +189,7 @@
   },
   "agent": {
     "supreme-orchestrator": {
-      "model": "local-sglang/qwen-3.8-nvfp4",
+      "model": "local-sglang/ornith-1.5-35b",
       "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
       "tools": {
         "question": true
@@ -343,7 +211,7 @@
       }
     },
     "team-orchestrator": {
-      "model": "local-sglang/qwen-3.8-nvfp4",
+      "model": "local-sglang/ornith-1.5-35b",
       "description": "Per-issue team orchestrator: plans, awaits approval, then dispatches and coordinates the agent team; the only agent allowed to spawn leaves; never merges",
       "tools": {
         "question": true
@@ -367,7 +235,7 @@
       }
     },
     "architect": {
-      "model": "local-sglang/qwen-3.8-nvfp4",
+      "model": "local-sglang/ornith-1.5-35b",
       "description": "Subsystem design, codebase surveys, high-context refactor blueprints, and dependency topology; calls scout for searches",
       "permission": {
         "edit": "deny",
@@ -386,7 +254,7 @@
       }
     },
     "worker": {
-      "model": "local-sglang/qwen-3.8-nvfp4",
+      "model": "local-sglang/ornith-1.5-35b",
       "description": "Implementation, refactoring, test authoring, and commits; calls grunt and scout",
       "permission": {
         "task": {
@@ -397,7 +265,7 @@
       }
     },
     "tester": {
-      "model": "local-sglang/qwen-3.8-nvfp4",
+      "model": "local-sglang/ornith-1.5-35b",
       "description": "Runs the TDD pipeline, fixes failures, and verifies behavior; calls grunt and scout",
       "permission": {
         "task": {
@@ -408,7 +276,7 @@
       }
     },
     "reviewer": {
-      "model": "local-sglang/qwen-3.8-nvfp4",
+      "model": "local-sglang/ornith-1.5-35b",
       "description": "Adversarial code reviewer and security gatekeeper; calls scout only for searches",
       "permission": {
         "edit": "deny",
@@ -456,6 +324,10 @@
     "compaction": {
       "model": "local-sglang/ornith-1.5-9b",
       "description": "Conversation context compaction and pruning"
+    },
+    "title": {
+      "model": "local-sglang/ornith-1.5-9b",
+      "description": "Session title generation"
     }
   }
 }
