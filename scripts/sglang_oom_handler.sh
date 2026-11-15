@@ -11,7 +11,7 @@
 # ==============================================================================
 set -uo pipefail
 
-SERVICE="opencode-sglang-ornith-35b.service"
+SERVICE="sglang-ornith-1.5-35b.service"
 
 detect_service() {
     if [ -n "${SGLANG_SERVICE:-}" ]; then
@@ -27,11 +27,14 @@ detect_service() {
         fi
         local env_primary
         env_primary="$(grep -s '^SGLANG_PRIMARY_MODEL=' "${HOME}/.config/opencode-backends/env" | head -n1 | cut -d'=' -f2- | tr -d '"\047')"
-        if [[ "$env_primary" == *"27b"* ]]; then
-            echo "opencode-sglang-qwen27b.service"
+        if [[ "$env_primary" == *"27b"* || "$env_primary" == *"qwen"* ]]; then
+            echo "sglang-qwen3.8-27b.service"
+            return
+        elif [[ "$env_primary" == *"9b"* ]]; then
+            echo "sglang-ornith-1.5-9b.service"
             return
         elif [[ "$env_primary" == *"35b"* ]]; then
-            echo "opencode-sglang-ornith-35b.service"
+            echo "sglang-ornith-1.5-35b.service"
             return
         fi
     fi
@@ -47,8 +50,10 @@ LADDER=(262144 131072 65536 32768)
 current() {
     local v=""
     if [ -r "$STATE" ]; then
-        if [[ "$SERVICE" == *"27b"* ]]; then
+        if [[ "$SERVICE" == *"27b"* || "$SERVICE" == *"qwen"* ]]; then
             v="$(sed -n 's/^SGLANG_27B_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
+        elif [[ "$SERVICE" == *"9b"* ]]; then
+            v="$(sed -n 's/^SGLANG_9B_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
         fi
         if [ -z "$v" ]; then
             v="$(sed -n 's/^SGLANG_CONTEXT_LENGTH=\([0-9]\+\)$/\1/p' "$STATE" | tail -1)"
@@ -60,10 +65,15 @@ current() {
 write_state() {
     mkdir -p "$STATE_DIR"
     local t; t="$(mktemp "${STATE}.XXXXXX")"
-    if [[ "$SERVICE" == *"27b"* ]]; then
+    if [[ "$SERVICE" == *"27b"* || "$SERVICE" == *"qwen"* ]]; then
         cat << EOF > "$t"
 SGLANG_CONTEXT_LENGTH=$1
 SGLANG_27B_CONTEXT_LENGTH=$1
+EOF
+    elif [[ "$SERVICE" == *"9b"* ]]; then
+        cat << EOF > "$t"
+SGLANG_CONTEXT_LENGTH=$1
+SGLANG_9B_CONTEXT_LENGTH=$1
 EOF
     else
         echo "SGLANG_CONTEXT_LENGTH=$1" > "$t"

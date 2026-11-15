@@ -370,9 +370,10 @@ OpenCode is powered by a high-throughput, local SGLang inference backend running
 - **NVFP4 Precision & Triton GDN Kernels**: Model weights and activations utilize NVFP4 quantization, allowing 35B and 70B parameter models to fit comfortably within single-card consumer and workstation VRAM budgets.
 - **Systemd User Units (`~/.config/systemd/user/`)**:
   - `opencode-server.service`: Headless remote server exposing port 4096 with password authentication.
+  - `opencode-model-proxy.service`: Dynamic SGLang model router and idle unloader proxy listening on `127.0.0.1:30000` (forwarding to backend port `30001`).
   - `opencode-agent.slice`: Cgroup resource isolation preventing background compilation or indexing from starving inference.
   - `opencode-colbert-reindex.service` & `timer`: Hourly scheduled CPU-only reindexing of Obsidian knowledge vaults.
-  - `opencode-sglang-ornith-35b.service`: Primary SGLang model server on `127.0.0.1:30000`.
+  - `sglang-ornith-1.5-35b.service`, `sglang-qwen3.8-27b.service`, `sglang-ornith-1.5-9b.service`: SGLang model backend services on `127.0.0.1:30001`.
 
 ### Dynamic GPU Probing (`scripts/gpu_probe.sh`)
 
@@ -385,10 +386,10 @@ During installation, `scripts/gpu_probe.sh` dynamically inspects the host GPU vi
 
 | Profile | Target VRAM | Static Memory Fraction | Max Context Length | Default Service Unit |
 | :--- | :--- | :--- | :--- | :--- |
-| `rtx-5090` | ~32 GB | `0.88` | 262,144 tokens (256k) | `opencode-sglang-ornith-35b.service` |
-| `rtx-pro-6000` | ~48–96 GB | `0.90` | 262,144 tokens (256k) | `opencode-sglang-ornith-35b.service` |
-| `rtx-spark` | ~128 GB Unified | `0.92` | 512,000 tokens (512k) | `opencode-sglang-ornith-35b.service` |
-| `fallback` | Generic (>=32 GB) | `0.88` | 262,144 tokens (256k) | `opencode-sglang-ornith-35b.service` |
+| `rtx-5090` | ~32 GB | `0.88` | 262,144 tokens (256k) | `sglang-ornith-1.5-35b.service` |
+| `rtx-pro-6000` | ~48–96 GB | `0.90` | 262,144 tokens (256k) | `sglang-ornith-1.5-35b.service` |
+| `rtx-spark` | ~128 GB Unified | `0.92` | 512,000 tokens (512k) | `sglang-ornith-1.5-35b.service` |
+| `fallback` | Generic (>=32 GB) | `0.88` | 262,144 tokens (256k) | `sglang-ornith-1.5-35b.service` |
 
 ### SGLang OOM Watchdog Recovery (`scripts/sglang_oom_handler.sh`)
 

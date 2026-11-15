@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenCode Dynamic SGLang Model Router & Idle Unloader Proxy on Port 30000
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/opencode-backends/env
+Environment="PYTHONPATH=%h/.orchestration"
+ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/python -m harness.orchestrator.model_proxy --listen-host 127.0.0.1 --listen-port 30000 --backend-host 127.0.0.1 --backend-port 30001 --catalog-path %h/.config/opencode-backends/models_catalog.json
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -637,7 +637,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.core_dir = REPO_ROOT / "core"
         self.opencode_json_path = REPO_ROOT / "config" / "opencode" / "opencode.json"
         self.manifest_path = self.core_dir / "manifest.json"
-        self.qwen27b_service_path = REPO_ROOT / "config" / "systemd" / "opencode-sglang-qwen27b.service"
+        self.qwen27b_service_path = REPO_ROOT / "config" / "systemd" / "sglang-qwen3.8-27b.service"
         self.install_sh_path = REPO_ROOT / "install.sh"
 
         with open(self.manifest_path, "r", encoding="utf-8") as f:
@@ -707,8 +707,8 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertEqual(profiles["ornith-1.5-35b"].get("workhorse"), "ornith-local/ornith-1.5-35b")
 
     def test_qwen27b_service_unit_configuration(self) -> None:
-        """Verify opencode-sglang-qwen27b.service parameters meet Issue #16 criteria."""
-        self.assertTrue(self.qwen27b_service_path.exists(), "opencode-sglang-qwen27b.service must exist")
+        """Verify sglang-qwen3.8-27b.service parameters meet Issue #16 and Issue #52 criteria."""
+        self.assertTrue(self.qwen27b_service_path.exists(), "sglang-qwen3.8-27b.service must exist")
         content = self.qwen27b_service_path.read_text(encoding="utf-8")
 
         # 100% VRAM residency / quantization flags
@@ -718,13 +718,14 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         )
         self.assertIn("--kv-cache-dtype", content, "Service must specify --kv-cache-dtype")
         self.assertIn("flashinfer", content, "Attention backend must be flashinfer")
-        self.assertIn("--disable-prefill-cuda-graph", content, "Service must specify --disable-prefill-cuda-graph")
+        self.assertIn("--disable-prefill-cuda-graph", content, "Service must disable prefill CUDA graph for fast startup")
         self.assertNotIn("\n  --enable-torch-compile", content, "Service must not hardcode --enable-torch-compile in default ExecStart")
         self.assertIn("--tool-call-parser qwen3_coder", content, "Tool-call parser must be qwen3_coder")
         self.assertIn("--reasoning-parser qwen3", content, "Reasoning parser must be qwen3")
-        self.assertIn("--port 30000", content, "Port must be 30000")
+        self.assertIn('Environment="SGLANG_BACKEND_PORT=30001"', content, "Default backend port must be 30001")
+        self.assertIn("--port ${SGLANG_BACKEND_PORT}", content, "Port must use ${SGLANG_BACKEND_PORT}")
         self.assertIn("--host 127.0.0.1", content, "Host must be 127.0.0.1")
-        self.assertIn("SGLANG_SERVICE=opencode-sglang-qwen27b.service", content)
+        self.assertIn("SGLANG_SERVICE=sglang-qwen3.8-27b.service", content)
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", content, "Service must specify nvidia/Qwen3.8-27B-NVFP4")
         self.assertNotIn("Qwen/Qwen3.8-27B-FP4", content, "Service must not reference non-existent Qwen/Qwen3.8-27B-FP4")
         self.assertIn("SGLANG_27B_QUANTIZATION=modelopt", content, "Service must specify modelopt quantization")
@@ -756,23 +757,23 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("--disable-cuda-graph", install_sh_content, "warmup_sglang_service must pass --disable-cuda-graph")
         self.assertIn("SGLANG_WARMUP_TIMEOUT:-300", install_sh_content, "warmup timeout must default to 300s")
         self.assertIn("SGLANG_HEALTHCHECK_RETRIES:-240", install_sh_content, "max_sglang_wait must default to 240s")
-        self.assertIn("disable --now opencode-sglang-ornith-35b.service", install_sh_content)
-        self.assertIn("disable --now opencode-sglang-qwen27b.service", install_sh_content)
+        self.assertIn("disable --now sglang-ornith-1.5-35b.service", install_sh_content)
+        self.assertIn("disable --now sglang-qwen3.8-27b.service", install_sh_content)
 
         # Verify sed tuning idempotency and absence of 0.880.88 corruption
         with tempfile.TemporaryDirectory() as tmp_dir:
-            test_svc = Path(tmp_dir) / "opencode-sglang-qwen27b.service"
+            test_svc = Path(tmp_dir) / "sglang-qwen3.8-27b.service"
             test_svc.write_text(service_content, encoding="utf-8")
             # Run bash sed script matching install.sh
             bash_cmd = f"""
             mem_fraction="0.88"
             max_context="65536"
             dest_dir="{tmp_dir}"
-            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
-                sed -i "s|Environment=\\"SGLANG_27B_MEM_FRACTION=[0-9.]*\\"|Environment=\\"SGLANG_27B_MEM_FRACTION=${{mem_fraction}}\\"|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            if grep -q 'Environment="SGLANG_27B_MEM_FRACTION=' "${{dest_dir}}/sglang-qwen3.8-27b.service"; then
+                sed -i "s|Environment=\\"SGLANG_27B_MEM_FRACTION=[0-9.]*\\"|Environment=\\"SGLANG_27B_MEM_FRACTION=${{mem_fraction}}\\"|" "${{dest_dir}}/sglang-qwen3.8-27b.service"
             fi
-            if grep -q '\\${{SGLANG_27B_MEM_FRACTION}}' "${{dest_dir}}/opencode-sglang-qwen27b.service"; then
-                sed -i "s|--mem-fraction-static [0-9.]*\\${{SGLANG_27B_MEM_FRACTION}}|--mem-fraction-static \\${{SGLANG_27B_MEM_FRACTION}}|" "${{dest_dir}}/opencode-sglang-qwen27b.service"
+            if grep -q '\\${{SGLANG_27B_MEM_FRACTION}}' "${{dest_dir}}/sglang-qwen3.8-27b.service"; then
+                sed -i "s|--mem-fraction-static [0-9.]*\\${{SGLANG_27B_MEM_FRACTION}}|--mem-fraction-static \\${{SGLANG_27B_MEM_FRACTION}}|" "${{dest_dir}}/sglang-qwen3.8-27b.service"
             fi
             """
             res = subprocess.run(["bash", "-c", bash_cmd], check=True, capture_output=True)
@@ -887,7 +888,7 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("t3-serve.service", qs_text)
         self.assertIn("t3 pair", qs_text)
         self.assertIn("t3 pair", readme_text)
-        self.assertIn("opencode-sglang-qwen27b.service", qs_text)
+        self.assertIn("sglang-qwen3.8-27b.service", qs_text)
         self.assertIn("qwen3.8-27b", qs_text)
         self.assertIn("nvidia/Qwen3.8-27B-NVFP4", qs_text)
         self.assertNotIn("qwen3.5", qs_text)

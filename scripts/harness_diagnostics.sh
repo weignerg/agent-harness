@@ -6,7 +6,7 @@
 # ==============================================================================
 set -uo pipefail
 HOST="${SGLANG_HOST:-127.0.0.1}"; PORT="${SGLANG_PORT:-30000}"
-SERVICE="${SERVICE:-opencode-sglang-ornith-35b.service}"; BAD=0
+SERVICE="${SERVICE:-sglang-ornith-1.5-35b.service}"; BAD=0
 echo "== OpenCode harness diagnostics ($(date '+%F %T')) =="
 if command -v systemctl >/dev/null 2>&1; then
     st="$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)"; st="${st:-unknown}"

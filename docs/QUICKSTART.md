@@ -202,16 +202,16 @@ T3 Code provides a single web-based interface and REST/WebSocket API to manage C
 
 ---
 
-## 3. 🧠 Switching Between Ornith 1.5 35B and Qwen 3.8 27B (SGLang Port 30000)
+## 3. 🧠 Switching Between Ornith 1.5 35B, Qwen 3.8 27B, and Ornith 1.5 9B
 
-Both model backends bind to `127.0.0.1:30000/v1` for OpenAI-compatible API parity. Only one backend service runs at a time.
+The dynamic proxy (`opencode-model-proxy.service`) binds to `127.0.0.1:30000/v1` and automatically switches SGLang backend services on port `30001` (`sglang-ornith-1.5-35b.service`, `sglang-qwen3.8-27b.service`, `sglang-ornith-1.5-9b.service`). Only one backend service runs at a time.
 
 ### Switch to Qwen 3.8 27B Dense (100% VRAM NVFP4 + NEXTN Speculative Decoding + FP8 KV Cache)
 Target weights: `nvidia/Qwen3.8-27B-NVFP4` (dense 27B NVFP4 on GPU VRAM)
 ```bash
 # 1. Stop Ornith 35B and activate Qwen 3.8 27B service:
-systemctl --user stop opencode-sglang-ornith-35b.service
-systemctl --user enable --now opencode-sglang-qwen27b.service
+systemctl --user stop sglang-ornith-1.5-35b.service
+systemctl --user enable --now sglang-qwen3.8-27b.service
 
 # 2. Resync OpenCode configuration to Qwen profile:
 ./install.sh --sglang-model qwen3.8-27b --no-backends --no-firewall --no-obsidian --skip-warmup --no-healthcheck -y
@@ -225,8 +225,8 @@ while leaf roles (`scout`, `grunt`, `summary`, `compaction`) remain on `ornith-1
 ### Switch Back to Ornith 1.5 35B-A3B MoE (Workhorse Model)
 ```bash
 # 1. Stop Qwen 27B and activate Ornith 35B service:
-systemctl --user stop opencode-sglang-qwen27b.service
-systemctl --user enable --now opencode-sglang-ornith-35b.service
+systemctl --user stop sglang-qwen3.8-27b.service
+systemctl --user enable --now sglang-ornith-1.5-35b.service
 
 # 2. Resync OpenCode configuration to Ornith profile:
 ./install.sh --sglang-model ornith-35b --no-backends --no-firewall --no-obsidian --skip-warmup --no-healthcheck -y

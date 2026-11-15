@@ -1,6 +1,6 @@
 """Dynamic Model Router & Idle Unloader Proxy for SGLang.
 
-Listens on a configurable proxy port (or 30000). Proxies OpenAI-compatible requests to internal SGLang backend.
+Listens on a configurable proxy port (default 30000). Proxies OpenAI-compatible requests to internal SGLang backend (default 30001).
 When a request asks for a model not currently active, it dynamically switches
 the running systemd service unit to match the requested model from models_catalog.json,
 rewrites the requested model name to the backend's served_model_name, and forwards the request.
@@ -28,6 +28,9 @@ DEFAULT_CATALOG_PATH = Path.home() / ".config/opencode-backends/models_catalog.j
 DEFAULT_IDLE_TIMEOUT_SECS = 900  # 15 minutes
 
 DEFAULT_SERVED_NAMES: Dict[str, str] = {
+    "sglang-qwen3.8-27b.service": "qwen3.8-27b",
+    "sglang-ornith-1.5-35b.service": "ornith-1.5-35b",
+    "sglang-ornith-1.5-9b.service": "ornith-1.5-9b",
     "opencode-sglang-qwen27b.service": "qwen3.8-27b",
     "opencode-sglang-ornith-35b.service": "ornith-1.5-35b",
     "ornith-30000.service": "ornith-1.5-35b",
@@ -39,7 +42,7 @@ class ModelRouter:
     def __init__(
         self,
         backend_host: str = "127.0.0.1",
-        backend_port: int = 30000,
+        backend_port: int = 30001,
         catalog_path: Path = DEFAULT_CATALOG_PATH,
         idle_timeout_seconds: int = DEFAULT_IDLE_TIMEOUT_SECS,
     ):
@@ -76,6 +79,14 @@ class ModelRouter:
             try:
                 with open(fallback, "r", encoding="utf-8") as fb_f:
                     repo_cat = json.load(fb_f)
+                legacy_key_map = {
+                    "qwen-3.8-27b-nvfp4-med-ctx": "sglang-qwen3.8-27b",
+                    "opencode-sglang-ornith-35b": "sglang-ornith-1.5-35b",
+                    "ornith-1.5-9b-nvfp4-low-ctx": "sglang-ornith-1.5-9b",
+                }
+                for old_k, new_k in legacy_key_map.items():
+                    if old_k in self.catalog and new_k in repo_cat and new_k not in self.catalog:
+                        self.catalog[new_k] = self.catalog.pop(old_k)
                 for mk, repo_info in repo_cat.items():
                     if mk not in self.catalog:
                         self.catalog[mk] = repo_info
@@ -88,7 +99,7 @@ class ModelRouter:
                         existing["aliases"] = merged_aliases
                         if "served_model_name" in repo_info and "served_model_name" not in existing:
                             existing["served_model_name"] = repo_info["served_model_name"]
-                        if mk == "qwen-3.8-27b-nvfp4-med-ctx" and "opencode-sglang-qwen27b.service" in repo_info.get("service_file", ""):
+                        if "service_file" in repo_info:
                             existing["service_file"] = repo_info["service_file"]
             except Exception as e:
                 logger.debug("Fallback catalog merge skipped: %s", e)
@@ -113,7 +124,7 @@ class ModelRouter:
             for alias in info.get("aliases", []):
                 clean_alias = self._normalize_model_id(str(alias))
                 # Preserve first registration for shared aliases unless not yet registered
-                if clean_alias not in self.alias_to_model or model_key == "ornith-1.5-9b-nvfp4-low-ctx":
+                if clean_alias not in self.alias_to_model or model_key in ("sglang-ornith-1.5-9b", "ornith-1.5-9b-nvfp4-low-ctx"):
                     self.alias_to_model[clean_alias] = model_key
 
     @staticmethod
@@ -233,6 +244,9 @@ class ModelRouter:
 
             # Stop conflicting sglang services
             services_to_stop = [
+                "sglang-qwen3.8-27b.service",
+                "sglang-ornith-1.5-35b.service",
+                "sglang-ornith-1.5-9b.service",
                 "opencode-sglang-qwen27b.service",
                 "opencode-sglang-ornith-35b.service",
                 "ornith-30000.service",
@@ -257,10 +271,11 @@ class ModelRouter:
                 return False
 
             self.active_service = target_service
-            return self.wait_for_backend_ready(timeout=timeout)
+            expected_served = self.service_to_served_name.get(target_service)
+            return self.wait_for_backend_ready(timeout=timeout, expected_served_model=expected_served)
 
-    def wait_for_backend_ready(self, timeout: float = 60.0) -> bool:
-        """Poll backend /v1/models until ready."""
+    def wait_for_backend_ready(self, timeout: float = 60.0, expected_served_model: Optional[str] = None) -> bool:
+        """Poll backend /v1/models until ready and (if specified) serving expected_served_model."""
         url = f"http://{self.backend_host}:{self.backend_port}/v1/models"
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -268,6 +283,22 @@ class ModelRouter:
                 req = urllib.request.Request(url, headers={"Authorization": "Bearer EMPTY"})
                 with urllib.request.urlopen(req, timeout=1.0) as resp:
                     if resp.status == 200:
+                        raw = resp.read().decode("utf-8", errors="ignore")
+                        if expected_served_model:
+                            try:
+                                payload = json.loads(raw)
+                                model_ids = {
+                                    str(m.get("id", ""))
+                                    for m in payload.get("data", [])
+                                    if isinstance(m, dict)
+                                }
+                                if expected_served_model not in model_ids and expected_served_model not in raw:
+                                    time.sleep(0.5)
+                                    continue
+                            except Exception:
+                                if expected_served_model not in raw:
+                                    time.sleep(0.5)
+                                    continue
                         logger.info("Backend %s is ready", url)
                         return True
             except Exception:
@@ -481,9 +512,9 @@ def start_idle_checker(router: ModelRouter, interval: float = 30.0) -> threading
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Dynamic Model Router & Idle Unloader Proxy for SGLang")
     parser.add_argument("--listen-host", default="127.0.0.1", help="Host interface to bind proxy server")
-    parser.add_argument("--listen-port", type=int, default=30080, help="Port to bind proxy server")
+    parser.add_argument("--listen-port", type=int, default=30000, help="Port to bind proxy server")
     parser.add_argument("--backend-host", default="127.0.0.1", help="Internal SGLang backend host")
-    parser.add_argument("--backend-port", type=int, default=30000, help="Internal SGLang backend port")
+    parser.add_argument("--backend-port", type=int, default=30001, help="Internal SGLang backend port")
     parser.add_argument(
         "--catalog-path",
         type=Path,

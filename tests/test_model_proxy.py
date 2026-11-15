@@ -67,32 +67,33 @@ class TestModelRouter(unittest.TestCase):
     def test_resolve_ornith_35b(self):
         res = self.router.resolve_model_service("ornith-1.5-35b")
         self.assertIsNotNone(res)
-        self.assertEqual(res[0], "opencode-sglang-ornith-35b")
-        self.assertEqual(res[1], "opencode-sglang-ornith-35b.service")
+        self.assertEqual(res[0], "sglang-ornith-1.5-35b")
+        self.assertEqual(res[1], "sglang-ornith-1.5-35b.service")
         self.assertEqual(self.router.resolve_served_model_name("ornith-1.5-35b"), "ornith-1.5-35b")
 
     def test_resolve_ornith_9b(self):
         res = self.router.resolve_model_service("ornith-1.5-9b")
         self.assertIsNotNone(res)
-        self.assertEqual(res[0], "ornith-1.5-9b-nvfp4-low-ctx")
-        self.assertEqual(res[1], "ornith-1.5-9b-nvfp4-low-ctx.service")
+        self.assertEqual(res[0], "sglang-ornith-1.5-9b")
+        self.assertEqual(res[1], "sglang-ornith-1.5-9b.service")
+        self.assertEqual(self.router.resolve_served_model_name("ornith-1.5-9b"), "ornith-1.5-9b")
 
     def test_resolve_qwen_27b_and_aliases(self):
         for alias in ("qwen-3.8-27b", "qwen-3.8-nvfp4", "qwen3.8", "qwen3.8-27b", "qwen-3.8-q6", "local-sglang/qwen3.8"):
             res = self.router.resolve_model_service(alias)
             self.assertIsNotNone(res, f"Failed to resolve {alias}")
-            self.assertEqual(res[0], "qwen-3.8-27b-nvfp4-med-ctx")
-            self.assertEqual(res[1], "opencode-sglang-qwen27b.service")
+            self.assertEqual(res[0], "sglang-qwen3.8-27b")
+            self.assertEqual(res[1], "sglang-qwen3.8-27b.service")
             self.assertEqual(self.router.resolve_served_model_name(alias), "qwen3.8-27b")
 
     def test_resolve_with_provider_prefix(self):
         res = self.router.resolve_model_service("local-sglang/ornith-1.5-35b")
         self.assertIsNotNone(res)
-        self.assertEqual(res[0], "opencode-sglang-ornith-35b")
+        self.assertEqual(res[0], "sglang-ornith-1.5-35b")
 
         res_ornith_prov = self.router.resolve_model_service("ornith-local/ornith-1.5-35b")
         self.assertIsNotNone(res_ornith_prov)
-        self.assertEqual(res_ornith_prov[0], "opencode-sglang-ornith-35b")
+        self.assertEqual(res_ornith_prov[0], "sglang-ornith-1.5-35b")
 
 
 class TestModelProxyServer(unittest.TestCase):
@@ -125,13 +126,13 @@ class TestModelProxyServer(unittest.TestCase):
         self.backend_server.server_close()
 
     def test_health_endpoint(self):
-        with patch.object(self.router, "get_currently_running_service", return_value="opencode-sglang-qwen27b.service"):
+        with patch.object(self.router, "get_currently_running_service", return_value="sglang-qwen3.8-27b.service"):
             url = f"http://127.0.0.1:{self.proxy_port}/health"
             with urllib.request.urlopen(url, timeout=2.0) as resp:
                 self.assertEqual(resp.status, 200)
                 data = json.loads(resp.read().decode("utf-8"))
                 self.assertEqual(data["status"], "ok")
-                self.assertEqual(data["active_service"], "opencode-sglang-qwen27b.service")
+                self.assertEqual(data["active_service"], "sglang-qwen3.8-27b.service")
 
     def test_v1_models_endpoint_includes_catalog_aliases(self):
         url = f"http://127.0.0.1:{self.proxy_port}/v1/models"
@@ -144,6 +145,11 @@ class TestModelProxyServer(unittest.TestCase):
             self.assertIn("qwen-3.8-nvfp4", model_ids)
             self.assertIn("qwen3.8", model_ids)
             self.assertIn("ornith-1.5-35b", model_ids)
+            self.assertIn("ornith-1.5-9b", model_ids)
+
+    def test_wait_for_backend_ready_verifies_expected_served_model(self):
+        self.assertTrue(self.router.wait_for_backend_ready(timeout=1.5, expected_served_model="qwen3.8-27b"))
+        self.assertFalse(self.router.wait_for_backend_ready(timeout=0.7, expected_served_model="ornith-1.5-35b"))
 
     def test_chat_completions_switches_service_and_rewrites_model_name(self):
         with patch.object(self.router, "ensure_service_running", return_value=True) as mock_ensure:
@@ -162,7 +168,7 @@ class TestModelProxyServer(unittest.TestCase):
                 self.assertEqual(resp.status, 200)
                 resp_data = json.loads(resp.read().decode("utf-8"))
 
-            mock_ensure.assert_called_once_with("opencode-sglang-qwen27b.service", timeout=5.0)
+            mock_ensure.assert_called_once_with("sglang-qwen3.8-27b.service", timeout=5.0)
             self.assertIsNotNone(_MockBackendHandler.last_request_body)
             self.assertEqual(_MockBackendHandler.last_request_body["model"], "qwen3.8-27b")
             self.assertEqual(resp_data["model"], "qwen3.8-27b")
