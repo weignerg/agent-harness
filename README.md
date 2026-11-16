@@ -14,7 +14,7 @@
 - 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
 - ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
 - 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
-- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 11 WSL2 bootstrap: download the release assets into one folder and run a single command to provision WSL, extract the pinned source, and install the harness inside WSL.
+- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 11 WSL2 bootstrap: download and extract the v0.7.1 source bundle, then run a single command to provision WSL, copy the bundle, and install the harness inside WSL.
 
 ---
 
@@ -193,16 +193,15 @@ Security is enabled by default (`WITH_FIREWALL=true`). The installer stages host
 
 ### Windows (WSL) — One-Command Install
 
-Install on Windows 11 (WSL2) by downloading the release assets into one folder and
-running a single command (see [docs/WINDOWS.md](docs/WINDOWS.md) for requirements,
-the reboot note, and troubleshooting):
+Install on Windows 11 (WSL2) by downloading and extracting the v0.7.1 source bundle, then
+running a single command from inside the extracted tree (see
+[docs/WINDOWS.md](docs/WINDOWS.md) for requirements, the reboot note, and troubleshooting):
 
 ```powershell
-# 1) Download the release assets into one folder (e.g. with an authenticated gh):
-gh release download v0.7.1 -D .\agent-harness-v0.7.1
-# 2) From that folder, run the ONE command:
-cd .\agent-harness-v0.7.1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1
+# 1) Download agent-harness-v0.7.1-source.tar.gz from the v0.7.1 release, then extract:
+tar -xzf agent-harness-v0.7.1-source.tar.gz
+# 2) One command, from inside the extracted tree:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-harness-v0.7.1\windows\install-windows.ps1
 ```
 
 ---

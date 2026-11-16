@@ -10,9 +10,9 @@ versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) b
 ## [v0.7.1] - 2026-11-16
 
 ### Added
-- `windows/install-windows.ps1` — Windows 11 (WSL2) one-command install bootstrap:
-  provisions WSL + Ubuntu, handles the single mandatory reboot via a resume marker,
-  extracts the pinned `v0.7.1` source from the locally downloaded release bundle, and
+- `windows/install-windows.ps1` — Windows 11 (WSL2) one-command install bootstrap: run from
+  inside the downloaded v0.7.1 source bundle; provisions WSL + Ubuntu, handles the single
+  mandatory reboot via a resume marker, copies the bundle to a canonical install target, and
   runs `install.sh` inside WSL. (Issue #61)
 - `docs/WINDOWS.md` — Windows (WSL) install guide (TLDR one-liner, reboot note,
   requirements, troubleshooting, update/uninstall).
