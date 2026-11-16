@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file. The format is b
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 This changelog covers releases **v0.4.0 through v0.6.0**. For the full history of earlier
-versions, see [Earlier releases (v0.1.0–v0.3.0)]#earlier-releases-v010v030) below.
+versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
 
 ## [v0.6.0] - 2026-11-15
 
