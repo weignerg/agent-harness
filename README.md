@@ -14,6 +14,7 @@
 - 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
 - ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
 - 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
+- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 11 WSL2 bootstrap: download the release assets into one folder and run a single command to provision WSL, extract the pinned source, and install the harness inside WSL.
 
 ---
 
@@ -188,6 +189,20 @@ Security is enabled by default (`WITH_FIREWALL=true`). The installer stages host
 # Explicitly control firewall staging:
 ./install.sh --target opencode --firewall      # Default
 ./install.sh --target opencode --no-firewall   # Bypass UFW rules
+```
+
+### Windows (WSL) — One-Command Install
+
+Install on Windows 11 (WSL2) by downloading the release assets into one folder and
+running a single command (see [docs/WINDOWS.md](docs/WINDOWS.md) for requirements,
+the reboot note, and troubleshooting):
+
+```powershell
+# 1) Download the release assets into one folder (e.g. with an authenticated gh):
+gh release download v0.7.1 -D .\agent-harness-v0.7.1
+# 2) From that folder, run the ONE command:
+cd .\agent-harness-v0.7.1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
 ---
