@@ -113,6 +113,53 @@ outcomes:
   `install.sh --no-healthcheck` so it succeeds even with systemd off; to get supervised
   services, enable WSL systemd and re-run `./install.sh` in WSL.
 
+## Guided configuration wizard + T3 completion gate (Issue-#67)
+
+When `install.sh` is run **interactively** (no `-y` / `--non-interactive`, with a
+real terminal), after the backend services are up it opens a **guided configuration
+wizard** and then a **human-confirmed T3 completion gate**. This is where the
+`OPENCODE_SERVER_USERNAME` nuance the user hit is resolved.
+
+The wizard walks through every runtime:
+
+1. **OpenCode** — shows the probed primary model (`ornith-1.5-35b`, `qwen3.8-27b` or
+   `ornith-9b`), how to pick a different profile (`--sglang-model …`), and model-weight
+   status.
+2. **Claude Code** — prompts you to confirm the MCP servers/agents installed.
+3. **Antigravity (AGY) / T3 Code** — instructs you to mint a pairing token
+   (`t3 pair` / `t3 pair --ttl 1h`) and point the provider at the local backend
+   `http://<LAN_IP>:3773`. **The installer never auto-pairs or sends a prompt.**
+4. **OpenCode server username vs. WSL auto-login** — the reconciliation below.
+
+Then the **T3 completion gate** re-checks ports 4096 (OpenCode) and 3773 (T3) and asks
+you to send one real T3 prompt and confirm it reported back as the Supreme Orchestrator.
+On `y` it prints the success banner and appends a ready-to-launch snippet to
+`~/.bashrc`. If you are not ready, answer `n` — the backend install still completes and
+you can finish the gate later by re-running `./install.sh`.
+
+> **The bootstrap (`install.sh … -y`) skips the wizard and gate** so the one-command
+> install is non-blocking. The wizard/gate run only for interactive installs.
+
+### The `OPENCODE_SERVER_USERNAME` ↔ WSL default-user cross-check
+
+The OpenCode headless server authenticates as the account systemd starts it under. In
+WSL that is the **auto-login** account declared by `wsl.conf` `[user] default=<user>`
+(the account you land in when WSL starts). If `OPENCODE_SERVER_USERNAME` differs from
+that account, remote clients (the T3 / Antigravity provider GUI, mobile app) can connect
+to port 4096 but be rejected — the username they send does not match the server's
+login.
+
+- **Interactive install:** if a mismatch is detected, `install.sh` flags it and asks
+  whether to reconcile `OPENCODE_SERVER_USERNAME` to the WSL auto-login account
+  (recommended). Your choice is honored.
+- **Non-interactive / dry-run:** the change is **not applied silently**. `install.sh`
+  prints a strong warning telling you to set `OPENCODE_SERVER_USERNAME=<WSL-default-user>`
+  in `~/.config/opencode-backends/env` (or re-run interactively) and to use that exact
+  value as the `Username` in the T3 provider GUI.
+
+If your Windows user (e.g. `JaneDoe`) differs from the Linux WSL user, this is the nuance
+that matters: set the provider `Username` to the **WSL** account, not the Windows one.
+
 ## Update
 
 Re-download the **new** release's source bundle, extract it, then from the new extracted

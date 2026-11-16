@@ -1040,9 +1040,333 @@ install_claude_global() {
 IS_NEW_SERVER_PASSWORD=false
 CURRENT_SERVER_PASSWORD=""
 CURRENT_SERVER_USERNAME=""
-PROBED_MODEL_NAME=""
-PROBED_MODEL_PATH=""
-PROBED_SERVICE_NAME=""
+# Guided per-runtime config wizard + human-confirmed T3 completion gate state (Issue-#67).
+RECONCILED_SERVER_USERNAME=""
+RECONCILIATION_STATUS="ok"   # ok | n-a | warn | mismatch | reconciled
+RECONCILIATION_NOTE=""
+T3_GATE_CONFIRMED="true"     # defaults to confirmed; the gate flips it to false only when it prompts interactively and gets a negative answer
+
+# =============================================================================
+# WSL auto-login detection + OPENCODE_SERVER_USERNAME reconciliation (Issue-#67)
+# The OpenCode headless server authenticates as the account systemd starts it
+# under. In WSL that is the auto-login account declared by wsl.conf [user]
+# default=. If OPENCODE_SERVER_USERNAME differs, the T3/Antigravity provider GUI
+# "Username" must still match that WSL account. We reconcile non-destructively.
+# =============================================================================
+
+detect_wsl() {
+    # Return 0 when running under the Windows Subsystem for Linux.
+    if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+        return 0
+    fi
+    if [ -r "/proc/device-tree/model" ] && grep -iq microsoft /proc/device-tree/model 2>/dev/null; then
+        return 0
+    fi
+    if [ -r "/proc/version" ] && grep -iq microsoft /proc/version 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+detect_wsl_default_user() {
+    # Echo the auto-login account declared by wsl.conf [user] default= (best effort).
+    # __HARNESS_WSL_CONF_PATH is a test/introspection override; production never sets
+    # it and the function auto-discovers the conf under /mnt/c otherwise.
+    local conf_path="${__HARNESS_WSL_CONF_PATH:-}"
+    if [ -z "$conf_path" ]; then
+        local candidates=()
+        local d
+        if [ -d "/mnt/c/Users" ]; then
+            for d in /mnt/c/Users/*/; do
+                candidates+=("${d%/}/wsl.conf")
+            done
+        fi
+        candidates+=("/mnt/c/Windows/wsl.conf" "/mnt/c/wsl.conf")
+        for d in "${candidates[@]}"; do
+            if [ -r "$d" ]; then
+                conf_path="$d"
+                break
+            fi
+        done
+    fi
+    [ -n "$conf_path" ] && [ -r "$conf_path" ] || return 1
+    # Parse only the [user] section; strip comments; match the key case-insensitively
+    # while preserving the original case of the value.
+    awk '
+        /^\[user\]/ { sec=1; next }
+        /^\[/       { sec=0 }
+        sec==1 {
+            line=$0
+            sub(/#.*/,"",line)                       # drop trailing comment
+            gsub(/^[ \t]+|[ \t]+$/,"",line)          # trim whole line
+            eq=index(line,"=")
+            if (eq > 0) {
+                key=substr(line,1,eq-1)
+                val=substr(line,eq+1)
+                gsub(/^[ \t]+|[ \t]+$/,"",key)
+                if (tolower(key)=="default") {
+                    gsub(/^[ \t]+|[ \t]+$/,"",val)
+                    if (val != "") { print val; exit }
+                }
+            }
+        }
+    ' "$conf_path" 2>/dev/null
+}
+
+reconcile_wsl_username() {
+    # Resolves the OPENCODE_SERVER_USERNAME to use, setting RECONCILED_SERVER_USERNAME
+    # (and RECONCILIATION_STATUS / RECONCILIATION_NOTE). UI text goes to the terminal.
+    # Non-destructive when -y/--non-interactive or --dry-run: it only warns.
+    local candidate="${1:-}"
+    RECONCILED_SERVER_USERNAME="$candidate"
+
+    if ! detect_wsl; then
+        RECONCILIATION_STATUS="n-a"
+        RECONCILIATION_NOTE=""
+        return 0
+    fi
+
+    local wsl_default=""
+    wsl_default="$(detect_wsl_default_user || true)"
+
+    if [ -z "$wsl_default" ]; then
+        RECONCILIATION_STATUS="warn"
+        RECONCILIATION_NOTE="WSL detected but no '[user] default=' found in wsl.conf; if the headless server username differs from the T3/mobile provider Username, set OPENCODE_SERVER_USERNAME to the WSL auto-login account."
+        return 0
+    fi
+
+    if [ "$wsl_default" = "$candidate" ]; then
+        RECONCILIATION_STATUS="ok"
+        RECONCILIATION_NOTE="WSL auto-login '${wsl_default}' already matches OPENCODE_SERVER_USERNAME."
+        return 0
+    fi
+
+    # Mismatch between the WSL auto-login and the OpenCode server username.
+    if [ "$NON_INTERACTIVE" = true ] || [ "$DRY_RUN" = true ]; then
+        RECONCILIATION_STATUS="mismatch"
+        RECONCILIATION_NOTE="WSL auto-login is '${wsl_default}' but OPENCODE_SERVER_USERNAME is '${candidate}'. Because the headless server authenticates as the WSL auto-login account, set OPENCODE_SERVER_USERNAME='${wsl_default}' (e.g. in ~/.config/opencode-backends/env) and use it as the Username in the T3/Antigravity provider GUI."
+        return 0
+    fi
+
+    if [ -t 0 ]; then
+        echo ""
+        echo "⚠️  WSL auto-login vs OpenCode server username mismatch"
+        echo "   WSL default user (auto-login) : ${wsl_default}"
+        echo "   Current OPENCODE_SERVER_USERNAME: ${candidate}"
+        echo "   The headless server (port 4096) authenticates as the WSL auto-login account."
+        printf "  Reconcile by setting OPENCODE_SERVER_USERNAME to '%s' (recommended) [Y/n]: " "$wsl_default"
+        local ans=""
+        read -r ans || true
+        case "$(printf '%s' "${ans:-}" | tr '[:upper:]' '[:lower:]')" in
+            n|no)
+                RECONCILIATION_STATUS="mismatch"
+                RECONCILIATION_NOTE="Kept OPENCODE_SERVER_USERNAME='${candidate}' at user request; make sure it matches the Username in the T3/Antigravity provider GUI."
+                ;;
+            *)
+                RECONCILIATION_STATUS="reconciled"
+                RECONCILIATION_NOTE="Reconciled OPENCODE_SERVER_USERNAME to WSL auto-login '${wsl_default}'."
+                candidate="$wsl_default"
+                ;;
+        esac
+    else
+        RECONCILIATION_STATUS="mismatch"
+        RECONCILIATION_NOTE="Recommending OPENCODE_SERVER_USERNAME='${wsl_default}' to match WSL auto-login. Re-run ./install.sh interactively to auto-reconcile, or set it in ~/.config/opencode-backends/env and use it as the provider Username."
+    fi
+
+    RECONCILED_SERVER_USERNAME="$candidate"
+}
+
+# =============================================================================
+# Guided per-runtime configuration wizard (Issue-#67)
+# Interactive-only guidance shown after install, before the T3 completion gate.
+# Skipped entirely in automated (-y) / dry-run paths so the bootstrap is untouched.
+# =============================================================================
+
+guided_configuration_wizard() {
+    if [ "$NON_INTERACTIVE" = true ] || [ "$DRY_RUN" = true ]; then
+        return 0
+    fi
+    if [ ! -t 0 ]; then
+        return 0
+    fi
+
+    local lan_ip
+    lan_ip="$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")"
+    lan_ip="${lan_ip:-127.0.0.1}"
+
+    echo ""
+    echo "================================================================================"
+    echo "🧭 GUIDED PER-RUNTIME CONFIGURATION CHECKLIST (Issue-#67)"
+    echo "   Review each runtime, then press Enter to proceed to the T3 completion gate."
+    echo "================================================================================"
+
+    # 1. OpenCode / primary inference model
+    echo ""
+    echo "1) OpenCode — primary inference model"
+    local disp_model="${PROBED_MODEL_NAME:-ornith-1.5-35b}"
+    local disp_path="${PROBED_MODEL_PATH:-ornith-ai/Ornith-1.5-35B-A3B-NVFP4}"
+    if [ "$WITH_BACKENDS" = true ]; then
+        echo "   • Probed model   : ${disp_model} (${disp_path})"
+        echo "   • Service unit   : ${PROBED_SERVICE_NAME:-sglang-ornith-1.5-35b.service}"
+        echo "   • Change profile by re-running with --sglang-model, choosing one of:"
+        echo "        --sglang-model ornith-35b   (Ornith-1.5-35B MoE 35b, workhorse / orchestration)"
+        echo "        --sglang-model qwen3.8-27b  (Qwen3.8-27B-NVFP4, dense 27b)"
+        echo "        --sglang-model ornith-9b    (Ornith-1.5-9b, fast leaf agent tier)"
+        if [ "$DOWNLOAD_MODELS" = true ]; then
+            echo "   • Weights        : auto-acquired (--download-models). Re-run with --no-download-models to skip."
+        fi
+    else
+        echo "   • Backend disabled (--no-backends); client loads models at runtime."
+    fi
+
+    # 2. Claude Code MCP servers
+    echo ""
+    echo "2) Claude Code — MCP servers"
+    if [ -d "$CLAUDE_HOME_DIR" ]; then
+        echo "   • Harness path   : ${CLAUDE_HOME_DIR}"
+        echo "   • Confirm your MCP servers/agents in ~/.claude before use."
+    else
+        echo "   • Claude path    : ${CLAUDE_HOME_DIR} (verify MCP registration)."
+    fi
+
+    # 3. Antigravity (AGY) / T3 Code provider wiring
+    echo ""
+    echo "3) Antigravity (AGY) / T3 Code — provider wiring"
+    echo "   • T3 unified server : http://${lan_ip}:3773  (t3-serve.service)"
+    echo "   • Mint a pairing token manually (the installer does NOT auto-pair):"
+    echo "         t3 pair            # 5-minute token + QR"
+    echo "         t3 pair --ttl 1h   # 1-hour token"
+    echo "   • Point the Antigravity provider at the local backend URL above."
+
+    # 4. OpenCode server username reconciliation vs WSL auto-login
+    echo ""
+    echo "4) OpenCode headless server username vs WSL auto-login (OPENCODE_SERVER_USERNAME)"
+    local disp_user="${CURRENT_SERVER_USERNAME:-${USER:-opencode}}"
+    echo "   • OPENCODE_SERVER_USERNAME : ${disp_user}"
+    case "${RECONCILIATION_STATUS:-n-a}" in
+        n-a)
+            echo "   • WSL not detected — no reconciliation needed."
+            ;;
+        ok|reconciled)
+            echo "   • ${RECONCILIATION_NOTE}"
+            ;;
+        warn)
+            echo "   • ${RECONCILIATION_NOTE}"
+            ;;
+        mismatch)
+            echo "   • ${RECONCILIATION_NOTE}"
+            ;;
+    esac
+    echo "   • Set the provider GUI 'Username' to exactly ${disp_user} to match the server."
+
+    echo ""
+    echo "When every item above is satisfied, press Enter to proceed to the T3 completion gate."
+    read -r _ || true
+    return 0
+}
+
+# =============================================================================
+# Human-confirmed T3 completion gate (Issue-#67)
+# No automated live-T3 prompt/token call is made. The user sends a real prompt
+# and confirms success; we only re-check ports 4096 (OpenCode) + 3773 (T3).
+# On confirmation it writes a ~/.bashrc launcher snippet and prints the success banner.
+# =============================================================================
+
+port_is_open() {
+    local host="$1" port="$2"
+    curl -s -m 3 -o /dev/null "http://${host}:${port}" 2>/dev/null
+}
+
+write_launcher_snippet() {
+    # Append a guarded, idempotent launcher note to an absolute bashrc path only.
+    local resolved="${LAUNCHER_SNIPPET_PATH:-${USER_HOME:-$HOME}/.bashrc}"
+    case "$resolved" in
+        /*) ;;
+        *) return 0 ;;        # only write to an absolute path
+    esac
+    case "$resolved" in
+        /proc/*|/sys/*|/dev/*) return 0 ;;
+    esac
+    local marker="# >>> agent-harness launcher (Issue-#67) >>>"
+    if [ -f "$resolved" ] && grep -qF "$marker" "$resolved" 2>/dev/null; then
+        return 0           # already installed — leave the user's file untouched
+    fi
+    if [ -d "$(dirname "$resolved" 2>/dev/null)" ] 2>/dev/null; then
+        {
+            printf '\n'
+            cat <<'EOF'
+# >>> agent-harness launcher (Issue-#67) >>>
+# Agent Harness readiness note. On the next WSL shell your client is ready.
+# OpenCode headless server: http://$(hostname -I 2>/dev/null | awk '{print $1}'):4096
+# Server Username/Password : see ~/.config/opencode-backends/env
+# Launch your client:       opencode | claude | agy | t3
+# <<< agent-harness launcher <<<
+EOF
+        } >> "$resolved" 2>/dev/null || true
+    fi
+}
+
+human_confirmed_t3_gate() {
+    T3_GATE_CONFIRMED="true"   # default: nothing to block (automated path / T3 off)
+
+    # The gate is only meaningful when the T3 unified server is in scope.
+    if [ "$ENABLE_T3_SERVE" = false ]; then
+        return 0
+    fi
+    if [ "$DRY_RUN" = true ] || [ "$NON_INTERACTIVE" = true ] || [ ! -t 0 ]; then
+        return 0
+    fi
+
+    # Basic health re-check of the two gates permitted by the spec.
+    local ok_4096=false ok_3773=false
+    if port_is_open 127.0.0.1 4096; then ok_4096=true; fi
+    if port_is_open 127.0.0.1 3773; then ok_3773=true; fi
+
+    echo ""
+    echo "================================================================================"
+    echo "🎯 T3 COMPLETION GATE (human-confirmed — no automated prompt is sent)"
+    echo "================================================================================"
+    echo "   OpenCode server 4096 : $([ "$ok_4096" = true ] && echo "reachable" || echo "NOT reachable")"
+    echo "   T3 server      3773  : $([ "$ok_3773" = true ] && echo "reachable" || echo "NOT reachable")"
+    echo "   Model                : ${PROBED_MODEL_NAME:-ornith-1.5-35b}"
+    echo ""
+    echo "   ACTION FOR YOU:"
+    echo "   1. In the T3/Antigravity client, send ONE prompt to the local backend."
+    echo "   2. Confirm it reported as the Supreme Orchestrator (harness context +"
+    echo "      tools loaded, model warmed, and a real reply)."
+    echo ""
+
+    if [ "$ok_4096" != true ] || [ "$ok_3773" != true ]; then
+        echo "   ⚠️  One or more required ports are not reachable. SGLang can take minutes to"
+        echo "      load weights into VRAM. Re-run this installer after the services are up"
+        echo "      before completing the gate."
+        return 0
+    fi
+
+    printf "   Have you sent a real T3 prompt and received a real response? [y/N]: "
+    local answer=""
+    read -r answer || true
+    case "$(printf '%s' "${answer:-}" | tr '[:upper:]' '[:lower:]')" in
+        y|yes)
+            write_launcher_snippet
+            echo ""
+            echo "================================================================================"
+            echo "✅ SUCCESS — T3 completion gate confirmed"
+            echo "   Your local harness is live: SGLang (${PROBED_MODEL_NAME:-ornith-1.5-35b}) is the"
+            echo "   inference engine and this machine is the Supreme Orchestrator."
+            echo "   A launcher snippet was written to ${LAUNCHER_SNIPPET_PATH:-${USER_HOME:-$HOME}/.bashrc}."
+            echo "================================================================================"
+            T3_GATE_CONFIRMED="true"
+            ;;
+        *)
+            T3_GATE_CONFIRMED="false"
+            echo ""
+            echo "⏳ Completion gate pending your confirmation. When ready, re-run"
+            echo "   ./install.sh (interactively) and answer 'y' after your first T3 prompt."
+            ;;
+    esac
+    return 0
+}
 
 setup_backend_environment() {
     local backend_env_dir="$1"
@@ -1073,11 +1397,14 @@ setup_backend_environment() {
         [ -n "$token_val" ] && export HF_TOKEN="$token_val"
     fi
 
-    # OPENCODE_SERVER_USERNAME handling
+    # OPENCODE_SERVER_USERNAME handling (reconcile with WSL auto-login when applicable)
     local user_val="${OPENCODE_SERVER_USERNAME:-${existing_user}}"
     if [ -z "$user_val" ]; then
         user_val="${USER:-opencode}"
     fi
+    # Non-destructive: in automated/dry-run paths reconcile_wsl_username only warns.
+    reconcile_wsl_username "$user_val"
+    user_val="${RECONCILED_SERVER_USERNAME:-$user_val}"
     CURRENT_SERVER_USERNAME="$user_val"
 
     # OPENCODE_SERVER_PASSWORD handling
@@ -1541,6 +1868,9 @@ print_completion_summary() {
         echo "📡 Server Endpoints & Launch Commands:"
         echo "   OpenCode Headless Server : http://${lan_ip}:4096 [${server_svc_status}]"
         echo "                              username: ${user_display} | password: ${pass_display}"
+        if [ "${RECONCILIATION_STATUS:-n-a}" != "n-a" ] && [ "${RECONCILIATION_STATUS:-n-a}" != "ok" ]; then
+            echo "   ⚠️  ${RECONCILIATION_NOTE}"
+        fi
         echo "   T3 Code Unified Server   : http://${lan_ip}:3773 [${t3_svc_status}]"
         echo "   SGLang Inference Server  : http://127.0.0.1:30000/v1 [${sglang_svc_status}]"
         echo "   Antigravity Remote       : agy remote-control start"
@@ -3179,9 +3509,16 @@ EOF
         fi
         warmup_sglang_service
         verify_backend_healthchecks
+        guided_configuration_wizard
+        human_confirmed_t3_gate
         print_pending_sudo_summary
         print_completion_summary
-        echo "🎉 Local Agent Harness installation complete!"
+        if [ "$T3_GATE_CONFIRMED" = true ]; then
+            echo "🎉 Local Agent Harness installation complete!"
+        else
+            echo "⏳ Backend services installed; the guided T3 completion gate is pending your"
+            echo "   confirmation. Re-run ./install.sh interactively to finish, or confirm it from the dashboard above."
+        fi
     else
         manifest_file="${USER_HOME}/.orchestration/install_manifest.json"
         if [ "$DRY_RUN" = true ]; then
@@ -3251,9 +3588,16 @@ EOF
         fi
         warmup_sglang_service
         verify_backend_healthchecks
+        guided_configuration_wizard
+        human_confirmed_t3_gate
         print_pending_sudo_summary
         print_completion_summary
-        echo "🎉 Global Agent Harness installation complete!"
+        if [ "$T3_GATE_CONFIRMED" = true ]; then
+            echo "🎉 Global Agent Harness installation complete!"
+        else
+            echo "⏳ Backend services installed; the guided T3 completion gate is pending your"
+            echo "   confirmation. Re-run ./install.sh interactively to finish, or confirm it from the dashboard above."
+        fi
     fi
 }
 
