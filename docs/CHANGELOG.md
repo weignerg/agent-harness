@@ -4,8 +4,23 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.6.0**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.1**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.1] - 2026-11-16
+
+### Added
+- `windows/install-windows.ps1` — Windows 11 (WSL2) one-command install bootstrap: run from
+  inside the downloaded v0.7.1 source bundle; provisions WSL + Ubuntu, handles the single
+  mandatory reboot via a resume marker, copies the bundle to a canonical install target, and
+  runs `install.sh` inside WSL. (Issue #61)
+- `docs/WINDOWS.md` — Windows (WSL) install guide (TLDR one-liner, reboot note,
+  requirements, troubleshooting, update/uninstall).
+- `README.md` — "Windows (WSL) — PowerShell One-Command Install" quick-start section
+  + documentation pointer.
+
+### Changed
+- Version bump `0.6.0` → `0.7.1`.
 
 ## [v0.6.0] - 2026-11-15
 
