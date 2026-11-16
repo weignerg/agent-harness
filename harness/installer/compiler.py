@@ -47,11 +47,28 @@ def compile_opencode_frontmatter(
         tools_yaml.append(f"    {k}: {'true' if v else 'false'}")
     tools_block = "\n".join(tools_yaml)
 
+    # Durable role options (e.g. variant: "high"). Emitted as a frontmatter block so the
+    # value survives compile: extract_body() strips all raw frontmatter, so a hand-added
+    # option would otherwise be lost and the deployed copy would go stale.
+    option_lines = []
+    options = meta.get("options")
+    if options:
+        option_lines.append("options:")
+        for _opt_key, _opt_val in options.items():
+            if isinstance(_opt_val, bool):
+                _opt_value = "true" if _opt_val else "false"
+            else:
+                _opt_value = str(_opt_val)
+            option_lines.append(f"  {_opt_key}: {_opt_value}")
+
     lines = [
         "---",
         f'description: "{desc}"',
         f"mode: {mode}",
         f"model: {model}",
+    ]
+    lines.extend(option_lines)
+    lines += [
         "tools:",
         tools_block,
         "permission:",
