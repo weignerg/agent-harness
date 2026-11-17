@@ -108,10 +108,12 @@ outcomes:
   extract it, and run **its** copy of `windows\install-windows.ps1`.
 - **GPU not detected in WSL:** make sure the NVIDIA driver is installed on the Windows side
   (WSL2 auto-passthrough); no action is needed inside WSL.
-- **systemd note:** supervised auto-start services require WSL systemd (opt-in, e.g.
-  `init.systemd=true` in `~/.wslconfig` + `wsl --shutdown`). The bootstrap runs
-  `install.sh --no-healthcheck` so it succeeds even with systemd off; to get supervised
-  services, enable WSL systemd and re-run `./install.sh` in WSL.
+- **systemd note:** the bootstrap writes `[boot] systemd=true` into `/etc/wsl.conf`
+  (alongside `[user] default=<user>`) and issues `wsl --shutdown`, so WSL systemd is on
+  by default. Supervised auto-start services therefore start on WSL's next launch — no
+  manual `~/.wslconfig` edit is required. Because systemd is on, the bootstrap runs
+  `install.sh` *without* `--no-healthcheck`, so the systemd user-service healthcheck
+  runs and verifies supervised completion.
 
 ## Update
 
@@ -134,11 +136,12 @@ release source bundle is the update medium.)
 
 The bootstrap runs (inside WSL):
 ```bash
-./install.sh --global --target all --with-backends --no-firewall --no-obsidian --no-healthcheck --skip-warmup -y
+./install.sh --global --target all --with-backends --no-firewall --no-obsidian --skip-warmup -y
 ```
 - `--no-firewall` — WSL has no ufw/iptables; avoids sudo noise.
 - `--no-obsidian` — pacman/flatpak-only → no-op on Ubuntu.
-- `--no-healthcheck` — `install.sh` hard-exits when systemd user-services are not managed,
-  which is the default on fresh WSL.
+- (healthcheck now enabled) — because `/etc/wsl.conf` sets `[boot] systemd=true`,
+  `install.sh`'s systemd user-service healthcheck runs and verifies the supervised
+  services, instead of being suppressed.
 - `--skip-warmup` — avoids a long blocking model download in a one-command bootstrap (warm up later).
 - `--global --target all --with-backends -y` — keeps the full harness + GPU backends.
