@@ -154,12 +154,23 @@ function Get-InstalledDistro {
                   | ForEach-Object { $_ -replace '\?\s*$','' }          # ignore trailing "?"
                   | Where-Object { $_ -and $_ -notmatch '^(NAME|Version|version|Downloading|Installing|---|—|)$' }
 
+    # Match each row's instance NAME = the first whitespace-delimited token (the distro
+    # column), stripping surrounding double quotes from a quoted/renamed instance. Exact
+    # token match wins; a case-insensitive substring match is kept only as a lenient
+    # fallback so a distro name that the user configured is never missed (no false
+    # negative). NOTE: this means "Ubuntu" still matches a renamed "Ubuntu-22.04"; that is
+    # the intentional lenient behavior called for by the kickoff.
+    $tokens = foreach ($n in $names) {
+        $tok = ($n -split '\s+', 2)[0]               # instance name = first column token
+        if ($tok -match '^"(.*)"$') { $tok = $Matches[1] }  # strip surrounding quotes
+        $tok
+    }
     # Pass 1: exact (case-insensitive) instance-name match.
-    foreach ($n in $names) { if ($n -ieq $Dist) { $present = $true; break } }
-    # Pass 2: case-insensitive substring match is AUTHORITATIVE (kickoff), only if no exact hit.
+    foreach ($t in $tokens) { if ($t -ieq $Dist) { $present = $true; break } }
+    # Pass 2: lenient case-insensitive substring fallback, only if no exact hit.
     if (-not $present) {
-        foreach ($n in $names) {
-            if ($n.IndexOf($Dist, [StringComparison]::InvariantCultureIgnoreCase) -ge 0) { $present = $true; break }
+        foreach ($t in $tokens) {
+            if ($t.IndexOf($Dist, [StringComparison]::InvariantCultureIgnoreCase) -ge 0) { $present = $true; break }
         }
     }
 
@@ -203,7 +214,10 @@ function Register-WslInstallResume {
         $act   = New-ScheduledTaskAction  -Execute $psBin -Argument $arg -WorkingDirectory $BundleRoot
         $trig  = New-ScheduledTaskTrigger  -AtLogOn
         $user  = ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
-        $princ = New-ScheduledTaskPrincipal -UserId $user -RunLevel Highest -RequirePrivilege $false
+        # -RunLevel Highest is the canonical privilege; New-ScheduledTaskPrincipal has no
+        # -RequirePrivilege parameter, so omit it (passing it threw and silently skipped
+        # registration, defeating the post-reboot auto-resume feature).
+        $princ = New-ScheduledTaskPrincipal -UserId $user -RunLevel Highest
         Register-ScheduledTask -TaskName $name -Action $act -Trigger $trig `
                                -Principal $princ -Description "Resume agent-harness WSL install after login." `
                                -Force | Out-Null
@@ -265,7 +279,7 @@ Write-Ok "Running with administrator privileges."
 # ---------------------------------------------------------------
 $featState = Get-WslFeatureState
 $hasDistro = Get-InstalledDistro
-Write-Step ("WSL feature state: " + $featState + " ; " + $Dist + " present: " + $hasDistro + " ; state marker: '" + (Read-State) + "'")
+Write-Step ("WSL feature state: " + $featState + " ; " + $Dist + " present: " + $hasDistro.present + " ; " + $hasDistro.status + " ; state marker: '" + (Read-State) + "'")
 
 if ($featState -eq "Disabled") {
     # CASE A - Fresh: enable WSL feature + install the distro; a reboot is required to finish.
@@ -291,7 +305,7 @@ elseif ($featState -eq "Enabled (Pending Reboot)" -or $featState -eq "Disabled (
 }
 else {
     # featState == "Enabled"
-    if (-not $hasDistro) {
+    if (-not $hasDistro.present) {
         # CASE C - WSL enabled, but the distro is not installed yet.
         Write-Step "WSL is enabled; installing the $Dist distro..."
         $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
@@ -367,8 +381,11 @@ if (-not $userExists -and (-not $Quiet)) {
         try {
             $pwFile = Join-Path $env:TEMP ("agent-harness-pw-" + [Guid]::NewGuid().ToString("N"))
             [File]::WriteAllText($pwFile, [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b))
+            # Resolve the Windows-side temp path to the WSL view so the bash payload below
+            # (running inside WSL) can actually locate and read the staged password.
+            $pwFileWsl = Convert-WindowsToWslPath $pwFile
         } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBString($b) }
-        $pwInject = "; [ -f '$pwFile' ] && chmod 600 '$pwFile' && chpasswd < '$pwFile'; rm -f '$pwFile'; "
+        $pwInject = "; [ -f '$pwFileWsl' ] && chmod 600 '$pwFileWsl' && chpasswd < '$pwFileWsl'; rm -f '$pwFileWsl'; "
     }
     $s = Read-Host "Give '$safeUser' passwordless sudo? [y/N]"
     $sudoOK = (-not [bool]$NoSudo) -and ($s -and $s.Trim().ToLower() -eq 'y')

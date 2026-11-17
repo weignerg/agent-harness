@@ -101,8 +101,8 @@ AssertTest "5 present (quoted/renamed)" ($r.present -eq $true)
 $r = Get-InstalledDistro -RawOutput $sample6
 AssertTest "6 present (case-insensitive)" ($r.present -eq $true)
 
-# 7) Other distro only -> Ubuntu absent. (.present is authoritative; the
-#    missing flag is int 0 here because it falls through the final return.)
+# 7) Other distro only -> Ubuntu absent. (.present is authoritative;
+#    missing is (-$present); a bool. The suite asserts .present explicitly.)
 $r = Get-InstalledDistro -RawOutput $sample7
 AssertTest "7 present == false" ($r.present -eq $false)
 AssertTest "7 absent (Ubuntu not listed)" (-not $r.present)
@@ -110,6 +110,19 @@ AssertTest "7 absent (Ubuntu not listed)" (-not $r.present)
 # 8) Trailing-marker + version column; literal "Ubuntu" row present.
 $r = Get-InstalledDistro -RawOutput $sample8
 AssertTest "8 present (literal Ubuntu row)" ($r.present -eq $true)
+
+# 9) Negative test (Debian only): no Ubuntu row at all -> Ubuntu is absent.
+#    A distro listed here that is not Ubuntu must NOT report present=true.
+$sampleDebian = "*? Debian  Running  1"
+$r = Get-InstalledDistro -RawOutput $sampleDebian
+AssertTest "9 Debian only -> Ubuntu absent" ($r.present -eq $false)
+
+# 10) Lenient test (documented kickoff behavior): a distro NAME is never missed.
+#     "Ubuntu" is a substring of the renamed "Ubuntu-22.04" instance, so the
+#     lenient substring fallback intentionally reports present=true.
+$sampleU22 = "*? Ubuntu-22.04  Running  2"
+$r = Get-InstalledDistro -RawOutput $sampleU22
+AssertTest "10 Ubuntu-22.04 -> Ubuntu lenient present" ($r.present -eq $true)
 
 # ---------------------------------------------------------------------------
 # Static source checks against install-windows.ps1.
