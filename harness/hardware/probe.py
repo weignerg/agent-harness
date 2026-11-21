@@ -200,6 +200,8 @@ def estimate_vram_from_name(name: str) -> int:
         return 40960
     if "5090" in n:
         return 32768
+    if "4090" in n and "LAPTOP" in n:
+        return 16384
     if "4090" in n or "3090" in n:
         return 24576
     if "5080" in n or "5070 TI" in n or "4080" in n or "T4" in n:

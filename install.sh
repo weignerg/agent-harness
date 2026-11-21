@@ -102,6 +102,10 @@ ENABLE_T3_SERVE="${ENABLE_T3_SERVE:-true}"
 EXPLICIT_WITH_T3=false
 EXPLICIT_NO_T3=false
 T3_SERVE_WORKDIR="${T3_SERVE_WORKDIR:-}"
+SGLANG_MODEL_EXPLICIT=false
+if [ -n "${SGLANG_MODEL:-}" ]; then
+    SGLANG_MODEL_EXPLICIT=true
+fi
 SGLANG_MODEL="${SGLANG_MODEL:-ornith-35b}"
 
 SYSTEMD_UNITS=(
@@ -121,6 +125,7 @@ PROBED_MODEL_PATH=""
 PROBED_SERVICE_NAME=""
 PROBED_CONTEXT_LENGTH=""
 PROBED_MEM_FRACTION=""
+SGLANG_LOCAL_UNSUPPORTED_REASON=""
 
 show_help() {
     cat << 'EOF'
@@ -272,10 +277,12 @@ while [[ $# -gt 0 ]]; do
             ;;
         --sglang-model)
             SGLANG_MODEL="$2"
+            SGLANG_MODEL_EXPLICIT=true
             shift 2
             ;;
         --sglang-model=*)
             SGLANG_MODEL="${1#*=}"
+            SGLANG_MODEL_EXPLICIT=true
             shift
             ;;
         --systemd|--with-systemd)
@@ -1195,82 +1202,80 @@ guided_configuration_wizard() {
     lan_ip="$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")"
     lan_ip="${lan_ip:-127.0.0.1}"
 
-    echo ""
-    echo "================================================================================"
-    echo "🧭 GUIDED PER-RUNTIME CONFIGURATION CHECKLIST (Issue-#67)"
-    echo "   Review each runtime, then press Enter to proceed to the T3 completion gate."
-    echo "================================================================================"
-
-    # 1. OpenCode / primary inference model
-    echo ""
-    echo "1) OpenCode — primary inference model"
-    local disp_model="${PROBED_MODEL_NAME:-ornith-1.5-35b}"
-    local disp_path="${PROBED_MODEL_PATH:-ornith-ai/Ornith-1.5-35B-A3B-NVFP4}"
-    if [ "$WITH_BACKENDS" = true ]; then
-        echo "   • Probed model   : ${disp_model} (${disp_path})"
-        echo "   • Service unit   : ${PROBED_SERVICE_NAME:-sglang-ornith-1.5-35b.service}"
-        echo "   • Change profile by re-running with --sglang-model, choosing one of:"
-        echo "        --sglang-model ornith-35b   (Ornith-1.5-35B MoE 35b, workhorse / orchestration)"
-        echo "        --sglang-model qwen3.8-27b  (Qwen3.8-27B-NVFP4, dense 27b)"
-        echo "        --sglang-model ornith-9b    (Ornith-1.5-9b, fast leaf agent tier)"
-        if [ "$DOWNLOAD_MODELS" = true ]; then
-            echo "   • Weights        : auto-acquired (--download-models). Re-run with --no-download-models to skip."
-        fi
-    else
-        echo "   • Backend disabled (--no-backends); client loads models at runtime."
-    fi
-
-    # 2. Claude Code MCP servers
-    echo ""
-    echo "2) Claude Code — MCP servers"
-    if [ -d "$CLAUDE_HOME_DIR" ]; then
-        echo "   • Harness path   : ${CLAUDE_HOME_DIR}"
-        echo "   • Confirm your MCP servers/agents in ~/.claude before use."
-    else
-        echo "   • Claude path    : ${CLAUDE_HOME_DIR} (verify MCP registration)."
-    fi
-
-    # 3. Antigravity (AGY) / T3 Code provider wiring
-    echo ""
-    echo "3) Antigravity (AGY) / T3 Code — provider wiring"
-    echo "   • T3 unified server : http://${lan_ip}:3773  (t3-serve.service)"
-    echo "   • Mint a pairing token manually (the installer does NOT auto-pair):"
-    echo "         t3 pair            # 5-minute token + QR"
-    echo "         t3 pair --ttl 1h   # 1-hour token"
-    echo "   • Point the Antigravity provider at the local backend URL above."
-
-    # 4. OpenCode server username reconciliation vs WSL auto-login
-    echo ""
-    echo "4) OpenCode headless server username vs WSL auto-login (OPENCODE_SERVER_USERNAME)"
     local disp_user="${CURRENT_SERVER_USERNAME:-${USER:-opencode}}"
-    echo "   • OPENCODE_SERVER_USERNAME : ${disp_user}"
-    case "${RECONCILIATION_STATUS:-n-a}" in
-        n-a)
-            echo "   • WSL not detected — no reconciliation needed."
-            ;;
-        ok|reconciled)
-            echo "   • ${RECONCILIATION_NOTE}"
-            ;;
-        warn)
-            echo "   • ${RECONCILIATION_NOTE}"
-            ;;
-        mismatch)
-            echo "   • ${RECONCILIATION_NOTE}"
-            ;;
-    esac
-    echo "   • Set the provider GUI 'Username' to exactly ${disp_user} to match the server."
+    local env_file="${USER_HOME}/.config/opencode-backends/env"
+    local disp_pass=""
+    if [ -f "$env_file" ]; then
+        disp_pass="$(grep -E '^OPENCODE_SERVER_PASSWORD=' "$env_file" 2>/dev/null | head -n 1 | cut -d= -f2- || true)"
+    fi
+
+    local is_wsl=false
+    if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ]; then
+        is_wsl=true
+    fi
 
     echo ""
-    echo "When every item above is satisfied, press Enter to proceed to the T3 completion gate."
-    read -r _ || true
+    echo "================================================================================"
+    echo "🧭 NEXT STEPS: LOG IN TO T3 CODE & VERIFY YOUR SETUP"
+    echo "================================================================================"
+    echo ""
+    echo "Follow these 4 steps while this installer waits:"
+    echo ""
+    echo "  Step 1 — Open T3 Code in your browser:"
+    echo "      Local (this computer) : http://localhost:3773"
+    if [ "$lan_ip" != "127.0.0.1" ]; then
+        echo "      LAN (other devices)   : http://${lan_ip}:3773"
+    fi
+    echo ""
+    echo "  Step 2 — Pair / Log in to T3 Code:"
+    local resolved_t3_bin=""
+    for _t3_cand in "${USER_HOME}/.local/bin/t3" "${USER_HOME}/.bun/bin/t3" "$(command -v t3 2>/dev/null || true)"; do
+        if [ -n "$_t3_cand" ] && [ -x "$_t3_cand" ]; then
+            resolved_t3_bin="$_t3_cand"
+            break
+        fi
+    done
+    if [ -n "$resolved_t3_bin" ] && port_is_open 127.0.0.1 3773; then
+        echo "      Generating a 1-hour T3 Code pairing link & QR code for you now..."
+        echo ""
+        "$resolved_t3_bin" pair --ttl 1h || true
+        echo ""
+        echo "      Scan the QR code OR paste the pairing link/code above into T3 Code."
+    else
+        echo "      Run 't3 pair --ttl 1h' once t3-serve is running, then scan the QR code"
+        echo "      or paste the pairing link/code into T3 Code."
+    fi
+    if [ "$is_wsl" = true ]; then
+        echo "      (To generate a new pairing code in the future, run: wsl -e bash -lc 't3 pair --ttl 1h')"
+    else
+        echo "      (To generate a new pairing code in the future, run: t3 pair --ttl 1h)"
+    fi
+    echo ""
+    echo "  Step 3 — OpenCode backend credentials (used by T3 Code behind the scenes):"
+    echo "      Server URL : http://127.0.0.1:4096"
+    echo "      Username   : ${disp_user}"
+    if [ -n "$disp_pass" ]; then
+        echo "      Password   : ${disp_pass}"
+    else
+        echo "      Password   : see ${env_file} (OPENCODE_SERVER_PASSWORD)"
+    fi
+    if [ -n "${RECONCILIATION_NOTE:-}" ] && [ "${RECONCILIATION_STATUS:-n-a}" != "n-a" ]; then
+        echo "      WSL Note   : ${RECONCILIATION_NOTE}"
+    fi
+    echo "      (If T3 Code asks for OpenCode server credentials, enter the URL, Username,"
+    echo "       and Password above.)"
+    echo ""
+    echo "  Step 4 — Send one test message in T3 Code:"
+    echo "      Start a new thread in T3 Code and send a short message (e.g. 'hello')"
+    echo "      to confirm T3 Code + OpenCode reply normally."
     return 0
 }
 
 # =============================================================================
-# Human-confirmed T3 completion gate (Issue-#67)
-# No automated live-T3 prompt/token call is made. The user sends a real prompt
-# and confirms success; we only re-check ports 4096 (OpenCode) + 3773 (T3).
-# On confirmation it writes a ~/.bashrc launcher snippet and prints the success banner.
+# Human-confirmed T3 verification step
+# No automated live-T3 prompt/token call is made. The user logs into T3 Code,
+# sends one test message, and confirms success; we only re-check ports 4096
+# (OpenCode) + 3773 (T3). On confirmation it writes a ~/.bashrc launcher note.
 # =============================================================================
 
 port_is_open() {
@@ -1318,34 +1323,30 @@ human_confirmed_t3_gate() {
         return 0
     fi
 
-    # Basic health re-check of the two gates permitted by the spec.
+    # Live re-check of the two required backend ports (4096 OpenCode + 3773 T3).
     local ok_4096=false ok_3773=false
     if port_is_open 127.0.0.1 4096; then ok_4096=true; fi
     if port_is_open 127.0.0.1 3773; then ok_3773=true; fi
 
     echo ""
-    echo "================================================================================"
-    echo "🎯 T3 COMPLETION GATE (human-confirmed — no automated prompt is sent)"
-    echo "================================================================================"
-    echo "   OpenCode server 4096 : $([ "$ok_4096" = true ] && echo "reachable" || echo "NOT reachable")"
-    echo "   T3 server      3773  : $([ "$ok_3773" = true ] && echo "reachable" || echo "NOT reachable")"
-    echo "   Model                : ${PROBED_MODEL_NAME:-ornith-1.5-35b}"
-    echo ""
-    echo "   ACTION FOR YOU:"
-    echo "   1. In the T3/Antigravity client, send ONE prompt to the local backend."
-    echo "   2. Confirm it reported as the Supreme Orchestrator (harness context +"
-    echo "      tools loaded, model warmed, and a real reply)."
-    echo ""
+    echo "--------------------------------------------------------------------------------"
+    echo "Service Readiness Check:"
+    echo "  • T3 Code UI (port 3773)      : $([ "$ok_3773" = true ] && echo "READY (http://localhost:3773)" || echo "NOT reachable")"
+    echo "  • OpenCode server (port 4096) : $([ "$ok_4096" = true ] && echo "READY (http://127.0.0.1:4096)" || echo "NOT reachable")"
+    echo "--------------------------------------------------------------------------------"
 
     if [ "$ok_4096" != true ] || [ "$ok_3773" != true ]; then
         T3_GATE_CONFIRMED="false"
-        echo "   ⚠️  One or more required ports are not reachable. SGLang can take minutes to"
-        echo "      load weights into VRAM. Re-run this installer after the services are up"
-        echo "      before completing the gate."
+        echo ""
+        echo "  ⚠️  One or more required services are not reachable yet:"
+        [ "$ok_3773" != true ] && echo "      - Check T3 Code logs  : journalctl --user -u t3-serve.service -n 30 --no-pager"
+        [ "$ok_4096" != true ] && echo "      - Check OpenCode logs : journalctl --user -u opencode-server.service -n 30 --no-pager"
+        echo "      Once both services are running, re-run ./install.sh to confirm."
         return 0
     fi
 
-    printf "   Have you sent a real T3 prompt and received a real response? [y/N]: "
+    echo ""
+    printf "Have you logged into T3 Code and received a reply to your test message? [y/N]: "
     local answer=""
     read -r answer || true
     case "$(printf '%s' "${answer:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -1353,18 +1354,16 @@ human_confirmed_t3_gate() {
             write_launcher_snippet
             echo ""
             echo "================================================================================"
-            echo "✅ SUCCESS — T3 completion gate confirmed"
-            echo "   Your local harness is live: SGLang (${PROBED_MODEL_NAME:-ornith-1.5-35b}) is the"
-            echo "   inference engine and this machine is the Supreme Orchestrator."
-            echo "   A launcher snippet was written to ${LAUNCHER_SNIPPET_PATH:-${USER_HOME:-$HOME}/.bashrc}."
+            echo "✅ SETUP CONFIRMED — T3 Code & OpenCode are live!"
+            echo "   Launcher note added to ${LAUNCHER_SNIPPET_PATH:-${USER_HOME:-$HOME}/.bashrc}."
             echo "================================================================================"
             T3_GATE_CONFIRMED="true"
             ;;
         *)
             T3_GATE_CONFIRMED="false"
             echo ""
-            echo "⏳ Completion gate pending your confirmation. When ready, re-run"
-            echo "   ./install.sh (interactively) and answer 'y' after your first T3 prompt."
+            echo "⏳ No problem — your services are running in the background."
+            echo "   Open http://localhost:3773 and run 't3 pair --ttl 1h' whenever you're ready."
             ;;
     esac
     return 0
@@ -1388,15 +1387,35 @@ setup_backend_environment() {
     if [ -f "$env_file" ]; then
         existing_pass="$(grep -E '^OPENCODE_SERVER_PASSWORD=' "$env_file" 2>/dev/null | cut -d= -f2- || true)"
         existing_user="$(grep -E '^OPENCODE_SERVER_USERNAME=' "$env_file" 2>/dev/null | cut -d= -f2- || true)"
-        existing_token="$(grep -E '^HF_TOKEN=' "$env_file" 2>/dev/null | cut -d= -f2- || true)"
+        existing_token="$(grep -E '^HF_TOKEN=' "$env_file" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r\n"'\''' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
     fi
 
-    # HF_TOKEN handling: prompt if unset & interactive
+    # HF_TOKEN handling: prompt with clear setup instructions ONLY if not already set
     local token_val="${HF_TOKEN:-${existing_token}}"
+    token_val="$(printf '%s' "${token_val}" | tr -d '\r\n"'\''' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    local token_was_prompted=false
     if [ -z "$token_val" ] && [ -t 0 ] && [ "$NON_INTERACTIVE" != true ]; then
-        read -r -p "Enter Hugging Face access token (HF_TOKEN) [optional, press Enter to skip]: " input_token || true
-        token_val="${input_token:-}"
-        [ -n "$token_val" ] && export HF_TOKEN="$token_val"
+        echo ""
+        echo "================================================================================"
+        echo "🤗 HUGGING FACE ACCESS TOKEN (HF_TOKEN)"
+        echo "================================================================================"
+        echo "A free Hugging Face account + Read token lets this installer download local"
+        echo "LLM weights (including gated models) faster and without rate limits."
+        echo ""
+        echo "  1. Create a free account (or sign in) at:"
+        echo "       https://huggingface.co/join"
+        echo "  2. Open your Access Tokens page:"
+        echo "       https://huggingface.co/settings/tokens"
+        echo "  3. Click '+ Create new token' -> select 'Read' -> give it any name"
+        echo "     (e.g. 'agent-harness') -> click 'Create token'."
+        echo "  4. Copy the token (starts with 'hf_...') and paste it below."
+        echo ""
+        read -r -p "Paste your Hugging Face token (hf_...) [or press Enter to skip]: " input_token || true
+        token_val="$(printf '%s' "${input_token:-}" | tr -d '\r\n"'\''' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -n "$token_val" ]; then
+            export HF_TOKEN="$token_val"
+            token_was_prompted=true
+        fi
     fi
 
     # OPENCODE_SERVER_USERNAME handling (reconcile with WSL auto-login when applicable)
@@ -1453,15 +1472,16 @@ GEMINI_API_KEY=${GEMINI_API_KEY:-}
 OPENAI_API_KEY=${OPENAI_API_KEY:-}
 EOF
         chmod 0600 "$env_file"
+        if [ -n "$token_val" ] && [ "$token_was_prompted" = true ]; then
+            echo "  ✅ Saved HF_TOKEN to ${env_file}"
+        fi
     else
-        for var_name in HF_TOKEN ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; do
+        for var_name in ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY OPENCODE_SERVER_USERNAME OPENCODE_SERVER_PASSWORD; do
             val="${!var_name:-}"
             if [ "$var_name" = "OPENCODE_SERVER_PASSWORD" ]; then
                 val="$pass_val"
             elif [ "$var_name" = "OPENCODE_SERVER_USERNAME" ]; then
                 val="$user_val"
-            elif [ "$var_name" = "HF_TOKEN" ] && [ -n "$token_val" ]; then
-                val="$token_val"
             fi
             if [ -n "$val" ]; then
                 if grep -sq "^${var_name}=$" "$env_file"; then
@@ -1471,14 +1491,37 @@ EOF
                         sed -i "s|^OPENCODE_SERVER_PASSWORD=.*|OPENCODE_SERVER_PASSWORD=${pass_val}|" "$env_file"
                     elif [ "$var_name" = "OPENCODE_SERVER_USERNAME" ] && [ -n "$user_val" ]; then
                         sed -i "s|^OPENCODE_SERVER_USERNAME=.*|OPENCODE_SERVER_USERNAME=${user_val}|" "$env_file"
-                    elif [ "$var_name" = "HF_TOKEN" ] && [ -n "$token_val" ]; then
-                        sed -i "s|^HF_TOKEN=.*|HF_TOKEN=${token_val}|" "$env_file"
                     fi
                 elif ! grep -sq "^${var_name}=" "$env_file"; then
                     printf '%s=%s\n' "$var_name" "$val" >> "$env_file"
                 fi
             fi
         done
+        if [ -n "$token_val" ]; then
+            python3 -c '
+import sys
+path, tok = sys.argv[1], sys.argv[2]
+lines = []
+with open(path, "r", encoding="utf-8", errors="ignore") as f:
+    lines = f.readlines()
+out = []
+updated = False
+for line in lines:
+    if line.startswith("HF_TOKEN="):
+        if not updated:
+            out.append(f"HF_TOKEN={tok}\n")
+            updated = True
+    else:
+        out.append(line)
+if not updated:
+    out.append(f"HF_TOKEN={tok}\n")
+with open(path, "w", encoding="utf-8") as f:
+    f.writelines(out)
+' "$env_file" "$token_val"
+            if [ "$token_was_prompted" = true ]; then
+                echo "  ✅ Saved HF_TOKEN to ${env_file}"
+            fi
+        fi
         for fallback_var in ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY; do
             if ! grep -sq "^${fallback_var}=" "$env_file"; then
                 printf '%s=\n' "$fallback_var" >> "$env_file"
@@ -1639,32 +1682,43 @@ verify_or_acquire_model_weights() {
 
     if [ "$DOWNLOAD_MODELS" = true ]; then
         local hf_cli=""
-        if [ -x "${STACK_DIR}/venv/bin/huggingface-cli" ]; then
+        local hf_cli_label="hf"
+        if [ -x "${STACK_DIR}/venv/bin/hf" ]; then
+            hf_cli="${STACK_DIR}/venv/bin/hf"
+        elif command -v hf >/dev/null 2>&1; then
+            hf_cli="$(command -v hf)"
+        elif [ -x "${STACK_DIR}/venv/bin/huggingface-cli" ]; then
             hf_cli="${STACK_DIR}/venv/bin/huggingface-cli"
+            hf_cli_label="huggingface-cli"
         elif command -v huggingface-cli >/dev/null 2>&1; then
             hf_cli="$(command -v huggingface-cli)"
+            hf_cli_label="huggingface-cli"
         fi
 
         local hf_token_val="${HF_TOKEN:-}"
         if [ -z "$hf_token_val" ] && [ -f "${backend_env_dir}/env" ]; then
-            hf_token_val="$(grep -E '^HF_TOKEN=' "${backend_env_dir}/env" | cut -d= -f2- || true)"
+            hf_token_val="$(grep -E '^HF_TOKEN=' "${backend_env_dir}/env" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r\n"'\''' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
         fi
 
         if [ -n "$hf_cli" ]; then
-            echo "  ⬇️  Initiating automatic download via huggingface-cli for ${target_model}..."
-            local token_args=()
+            echo "  ⬇️  Initiating automatic download via ${hf_cli_label} for ${target_model}..."
             if [ -n "$hf_token_val" ]; then
-                token_args=(--token "$hf_token_val")
-            fi
-
-            if "${hf_cli}" download "${target_model}" "${token_args[@]}"; then
-                echo "  ✅ Model weights acquired successfully for ${target_model}"
-                return 0
+                if HF_TOKEN="${hf_token_val}" "${hf_cli}" download "${target_model}"; then
+                    echo "  ✅ Model weights acquired successfully for ${target_model}"
+                    return 0
+                else
+                    echo "  ⚠️  ${hf_cli_label} download encountered an issue."
+                fi
             else
-                echo "  ⚠️  huggingface-cli download encountered an issue."
+                if "${hf_cli}" download "${target_model}"; then
+                    echo "  ✅ Model weights acquired successfully for ${target_model}"
+                    return 0
+                else
+                    echo "  ⚠️  ${hf_cli_label} download encountered an issue."
+                fi
             fi
         else
-            echo "  ℹ️  huggingface-cli not found in backend venv or system PATH."
+            echo "  ℹ️  Hugging Face CLI (hf) not found in backend venv or system PATH."
         fi
     fi
 
@@ -1673,7 +1727,7 @@ verify_or_acquire_model_weights() {
     echo "  📋 Manual Model Acquisition Instructions:"
     echo "     1. Ensure you have access to: https://huggingface.co/${target_model}"
     echo "     2. Run the following command to download model weights:"
-    echo "        huggingface-cli download ${target_model}"
+    echo "        hf download ${target_model}"
     echo "        (or set HF_TOKEN in ~/.config/opencode-backends/env and re-run with --download-models)"
     echo ""
 }
@@ -1794,7 +1848,9 @@ print_completion_summary() {
             server_svc_status="🟡 enabled"
         fi
 
-        if systemctl --user is-active --quiet "$svc_name" 2>/dev/null; then
+        if [ -n "${SGLANG_LOCAL_UNSUPPORTED_REASON:-}" ]; then
+            sglang_svc_status="⚪ skipped (GPU unsupported: ${SGLANG_LOCAL_UNSUPPORTED_REASON})"
+        elif systemctl --user is-active --quiet "$svc_name" 2>/dev/null; then
             sglang_svc_status="🟢 running"
         elif systemctl --user is-enabled --quiet "$svc_name" 2>/dev/null; then
             sglang_svc_status="🟡 enabled"
@@ -2140,6 +2196,109 @@ warmup_sglang_service() {
     fi
 }
 
+resolve_opencode_binary() {
+    local candidate=""
+    for candidate in \
+        "${USER_HOME}/.local/bin/opencode" \
+        "${USER_HOME}/.opencode/bin/opencode" \
+        "${USER_HOME}/.bun/bin/opencode"; do
+        if [ -x "$candidate" ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    candidate="$(command -v opencode 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+    return 1
+}
+
+check_local_sglang_gpu_support() {
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo "No NVIDIA GPU / nvidia-smi found"
+        return 1
+    fi
+    local smi_out=""
+    smi_out="$(nvidia-smi --query-gpu=name,compute_cap,memory.total --format=csv,noheader,nounits 2>/dev/null || true)"
+    if [ -z "$smi_out" ]; then
+        if ! nvidia-smi >/dev/null 2>&1; then
+            echo "No working NVIDIA GPU detected via nvidia-smi"
+            return 1
+        fi
+        # Minimal/mock nvidia-smi without --query-gpu output: allow proceeding
+        return 0
+    fi
+
+    local check_res=""
+    check_res="$(python3 -c '
+import sys
+lines = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
+gpus = []
+for line in lines:
+    parts = [p.strip() for p in line.split(",")]
+    if len(parts) < 3:
+        continue
+    name = parts[0]
+    try:
+        cc = float(parts[1])
+    except ValueError:
+        cc = 0.0
+    try:
+        vram_mb = int(float(parts[2]))
+    except ValueError:
+        vram_mb = 0
+    gpus.append((name, cc, vram_mb))
+
+if not gpus:
+    sys.exit(0)
+
+# Accept if at least one NVIDIA GPU meets SGLang minimum: CUDA CC >= 7.5 and >= 8 GB VRAM
+supported = [g for g in gpus if g[1] >= 7.5 and g[2] >= 8000]
+if supported:
+    sys.exit(0)
+
+best = max(gpus, key=lambda g: (g[1], g[2]))
+name, cc, vram_mb = best
+vram_gb = vram_mb / 1024.0
+reasons = []
+if cc < 7.5:
+    reasons.append(f"CUDA compute capability {cc:.1f} < 7.5 minimum")
+if vram_mb < 8000:
+    reasons.append(f"{vram_gb:.1f} GB VRAM < 8 GB minimum")
+sep = ", "
+print(f"{name} ({sep.join(reasons)})")
+sys.exit(1)
+' <<< "$smi_out" 2>/dev/null)"
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "${check_res:-Unsupported NVIDIA GPU for local SGLang inference}"
+        return 1
+    fi
+    return 0
+}
+
+systemd_unit_crash_loop_reason() {
+    local unit="$1"
+    command -v systemctl >/dev/null 2>&1 || return 1
+    local sub_state="" exec_status="" unit_result=""
+    sub_state="$(systemctl --user show -p SubState --value "$unit" 2>/dev/null || true)"
+    exec_status="$(systemctl --user show -p ExecMainStatus --value "$unit" 2>/dev/null || true)"
+    unit_result="$(systemctl --user show -p Result --value "$unit" 2>/dev/null || true)"
+    if [ "$sub_state" = "auto-restart" ]; then
+        if [ "$exec_status" = "203" ]; then
+            echo "SubState=auto-restart, ExecMainStatus=203/EXEC (binary missing or not executable)"
+            return 0
+        fi
+        if [ "$unit_result" = "exit-code" ] || { [ -n "$exec_status" ] && [ "$exec_status" != "0" ]; }; then
+            echo "SubState=auto-restart, Result=${unit_result:-exit-code}, ExecMainStatus=${exec_status:-unknown}"
+            return 0
+        fi
+    fi
+    return 1
+}
+
 verify_backend_healthchecks() {
     if [ "$WITH_HEALTHCHECK" != true ]; then
         echo "  ℹ️  Backend healthchecks skipped (--no-healthcheck)."
@@ -2164,7 +2323,7 @@ verify_backend_healthchecks() {
         return 0
     fi
 
-    if { [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; } && [ "${EXPLICIT_HEALTHCHECK:-false}" != true ]; then
+    if { [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\.|antigravity-tmp|/tmp[A-Za-z0-9_]+/ ]]; } && [ "${EXPLICIT_HEALTHCHECK:-false}" != true ]; then
         echo "  ℹ️  Backend healthchecks skipped (isolated sandbox test environment)."
         return 0
     fi
@@ -2186,9 +2345,31 @@ verify_backend_healthchecks() {
     local svc_name="${PROBED_SERVICE_NAME:-sglang-ornith-1.5-35b.service}"
     local health_failed=false
     local failure_reasons=()
+    local is_real_systemd_host=false
+    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\.|antigravity-tmp|/tmp[A-Za-z0-9_]+/ ]]; then
+        is_real_systemd_host=true
+    fi
+
+    local resolved_opencode_bin=""
+    resolved_opencode_bin="$(resolve_opencode_binary 2>/dev/null || true)"
+
+    local sglang_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/sglang"
+    local sglang_local_ready=true
+    local sglang_skip_reason=""
+    if [ "$is_real_systemd_host" = true ]; then
+        local gpu_check_msg=""
+        if ! gpu_check_msg="$(check_local_sglang_gpu_support)"; then
+            sglang_local_ready=false
+            SGLANG_LOCAL_UNSUPPORTED_REASON="${gpu_check_msg}"
+            sglang_skip_reason="GPU unsupported for local SGLang: ${gpu_check_msg}. Use a cloud or remote AI provider in T3 Code / OpenCode."
+        elif [ ! -x "$sglang_bin" ]; then
+            sglang_local_ready=false
+            sglang_skip_reason="SGLang binary not installed at ${sglang_bin}"
+        fi
+    fi
 
     # 1. Start / enable units if systemctl is available
-    if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+    if [ "$is_real_systemd_host" = true ]; then
         # Disable legacy SGLang units and mutually exclusive model units
         for _legacy_u in opencode-sglang-ornith-35b.service opencode-sglang-qwen27b.service ornith-1.5-9b-nvfp4-low-ctx.service ornith-30000.service; do
             systemctl --user disable --now "$_legacy_u" 2>/dev/null || true
@@ -2207,8 +2388,16 @@ verify_backend_healthchecks() {
             done
         fi
         systemctl --user daemon-reload 2>/dev/null || true
-        systemctl --user enable opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service "${svc_name}" 2>/dev/null || true
-        systemctl --user start opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service "${svc_name}" 2>/dev/null || true
+        systemctl --user enable opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service 2>/dev/null || true
+        systemctl --user start opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service 2>/dev/null || true
+
+        if [ "$sglang_local_ready" = true ]; then
+            systemctl --user enable "${svc_name}" 2>/dev/null || true
+            systemctl --user start "${svc_name}" 2>/dev/null || true
+        else
+            systemctl --user stop "${svc_name}" 2>/dev/null || true
+        fi
+
         if [ "$ENABLE_T3_SERVE" = true ]; then
             local t3_bin_available=false
             if command -v t3 >/dev/null 2>&1 || [ -x "${USER_HOME}/.bun/bin/t3" ] || [ -x "${USER_HOME}/.local/bin/t3" ]; then
@@ -2256,7 +2445,16 @@ verify_backend_healthchecks() {
         if [ "$server_status" = "failed" ]; then
             echo "  ❌ OpenCode server (opencode-server.service) status is failed; aborting wait."
             break
-        elif [ "$server_status" = "active" ] || [ "$server_status" = "activating" ]; then
+        fi
+
+        local server_crash_reason=""
+        server_crash_reason="$(systemd_unit_crash_loop_reason opencode-server.service 2>/dev/null || true)"
+        if [ -n "$server_crash_reason" ]; then
+            echo "  ❌ OpenCode server (opencode-server.service) crash-looping (${server_crash_reason}); aborting wait."
+            break
+        fi
+
+        if [ "$server_status" = "active" ] || [ "$server_status" = "activating" ]; then
             echo "  [$(date +%T)] ⏳ OpenCode server starting up (elapsed: ${server_elapsed}s / max: ${max_server_wait}s)..."
         fi
 
@@ -2295,7 +2493,7 @@ verify_backend_healthchecks() {
             echo "  ℹ️  T3 Code binary (t3) not found in PATH; t3-serve.service deployed and ready once t3 is installed"
         else
             echo "  Checking T3 Code unified server (port 3773)..."
-            if command -v systemctl >/dev/null 2>&1 && [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+            if [ "$is_real_systemd_host" = true ]; then
                 systemctl --user enable t3-serve.service 2>/dev/null || true
                 systemctl --user start t3-serve.service 2>/dev/null || true
             fi
@@ -2313,7 +2511,16 @@ verify_backend_healthchecks() {
                 if [ "$t3_status" = "failed" ]; then
                     echo "  ❌ T3 Code server (t3-serve.service) status is failed; aborting wait."
                     break
-                elif [ "$t3_status" = "active" ] || [ "$t3_status" = "activating" ]; then
+                fi
+
+                local t3_crash_reason=""
+                t3_crash_reason="$(systemd_unit_crash_loop_reason t3-serve.service 2>/dev/null || true)"
+                if [ -n "$t3_crash_reason" ]; then
+                    echo "  ❌ T3 Code server (t3-serve.service) crash-looping (${t3_crash_reason}); aborting wait."
+                    break
+                fi
+
+                if [ "$t3_status" = "active" ] || [ "$t3_status" = "activating" ]; then
                     echo "  [$(date +%T)] ⏳ T3 Code server starting up (elapsed: ${t3_elapsed}s / max: ${max_t3_wait}s)..."
                 fi
 
@@ -2344,51 +2551,68 @@ verify_backend_healthchecks() {
     fi
 
     # 5. Poll SGLang (systemctl and 127.0.0.1:30000/v1/models)
-    echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
-    local sglang_ok=false
-    local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-240}}}"
-    local elapsed=0
-    local model_name="${PROBED_MODEL_NAME:-ornith}"
-
-    local sglang_check_url="http://127.0.0.1:30000/v1/models"
-    if curl -s -m 1 "http://127.0.0.1:30000/health" 2>/dev/null | grep -q '"active_service"'; then
-        sglang_check_url="http://127.0.0.1:${SGLANG_BACKEND_PORT:-30001}/v1/models"
+    local initial_sglang_status=""
+    if command -v systemctl >/dev/null 2>&1; then
+        initial_sglang_status="$(systemctl --user is-active "${svc_name}" 2>/dev/null || true)"
     fi
-
-    while [ "$elapsed" -lt "$max_sglang_wait" ]; do
-        local sglang_out=""
-        sglang_out="$(curl -s -m 2 -w "\n%{http_code}" "${sglang_check_url}" 2>/dev/null || true)"
-        local sglang_code="${sglang_out##*$'\n'}"
-        local sglang_resp="${sglang_out%$'\n'*}"
-
-        if [ "$sglang_code" = "200" ] || echo "$sglang_resp" | grep -q '"data"' || { [ -n "$model_name" ] && echo "$sglang_resp" | grep -qi "$model_name"; }; then
-            sglang_ok=true
-            break
-        fi
-
-        # If not yet ready, check systemd status
-        local sglang_status=""
-        if command -v systemctl >/dev/null 2>&1; then
-            sglang_status="$(systemctl --user is-active "${svc_name}" 2>/dev/null || true)"
-        fi
-
-        if [ "$sglang_status" = "failed" ]; then
-            echo "  ❌ SGLang service (${svc_name}) status is failed; aborting wait."
-            break
-        elif [ "$sglang_status" = "active" ] || [ "$sglang_status" = "activating" ]; then
-            echo "  [$(date +%T)] ⏳ SGLang is loading model weights into VRAM (elapsed: ${elapsed}s / max: ${max_sglang_wait}s)..."
-        fi
-
-        sleep 2
-        elapsed=$((elapsed + 2))
-    done
-
-    if [ "$sglang_ok" = true ]; then
-        echo "  ✅ SGLang inference engine is active and serving on port 30000."
+    if [ "$sglang_local_ready" != true ] && [ "$initial_sglang_status" != "active" ] && [ "$initial_sglang_status" != "failed" ]; then
+        echo "  ℹ️  Skipping local SGLang healthcheck (${sglang_skip_reason}); ${svc_name} deployed and ready when local GPU inference is enabled."
     else
-        health_failed=true
-        failure_reasons+=("SGLang inference service (${svc_name} / port 30000) failed healthcheck")
-        echo "  ❌ SGLang inference engine failed healthcheck."
+        echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
+        local sglang_ok=false
+        local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-240}}}"
+        local elapsed=0
+        local model_name="${PROBED_MODEL_NAME:-ornith}"
+
+        local sglang_check_url="http://127.0.0.1:30000/v1/models"
+        if curl -s -m 1 "http://127.0.0.1:30000/health" 2>/dev/null | grep -q '"active_service"'; then
+            sglang_check_url="http://127.0.0.1:${SGLANG_BACKEND_PORT:-30001}/v1/models"
+        fi
+
+        while [ "$elapsed" -lt "$max_sglang_wait" ]; do
+            local sglang_out=""
+            sglang_out="$(curl -s -m 2 -w "\n%{http_code}" "${sglang_check_url}" 2>/dev/null || true)"
+            local sglang_code="${sglang_out##*$'\n'}"
+            local sglang_resp="${sglang_out%$'\n'*}"
+
+            if [ "$sglang_code" = "200" ] || echo "$sglang_resp" | grep -q '"data"' || { [ -n "$model_name" ] && echo "$sglang_resp" | grep -qi "$model_name"; }; then
+                sglang_ok=true
+                break
+            fi
+
+            # If not yet ready, check systemd status
+            local sglang_status=""
+            if command -v systemctl >/dev/null 2>&1; then
+                sglang_status="$(systemctl --user is-active "${svc_name}" 2>/dev/null || true)"
+            fi
+
+            if [ "$sglang_status" = "failed" ]; then
+                echo "  ❌ SGLang service (${svc_name}) status is failed; aborting wait."
+                break
+            fi
+
+            local sglang_crash_reason=""
+            sglang_crash_reason="$(systemd_unit_crash_loop_reason "${svc_name}" 2>/dev/null || true)"
+            if [ -n "$sglang_crash_reason" ]; then
+                echo "  ❌ SGLang service (${svc_name}) crash-looping (${sglang_crash_reason}); aborting wait."
+                break
+            fi
+
+            if [ "$sglang_status" = "active" ] || [ "$sglang_status" = "activating" ]; then
+                echo "  [$(date +%T)] ⏳ SGLang is loading model weights into VRAM (elapsed: ${elapsed}s / max: ${max_sglang_wait}s)..."
+            fi
+
+            sleep 2
+            elapsed=$((elapsed + 2))
+        done
+
+        if [ "$sglang_ok" = true ]; then
+            echo "  ✅ SGLang inference engine is active and serving on port 30000."
+        else
+            health_failed=true
+            failure_reasons+=("SGLang inference service (${svc_name} / port 30000) failed healthcheck")
+            echo "  ❌ SGLang inference engine failed healthcheck."
+        fi
     fi
 
     if [ "$health_failed" = true ]; then
@@ -2421,7 +2645,11 @@ EOF
         echo "📋 Diagnostic Information:" >&2
         if command -v systemctl >/dev/null 2>&1; then
             echo "--- Systemd User Unit Statuses ---" >&2
-            systemctl --user status opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service t3-serve.service "${svc_name}" --no-pager 2>&1 | head -n 35 >&2 || true
+            systemctl --user status opencode-colbert-reindex.timer opencode-server.service opencode-model-proxy.service t3-serve.service "${svc_name}" --no-pager 2>&1 | head -n 80 >&2 || true
+        fi
+        if command -v journalctl >/dev/null 2>&1 && [ "$sglang_local_ready" = true ] && [ "${sglang_ok:-false}" != true ]; then
+            echo "--- Recent ${svc_name} Journal ---" >&2
+            journalctl --user -u "${svc_name}" -n 15 --no-pager 2>&1 >&2 || true
         fi
         echo "--- Socket Listening Status (Port 4096, 3773, 30000, 30001) ---" >&2
         if command -v ss >/dev/null 2>&1; then
@@ -2434,7 +2662,7 @@ EOF
         echo "  2. Ensure model weights are downloaded (run with --download-models)" >&2
         echo "  3. Manually start services: systemctl --user start ${svc_name} opencode-model-proxy.service opencode-server.service t3-serve.service opencode-colbert-reindex.timer" >&2
         echo "  4. Re-run installer with --no-healthcheck to bypass live polling if testing in container/sandbox" >&2
-        echo "========================================================================" >&2
+        echo "=========================================================================" >&2
         exit 1
     fi
 
@@ -2474,23 +2702,86 @@ deploy_opencode_backend_and_units() {
     fi
     echo "  ✅ Deployed SGLang stack scripts to ${STACK_DIR}/"
 
-    # Check / provision venv
-    if [ ! -e "${STACK_DIR}/venv" ]; then
-        local sibling_found=false
-        for sib in "${USER_HOME}/.local/share/agy-sglang-stack/venv" "${USER_HOME}/.local/share/agy-vllm-stack/venv"; do
-            if [ -d "${sib}" ] && ([ -x "${sib}/bin/python" ] || [ -f "${sib}/pyvenv.cfg" ]); then
-                echo "  🔗 Linking healthy sibling backend venv from ${sib}..."
-                ln -sfn "${sib}" "${STACK_DIR}/venv"
-                sibling_found=true
-                break
+    local is_sandbox_env=false
+    if [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\.|antigravity-tmp|/tmp[A-Za-z0-9_]+/ ]]; then
+        is_sandbox_env=true
+    fi
+
+    local uv_bin=""
+    _resolve_uv_bin() {
+        local c=""
+        for c in "${USER_HOME}/.local/bin/uv" "${USER_HOME}/.cargo/bin/uv" "$(command -v uv 2>/dev/null || true)"; do
+            if [ -n "$c" ] && [ -x "$c" ]; then
+                echo "$c"
+                return 0
             fi
         done
+        return 1
+    }
+    _ensure_uv_bin() {
+        uv_bin="$(_resolve_uv_bin 2>/dev/null || true)"
+        if [ -n "$uv_bin" ]; then
+            return 0
+        fi
+        if [ "$is_sandbox_env" = true ] || [ "$DRY_RUN" = true ]; then
+            return 1
+        fi
+        if command -v curl >/dev/null 2>&1; then
+            echo "  📦 Installing uv (fast Python & package manager for Python 3.12 SGLang venv)..."
+            curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || true
+            uv_bin="$(_resolve_uv_bin 2>/dev/null || true)"
+        fi
+        [ -n "$uv_bin" ]
+    }
+
+    # Check / provision venv (prefer Python 3.12 for SGLang/PyTorch wheel compatibility)
+    local need_py312_recreate=false
+    if [ -e "${STACK_DIR}/venv" ] && [ ! -L "${STACK_DIR}/venv" ] && [ "$is_sandbox_env" != true ]; then
+        local existing_py="${STACK_DIR}/venv/bin/python3"
+        [ ! -x "$existing_py" ] && [ -x "${STACK_DIR}/venv/bin/python" ] && existing_py="${STACK_DIR}/venv/bin/python"
+        if [ -x "$existing_py" ]; then
+            local existing_minor=""
+            existing_minor="$("$existing_py" -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || true)"
+            if [ -n "$existing_minor" ] && [ "$existing_minor" -ge 13 ] 2>/dev/null; then
+                if ! "$existing_py" -c "import sglang" >/dev/null 2>&1; then
+                    echo "  🔄 Existing venv uses Python 3.${existing_minor} (unsupported by SGLang/PyTorch wheels); upgrading venv to Python 3.12..."
+                    need_py312_recreate=true
+                fi
+            fi
+        fi
+    fi
+
+    if [ ! -e "${STACK_DIR}/venv" ] || [ "$need_py312_recreate" = true ]; then
+        local sibling_found=false
+        if [ "$need_py312_recreate" != true ]; then
+            for sib in "${USER_HOME}/.local/share/agy-sglang-stack/venv" "${USER_HOME}/.local/share/agy-vllm-stack/venv"; do
+                if [ -d "${sib}" ] && ([ -x "${sib}/bin/python" ] || [ -f "${sib}/pyvenv.cfg" ]); then
+                    echo "  🔗 Linking healthy sibling backend venv from ${sib}..."
+                    ln -sfn "${sib}" "${STACK_DIR}/venv"
+                    sibling_found=true
+                    break
+                fi
+            done
+        fi
         if [ "$sibling_found" != true ]; then
-            echo "  📦 Provisioning fresh backend venv in ${STACK_DIR}/venv..."
-            if command -v uv >/dev/null 2>&1; then
-                uv venv "${STACK_DIR}/venv" --python python3 2>/dev/null || python3 -m venv "${STACK_DIR}/venv" 2>/dev/null || true
+            echo "  📦 Provisioning backend venv in ${STACK_DIR}/venv..."
+            local sys_py_minor=""
+            sys_py_minor="$(python3 -c 'import sys; print(sys.version_info.minor)' 2>/dev/null || echo "12")"
+            if [ "$is_sandbox_env" != true ] && { [ "$need_py312_recreate" = true ] || [ "$sys_py_minor" -ge 13 ] 2>/dev/null || [ "$sys_py_minor" -lt 10 ] 2>/dev/null; }; then
+                if _ensure_uv_bin; then
+                    echo "  🐍 Installing standalone Python 3.12 via uv..."
+                    "$uv_bin" python install 3.12 2>/dev/null || true
+                    "$uv_bin" venv --clear --seed --python 3.12 "${STACK_DIR}/venv" || python3 -m venv "${STACK_DIR}/venv" 2>/dev/null || true
+                else
+                    python3 -m venv "${STACK_DIR}/venv" 2>/dev/null || true
+                fi
             else
-                python3 -m venv "${STACK_DIR}/venv" 2>/dev/null || true
+                uv_bin="$(_resolve_uv_bin 2>/dev/null || true)"
+                if [ -n "$uv_bin" ]; then
+                    "$uv_bin" venv --seed "${STACK_DIR}/venv" --python python3 2>/dev/null || python3 -m venv "${STACK_DIR}/venv" 2>/dev/null || true
+                else
+                    python3 -m venv "${STACK_DIR}/venv" 2>/dev/null || true
+                fi
             fi
         fi
     else
@@ -2558,24 +2849,35 @@ deploy_opencode_backend_and_units() {
             done
 
             if [ "$healed" != true ]; then
-                if [ "${USER_HOME}" != "${HOME}" ] || [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]]; then
+                if [ "$is_sandbox_env" = true ]; then
                     echo "  ℹ️  Skipping remote sglang package install in isolated sandbox test environment."
                 else
-                    echo "  📦 Local sglang repo not found or install failed. Attempting package install (sglang[all]>=0.4.0)..."
-                    if command -v uv >/dev/null 2>&1; then
-                        uv pip install --python "${py_exec}" "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
+                    local sglang_gpu_reason=""
+                    if [ -z "${OVERRIDE_GPU:-}" ] && ! sglang_gpu_reason="$(check_local_sglang_gpu_support)"; then
+                        SGLANG_LOCAL_UNSUPPORTED_REASON="${sglang_gpu_reason}"
+                        echo "  ℹ️  Skipping local SGLang package install: ${sglang_gpu_reason}."
+                        echo "      OpenCode & T3 Code will still be installed and ready to use with cloud or remote AI providers."
                     else
-                        "${py_exec}" -m pip install "sglang[all]>=0.4.0" >/dev/null 2>&1 || true
-                    fi
+                        echo "  📦 Installing sglang[all]>=0.4.0 into ${STACK_DIR}/venv (first-time download may take a few minutes)..."
+                        uv_bin="$(_resolve_uv_bin 2>/dev/null || true)"
+                        if [ -z "$uv_bin" ]; then
+                            _ensure_uv_bin || true
+                        fi
+                        if [ -n "$uv_bin" ]; then
+                            "$uv_bin" pip install --python "${py_exec}" "sglang[all]>=0.4.0" || true
+                        else
+                            "${py_exec}" -m pip install "sglang[all]>=0.4.0" || true
+                        fi
 
-                    if "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
-                        echo "  ✅ Successfully auto-healed sglang via package install"
-                        healed=true
+                        if "${py_exec}" -c "import sglang" >/dev/null 2>&1; then
+                            echo "  ✅ Successfully installed sglang into ${STACK_DIR}/venv"
+                            healed=true
+                        fi
                     fi
                 fi
             fi
 
-            if [ "$healed" != true ]; then
+            if [ "$healed" != true ] && [ -z "${SGLANG_LOCAL_UNSUPPORTED_REASON:-}" ]; then
                 echo "  ⚠️  Could not auto-heal sglang in ${STACK_DIR}/venv. SGLang startup may fail."
             fi
         else
@@ -2617,34 +2919,36 @@ deploy_opencode_backend_and_units() {
     local probed_cpu_offload="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo 0)"
     local probed_service="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('service', 'sglang-ornith-1.5-35b.service'))" "${gpu_profile}" 2>/dev/null || echo "sglang-ornith-1.5-35b.service")"
 
-    if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
-        probed_model="qwen3.8-27b"
-        probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
-        probed_service="sglang-qwen3.8-27b.service"
-        max_context="$qwen27b_max_context"
-        mem_fraction="$qwen27b_mem_fraction"
-        probed_cpu_offload="$qwen27b_cpu_offload_gb"
-    elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
-        probed_model="qwen3.8-27b"
-        probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
-        probed_service="sglang-qwen3.8-27b.service"
-        max_context="$qwen27b_max_context"
-        mem_fraction="$qwen27b_mem_fraction"
-        probed_cpu_offload="$qwen27b_cpu_offload_gb"
-    elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
-        probed_model="ornith-1.5-9b"
-        probed_model_path="ornith-ai/Ornith-1.5-9B-NVFP4"
-        probed_service="sglang-ornith-1.5-9b.service"
-        max_context="$ornith9b_max_context"
-        mem_fraction="$ornith9b_mem_fraction"
-        probed_cpu_offload="$ornith9b_cpu_offload_gb"
-    elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
-        probed_model="ornith-1.5-35b"
-        probed_model_path="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
-        probed_service="sglang-ornith-1.5-35b.service"
-        max_context="$ornith_max_context"
-        mem_fraction="$ornith_mem_fraction"
-        probed_cpu_offload="$ornith_cpu_offload_gb"
+    if [ "$SGLANG_MODEL_EXPLICIT" = true ]; then
+        if [ "$SGLANG_MODEL" = "qwen-3.8-nvfp4" ] || [ "$SGLANG_MODEL" = "qwen3.8" ] || [ "$SGLANG_MODEL" = "qwen3.8-27b" ] || [ "$SGLANG_MODEL" = "27b-nvfp4" ]; then
+            probed_model="qwen3.8-27b"
+            probed_model_path="nvidia/Qwen3.8-27B-NVFP4"
+            probed_service="sglang-qwen3.8-27b.service"
+            max_context="$qwen27b_max_context"
+            mem_fraction="$qwen27b_mem_fraction"
+            probed_cpu_offload="$qwen27b_cpu_offload_gb"
+        elif [ "$SGLANG_MODEL" = "qwen-3.8-q6" ] || [ "$SGLANG_MODEL" = "27b-q6" ]; then
+            probed_model="qwen3.8-27b"
+            probed_model_path="Qwen/Qwen3.8-27B-Instruct-GGUF/qwen3.8-27b-instruct-q6_k.gguf"
+            probed_service="sglang-qwen3.8-27b.service"
+            max_context="$qwen27b_max_context"
+            mem_fraction="$qwen27b_mem_fraction"
+            probed_cpu_offload="$qwen27b_cpu_offload_gb"
+        elif [ "$SGLANG_MODEL" = "ornith-9b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-9b" ]; then
+            probed_model="ornith-1.5-9b"
+            probed_model_path="ornith-ai/Ornith-1.5-9B-NVFP4"
+            probed_service="sglang-ornith-1.5-9b.service"
+            max_context="$ornith9b_max_context"
+            mem_fraction="$ornith9b_mem_fraction"
+            probed_cpu_offload="$ornith9b_cpu_offload_gb"
+        elif [ "$SGLANG_MODEL" = "ornith-35b" ] || [ "$SGLANG_MODEL" = "ornith-1.5-35b" ]; then
+            probed_model="ornith-1.5-35b"
+            probed_model_path="ornith-ai/Ornith-1.5-35B-A3B-NVFP4"
+            probed_service="sglang-ornith-1.5-35b.service"
+            max_context="$ornith_max_context"
+            mem_fraction="$ornith_mem_fraction"
+            probed_cpu_offload="$ornith_cpu_offload_gb"
+        fi
     fi
 
     local ornith_offload_args=""
@@ -2660,8 +2964,8 @@ deploy_opencode_backend_and_units() {
         ornith9b_offload_args="--cpu-offload-gb ${ornith9b_cpu_offload_gb}"
     fi
 
-    # Update gpu_profile.json when SGLANG_MODEL overrides profile parameters
-    if [ -n "$SGLANG_MODEL" ] && [ -f "${backend_env_dir}/gpu_profile.json" ]; then
+    # Update gpu_profile.json when --sglang-model explicitly overrides profile parameters
+    if [ "$SGLANG_MODEL_EXPLICIT" = true ] && [ -n "$SGLANG_MODEL" ] && [ -f "${backend_env_dir}/gpu_profile.json" ]; then
         python3 -c "
 import json, sys
 p = sys.argv[1]
@@ -2716,6 +3020,7 @@ keys = {
     'PROBED_MODEL': sys.argv[4],
     'PROBED_CPU_OFFLOAD_GB': sys.argv[5],
     'SGLANG_SERVICE': sys.argv[14],
+    'SGLANG_PRIMARY_MODEL': f'local-sglang/{sys.argv[4]}',
     'SGLANG_CONTEXT_LENGTH': sys.argv[6],
     'SGLANG_CPU_OFFLOAD_ARGS': ornith_offload,
     'SGLANG_27B_CONTEXT_LENGTH': sys.argv[8],
@@ -2751,8 +3056,12 @@ with open(path, 'w') as f:
         chmod 0600 "${backend_env_dir}/env"
     fi
 
-    # Model Acquisition & Cache Verification
-    verify_or_acquire_model_weights "${probed_model_path}" "${backend_env_dir}"
+    # Model Acquisition & Cache Verification (skip on GPUs unsupported for local SGLang)
+    if [ -n "${SGLANG_LOCAL_UNSUPPORTED_REASON:-}" ]; then
+        echo "  ℹ️  Skipping local model weight verification/download (${SGLANG_LOCAL_UNSUPPORTED_REASON})."
+    else
+        verify_or_acquire_model_weights "${probed_model_path}" "${backend_env_dir}"
+    fi
 
     # 2. Deploy model catalog template expanded with USER_HOME
     if [ -f "${SCRIPT_DIR}/config/models/models_catalog.json" ]; then
@@ -2806,6 +3115,36 @@ with open(path, 'w') as f:
             cp -a "${SCRIPT_DIR}/config/systemd/${u}" "${systemd_dest}/${u}"
         fi
     done
+
+    # Ensure opencode CLI is installed (required by T3 Code and opencode-server.service)
+    local resolved_opencode_unit_bin=""
+    resolved_opencode_unit_bin="$(resolve_opencode_binary 2>/dev/null || true)"
+    if [ -z "$resolved_opencode_unit_bin" ]; then
+        if [ "$is_sandbox_env" != true ] && [ "$DRY_RUN" != true ]; then
+            echo "  📦 Installing opencode CLI via official installer..."
+            if command -v curl >/dev/null 2>&1; then
+                curl -fsSL https://opencode.ai/install | bash || true
+            fi
+            resolved_opencode_unit_bin="$(resolve_opencode_binary 2>/dev/null || true)"
+            if [ -n "$resolved_opencode_unit_bin" ]; then
+                echo "  ✅ Installed opencode CLI: ${resolved_opencode_unit_bin}"
+            else
+                echo "  ⚠️  Could not auto-install opencode CLI (install manually: curl -fsSL https://opencode.ai/install | bash)"
+            fi
+        fi
+    fi
+
+    if [ -n "$resolved_opencode_unit_bin" ]; then
+        mkdir -p "${USER_HOME}/.local/bin"
+        if [ "$resolved_opencode_unit_bin" != "${USER_HOME}/.local/bin/opencode" ] && [ ! -e "${USER_HOME}/.local/bin/opencode" ]; then
+            ln -sf "${resolved_opencode_unit_bin}" "${USER_HOME}/.local/bin/opencode" 2>/dev/null || true
+        fi
+        for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+            if [ -f "${dest_dir}/opencode-server.service" ]; then
+                sed -i "s|^ExecStart=.*opencode serve|ExecStart=${resolved_opencode_unit_bin} serve|" "${dest_dir}/opencode-server.service"
+            fi
+        done
+    fi
 
     # Tune Ornith 35B SGLang service with probed Ornith hardware parameters (preserving 256k context on RTX 5090+)
     for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
@@ -3108,6 +3447,19 @@ install_opencode_global() {
 
     deploy_opencode_backend_and_units "${systemd_dest}" "${backend_env_dir}"
 
+    local effective_sglang_model="${SGLANG_MODEL:-}"
+    if [ "$SGLANG_MODEL_EXPLICIT" != true ] && [ -n "${PROBED_MODEL_NAME:-}" ]; then
+        effective_sglang_model="${PROBED_MODEL_NAME}"
+        if [ "${PROBED_MODEL_NAME}" != "ornith-1.5-35b" ]; then
+            python3 -m harness.installer.compiler \
+                --core-dir "${core_dir}" \
+                --runtime opencode \
+                --output-dir "${opencode_dest}/agents" \
+                --model-profile "${PROBED_MODEL_NAME}"
+            rm -f "${opencode_dest}/agents/compaction.md" "${opencode_dest}/agents/summary.md"
+        fi
+    fi
+
     if [ -x "${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python" ]; then
         py_bin="${USER_HOME}/.local/share/opencode-sglang-stack/venv/bin/python"
     fi
@@ -3118,7 +3470,7 @@ install_opencode_global() {
         --py-bin "${py_bin}" \
         --orch-dir "${orch_dest}" \
         --opencode-dir "${opencode_dest}" \
-        --sglang-model "${SGLANG_MODEL:-}"
+        --sglang-model "${effective_sglang_model}"
 
     if [ "${USER_HOME}" = "${HOME}" ] && ! [[ "${USER_HOME}" =~ ^/tmp/|sandbox|mock|tmp\. ]] && [ "$DRY_RUN" != true ]; then
         rm -f "${USER_HOME}/.t3/caches/opencode.json"

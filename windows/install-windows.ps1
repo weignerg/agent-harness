@@ -1,12 +1,12 @@
 #
 # install-windows.ps1
-# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.2).
+# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.3).
 #
 # TLDR:
-#   1) Download install-agent-harness-v0.7.2-windows10-11.ps1 from the release page
+#   1) Download install-agent-harness-v0.7.3-windows10-11.ps1 from the release page
 #      (https://github.com/weignerg/agent-harness/releases).
 #   2) Run ONE command:
-#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1
+#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1
 #   The command self-elevates, provisions WSL2 + Ubuntu (with systemd persistence and
 #   Task Scheduler auto-resume across the one mandatory reboot), decodes and checksum-
 #   verifies its embedded base64(tar.gz) runtime payload, extracts it into
@@ -16,7 +16,7 @@
 #
 # What it does (one paragraph):
 #   This script is the Windows/WSL2 bootstrap wrapped by release-build/make_windows_installer.ps1
-#   into the self-extracting install-agent-harness-v0.7.2-windows10-11.ps1 artifact. It
+#   into the self-extracting install-agent-harness-v0.7.3-windows10-11.ps1 artifact. It
 #   elevates itself, provisions WSL2 and the Ubuntu distro (handling the single mandatory
 #   reboot via a state marker and logon auto-resume task), installs git/curl/python inside
 #   Ubuntu, configures a default Linux user and [boot] systemd=true in /etc/wsl.conf,
@@ -56,7 +56,7 @@ function ConvertTo-BashSingleQuoted {
 }
 
 function Test-IsAdmin {
-    return [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent().IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 function Get-PendingReboot {
@@ -72,7 +72,11 @@ function Get-PendingReboot {
 function Get-FeatureState($name) {
     try {
         $feat = Get-WindowsOptionalFeature -Online -FeatureName $name -ErrorAction Stop
-        return [string]$feat.InstallState
+        $state = if ($null -ne $feat.State) { [string]$feat.State } else { [string]$feat.InstallState }
+        if ($state -eq "EnablePending") { return "Enabled (Pending Reboot)" }
+        if ($state -eq "DisablePending") { return "Disabled (Pending Reboot)" }
+        if ($state) { return $state }
+        return "Disabled"
     } catch {
         return "Disabled"
     }
@@ -80,23 +84,36 @@ function Get-FeatureState($name) {
 
 function Get-WslFeatureState {
     # Returns one of: Disabled, Enabled, "Enabled (Pending Reboot)", "Disabled (Pending Reboot)".
-    # The WSL pair (Microsoft-Windows-Subsystem-Linux + VirtualMachinePlatform) must BOTH be
-    # enabled to be usable; if either is not, the pair is "not ready" and we surface it.
+    # Modern Store WSL2 (Windows 11) only requires VirtualMachinePlatform (the legacy WSL1
+    # optional feature Microsoft-Windows-Subsystem-Linux may be Disabled).
     $wslState = Get-FeatureState "Microsoft-Windows-Subsystem-Linux"
     $vmpState = Get-FeatureState "VirtualMachinePlatform"
     $pending  = Get-PendingReboot
 
-    $wslUsable = ($wslState -eq "Enabled" -or $wslState -eq "Enabled (Pending Reboot)")
-    $vmpUsable = ($vmpState -eq "Enabled" -or $vmpState -eq "Enabled (Pending Reboot)")
+    $wslUsable  = ($wslState -eq "Enabled" -or $wslState -eq "Enabled (Pending Reboot)")
+    $vmpUsable  = ($vmpState -eq "Enabled" -or $vmpState -eq "Enabled (Pending Reboot)")
+    $anyPending = ($pending -or $wslState -eq "Enabled (Pending Reboot)" -or $vmpState -eq "Enabled (Pending Reboot)")
 
-    if (-not ($wslUsable -and $vmpUsable)) {
-        # A disabled / missing feature that still has a pending reboot -> ask for reboot.
-        if ($pending) { return "Disabled (Pending Reboot)" }
+    if (-not $vmpUsable) {
+        if ($pending -or $vmpState -eq "Disabled (Pending Reboot)") { return "Disabled (Pending Reboot)" }
         return "Disabled"
     }
 
-    # At least one side is enabled; report the WSL side, annotated with a reboot note.
-    if ($pending) { return "Enabled (Pending Reboot)" }
+    if (-not $wslUsable) {
+        $wslOk = $false
+        $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+        try {
+            $null = wsl.exe --status 2>&1
+            $wslOk = ($LASTEXITCODE -eq 0)
+        } catch { $wslOk = $false }
+        $ErrorActionPreference = $oldEap
+        if (-not $wslOk) {
+            if ($pending -or $wslState -eq "Disabled (Pending Reboot)") { return "Disabled (Pending Reboot)" }
+            return "Disabled"
+        }
+    }
+
+    if ($anyPending) { return "Enabled (Pending Reboot)" }
     return "Enabled"
 }
 
@@ -159,10 +176,11 @@ function Get-InstalledDistro {
 
     # Normalise instance names: drop header rows, leading "*"/"*?" status markers, and a
     # trailing "?". Then match against $Dist (case-insensitive).
-    $names = ($blob -split "`r?`n") | ForEach-Object { $_.Trim() } `
-                  | ForEach-Object { $_ -replace '^\*[?]?\s+','' }   # drop "*?"/"*" marker prefix
-                  | ForEach-Object { $_ -replace '\?\s*$','' }          # ignore trailing "?"
-                  | Where-Object { $_ -and $_ -notmatch '^(NAME|Version|version|Downloading|Installing|---|—|)$' }
+    $names = ($blob -split "`r?`n") |
+        ForEach-Object { $_.Trim() } |
+        ForEach-Object { $_ -replace '^\*[?]?\s+','' } |
+        ForEach-Object { $_ -replace '\?\s*$','' } |
+        Where-Object { $_ -and $_ -notmatch '^(NAME|Version|version|Downloading|Installing|---|\u2014|)$' }
 
     # Match each row's instance NAME = the first whitespace-delimited token (the distro
     # column), stripping surrounding double quotes from a quoted/renamed instance. Exact
@@ -207,7 +225,7 @@ function Read-State {
 
 function Write-State($token) {
     if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Force -Path $StateDir | Out-Null }
-    Set-Content -Path $StateFile -Value [string]$token -NoNewline
+    Set-Content -Path $StateFile -Value ([string]$token) -NoNewline
 }
 
 # ---------------------------------------------------------------
@@ -360,17 +378,17 @@ try {
     $VerifiedPayload = Resolve-VerifiedEmbeddedPayload -ScriptPath $ScriptSelfPath
 } catch {
     Write-Err $_.Exception.Message
-    Write-Err "  1) Download install-agent-harness-v0.7.2-windows10-11.ps1 from the release page, or"
+    Write-Err "  1) Download install-agent-harness-v0.7.3-windows10-11.ps1 from the release page, or"
     Write-Err "     build it from a checkout with: pwsh -NoProfile -File release-build/make_windows_installer.ps1"
     Write-Err "  2) Then run:"
-    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1"
+    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1"
     exit 1
 }
 
 # ---------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------
-Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.2" -ForegroundColor Magenta
+Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.3" -ForegroundColor Magenta
 Write-Host "-------------------------------------------------------------"
 Write-Host
 Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substring(0, 12) + "...).")
@@ -381,7 +399,7 @@ Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substr
 if (-not (Test-IsAdmin)) {
     Write-Warn "Admin rights required - relaunching elevated..."
     $scriptPath = $ScriptSelfPath
-    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.2-windows10-11.ps1" }
+    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.3-windows10-11.ps1" }
     $argList = Format-SelfInvocationArgs -ScriptPath $scriptPath -BoundParams $script:InitialBoundParams
     Start-Process -FilePath $env:windir\System32\WindowsPowerShell\v1.0\powershell.exe `
                   -Verb RunAs -ArgumentList $argList
@@ -394,6 +412,9 @@ Write-Ok "Running with administrator privileges."
 # ---------------------------------------------------------------
 $featState = Get-WslFeatureState
 $hasDistro = Get-InstalledDistro
+if ($featState -eq "Disabled" -and $hasDistro.present) {
+    $featState = "Enabled"
+}
 Write-Step ("WSL feature state: " + $featState + " ; " + $Dist + " present: " + $hasDistro.present + " ; " + $hasDistro.status + " ; state marker: '" + (Read-State) + "'")
 
 if ($featState -eq "Disabled") {
@@ -438,7 +459,7 @@ else {
 Write-Step "Installing WSL tooling (git, curl, python3, venv, build tools)..."
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -u root -- bash -lc "export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y git curl ca-certificates python3 python3-venv build-essential"
+    wsl.exe -d $Dist --cd ~ -u root -- bash -lc "export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get install -y git curl ca-certificates python3 python3-venv build-essential"
     $rc = $LASTEXITCODE
 } catch { $rc = $LASTEXITCODE }
 $ErrorActionPreference = $oldEap
@@ -483,7 +504,7 @@ $pwInject = ""
 $userExists = $false
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -- bash -lc "id '$safeUser' >/dev/null 2>&1"
+    wsl.exe -d $Dist --cd ~ -- bash -lc "id '$safeUser' >/dev/null 2>&1"
     $userExists = ($LASTEXITCODE -eq 0)
 } catch { $userExists = $false }
 $ErrorActionPreference = $oldEap
@@ -557,7 +578,7 @@ $inner = "set -e; " +
 $u = $safeUser
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -u root -- bash -lc $inner
+    wsl.exe -d $Dist --cd ~ -u root -- bash -lc $inner
     $rc = $LASTEXITCODE
 } catch { $rc = $LASTEXITCODE }
 finally {
@@ -603,7 +624,7 @@ if ($Refresh.IsPresent -or -not $bundleHasInstallSh) {
     $rc = 1
     try {
         $extractCmd = "rm -rf '$wslInstallTargetSq/harness' '$wslInstallTargetSq/config' '$wslInstallTargetSq/scripts' '$wslInstallTargetSq/core' '$wslInstallTargetSq/install.sh' && tar -xzf '$wslTempPkgSq' -C '$wslInstallTargetSq'"
-        wsl.exe -d $Dist -- bash -lc $extractCmd
+        wsl.exe -d $Dist --cd ~ -- bash -lc $extractCmd
         $rc = $LASTEXITCODE
     } catch {
         $rc = if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
@@ -633,7 +654,7 @@ if ($Refresh.IsPresent -or -not $bundleHasInstallSh) {
 $preExists = $false
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -- bash -lc "test -d '$wslInstallTargetSq' && test -f '$wslInstallTargetSq/install.sh'"
+    wsl.exe -d $Dist --cd ~ -- bash -lc "test -d '$wslInstallTargetSq' && test -f '$wslInstallTargetSq/install.sh'"
     $preExists = ($LASTEXITCODE -eq 0)
 } catch { $preExists = $false }
 $ErrorActionPreference = $oldEap
@@ -643,10 +664,12 @@ if (-not $preExists) {
 }
 
 Write-Step "Running the harness installer inside WSL..."
+$installFlags = "--global --target all --with-backends --no-firewall --no-obsidian --skip-warmup"
+if ($Quiet) { $installFlags += " -y" }
 $code = 0
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -- bash -lc "cd '$wslInstallTargetSq' && AGENT_HARNESS_CANONICAL_ROOT='$wslInstallTargetSq' bash ./install.sh --global --target all --with-backends --no-firewall --no-obsidian --skip-warmup -y"
+    wsl.exe -d $Dist --cd ~ -- bash -lc "cd '$wslInstallTargetSq' && AGENT_HARNESS_CANONICAL_ROOT='$wslInstallTargetSq' bash ./install.sh $installFlags"
     $code = $LASTEXITCODE
 } catch {
     $code = -1
@@ -663,7 +686,7 @@ Write-Ok "install.sh completed successfully."
 # (6) Final summary
 # ---------------------------------------------------------------
 Write-Host ""
-Write-Host "agent-harness v0.7.2 install complete." -ForegroundColor Green
+Write-Host "agent-harness v0.7.3 install complete." -ForegroundColor Green
 Write-Host ""
 Write-Host "What was installed:" -ForegroundColor Cyan
 Write-Host "  - Embedded harness runtime tree extracted to $InstallTarget (Windows side),"
@@ -682,7 +705,7 @@ Write-Host "  - Windows side: remove the runtime dir ($InstallTarget)."
 Write-Host "  - WSL: remove ~/.config/opencode*, ~/.local/share/opencode-sglang-stack, ~/.orchestration"
 Write-Host "  - Optional: wsl.exe --unregister $Dist (removes the distro and its data)."
 Write-Host ""
-Write-Host "One-command start (download install-agent-harness-v0.7.2-windows10-11.ps1, then):" -ForegroundColor Cyan
-Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1"
+Write-Host "One-command start (download install-agent-harness-v0.7.3-windows10-11.ps1, then):" -ForegroundColor Cyan
+Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1"
 Write-Host ""
 exit 0

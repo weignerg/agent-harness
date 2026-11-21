@@ -156,6 +156,13 @@ AssertTest "17 uses valid 'wsl.exe -l -v' (not '-l --list')"   ($src.Contains("w
 AssertTest "18 safe unsigned hex conversion (no [UInt32] cast)" ($src.Contains("ToUInt32") -and -not $src.Contains('[UInt32]$rc'))
 AssertTest "19 chpasswd stages user:password with finally rm"  ($src.Contains('$safeUser + ":" + $plainPw') -and $src.Contains('Remove-Item -LiteralPath $pwFile'))
 AssertTest "20 no double-semicolon in pwInject"                (-not $src.Contains('$pwInject = "; '))
+AssertTest "21 PS 5.1 safe: no leading pipe on new line"       (-not ($src -match '(?m)^\s*\|'))
+AssertTest "22 PS 5.1 safe: parenthesized Test-IsAdmin cast"   ($src.Contains('([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole'))
+AssertTest "23 DISM checks .State before fallback"             ($src.Contains('$null -ne $feat.State'))
+AssertTest "24 Write-State uses parenthesized ([string]`$token)" ($src.Contains('([string]$token)'))
+AssertTest "25 PS 5.1 safe: no raw UTF-8 em-dash in script"    (-not $src.Contains([char]0x2014))
+AssertTest "26 wsl.exe passes --cd ~ for clean UNC execution"  ($src.Contains('--cd ~'))
+AssertTest "27 interactive install.sh only passes -y with -Quiet" ($src.Contains('if ($Quiet) { $installFlags += " -y" }') -and -not $src.Contains('--skip-warmup -y"'))
 
 # ---------------------------------------------------------------------------
 $passCount = $script:passCount

@@ -14,7 +14,7 @@
 - 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
 - ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
 - 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
-- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 10/11 WSL2 self-extracting installer: download `install-agent-harness-v0.7.2-windows10-11.ps1` and run a single command to provision WSL, self-extract the runtime tree, and install the harness inside WSL.
+- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 10/11 WSL2 self-extracting installer: download `install-agent-harness-v0.7.3-windows10-11.ps1` and run a single command to provision WSL, self-extract the runtime tree, and install the harness inside WSL.
 
 ---
 
@@ -194,18 +194,18 @@ Security is enabled by default (`WITH_FIREWALL=true`). The installer stages host
 ### Self-Extracting Release Installers (Linux & Windows WSL2)
 
 Releases ship **exactly two** self-extracting installers (no separate source tarball):
-- **Linux (distro-agnostic):** `install-agent-harness-v0.7.2-linux.sh`
-- **Windows 10/11 (WSL2):** `install-agent-harness-v0.7.2-windows10-11.ps1`
+- **Linux (distro-agnostic):** `install-agent-harness-v0.7.3-linux.sh`
+- **Windows 10/11 (WSL2):** `install-agent-harness-v0.7.3-windows10-11.ps1`
 
 ```bash
 # Linux: download and run directly
-chmod +x ./install-agent-harness-v0.7.2-linux.sh
-./install-agent-harness-v0.7.2-linux.sh
+chmod +x ./install-agent-harness-v0.7.3-linux.sh
+./install-agent-harness-v0.7.3-linux.sh
 ```
 
 ```powershell
 # Windows 10/11 (WSL2): download and run one command (see docs/WINDOWS.md)
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1
 ```
 
 Build both artifacts locally from a checkout with:
