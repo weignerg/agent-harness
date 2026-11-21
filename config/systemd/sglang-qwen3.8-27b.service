@@ -30,7 +30,7 @@ Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="
 Environment="SGLANG_27B_MAMBA_ARGS=--max-mamba-cache-size 5 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
-Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+Environment="PATH=%h/.local/share/opencode-sglang-stack/venv/bin:%h/.local/share/opencode-sglang-stack/cuda-home/bin:/opt/cuda/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
 # Note: Unbraced $VAR syntax is required for optional flags ($SGLANG_27B_TORCH_COMPILE, $SGLANG_27B_SPECULATIVE_ARGS, $SGLANG_27B_CPU_OFFLOAD_ARGS, $SGLANG_27B_MAMBA_ARGS)
 # because systemd unbraced $VAR emits 0 arguments when empty and splits on whitespace when set,

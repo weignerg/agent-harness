@@ -12,7 +12,7 @@ Environment="SGLANG_CONTEXT_LENGTH=262144"
 Environment="SGLANG_CPU_OFFLOAD_ARGS="
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
-Environment="PATH=/opt/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin"
+Environment="PATH=%h/.local/share/opencode-sglang-stack/venv/bin:%h/.local/share/opencode-sglang-stack/cuda-home/bin:/opt/cuda/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
 ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --model-path ornith-ai/Ornith-1.5-35B-A3B-NVFP4 \

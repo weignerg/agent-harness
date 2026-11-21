@@ -4,8 +4,18 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.4**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.5**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.5] - 2026-11-20
+
+### Fixed
+- **SGLang FlashInfer/PyTorch JIT compilation on fresh Ubuntu/WSL2 hosts** (`config/systemd/sglang-*.service`, `install.sh`, `windows/install-windows.ps1`):
+  - Added `%h/.local/share/opencode-sglang-stack/venv/bin` and `%h/.local/share/opencode-sglang-stack/cuda-home/bin` to `PATH` across all SGLang systemd service templates (`sglang-ornith-1.5-9b.service`, `sglang-ornith-1.5-35b.service`, `sglang-qwen3.8-27b.service`) so pip-installed `ninja` in the venv is always discoverable (resolving `FileNotFoundError: [Errno 2] No such file or directory: 'ninja'`).
+  - Added `ninja-build` to the WSL2 Ubuntu apt bootstrap package list in `windows/install-windows.ps1`.
+  - Added `resolve_sglang_cuda_home()` in `install.sh` to wire a valid `CUDA_HOME` into deployed SGLang units and warmup subshells — preferring system `/opt/cuda` or `/usr/local/cuda` when `bin/nvcc` is present, and otherwise synthesizing `~/.local/share/opencode-sglang-stack/cuda-home` from the venv's pip-installed NVIDIA CUDA toolkit (`nvidia/cu13`, `nvidia/cu12`, or `nvidia/cuda_nvcc`) with `lib64/libcudart.so` and `lib64/stubs/libcuda.so` symlinks for FlashInfer JIT linking.
+  - Updated `install.sh` service activation to `systemctl --user restart` an unhealthy/stopped SGLang unit after `daemon-reload` (while leaving an already-healthy server untouched) so `-Refresh` immediately applies updated unit files.
+- Version bump `0.7.4` → `0.7.5`.
 
 ## [v0.7.4] - 2026-11-20
 

@@ -164,6 +164,7 @@ AssertTest "25 PS 5.1 safe: no raw UTF-8 em-dash in script"    (-not $src.Contai
 AssertTest "26 wsl.exe passes --cd ~ for clean UNC execution"  ($src.Contains('--cd ~'))
 AssertTest "27 interactive install.sh only passes -y with -Quiet" ($src.Contains('if ($Quiet) { $installFlags += " -y" }') -and -not $src.Contains('--skip-warmup -y"'))
 AssertTest "28 PS 5.1 safe: no '(if ...)' inside parentheses"     (-not ($src -match '\(\s*if\s*\('))
+AssertTest "29 WSL apt bootstrap installs ninja-build"           ($src.Contains('build-essential ninja-build'))
 
 # ---------------------------------------------------------------------------
 $passCount = $script:passCount
