@@ -4,8 +4,19 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.6**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.7**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.7] - 2026-11-20
+
+### Fixed
+- **SGLang breakable prefill CUDA graph crash (`double free or corruption`), oversized Mamba cache, and WSL2 allocator safety across all 3 models** (`config/systemd/sglang-*.service`, `harness/hardware/probe.py`, `install.sh`):
+  - Disabled breakable prefill CUDA graph capture (`--disable-prefill-cuda-graph`), capped decode CUDA graph batch sizes (`--cuda-graph-max-bs-decode`), and bounded Mamba SSM cache slots (`--max-mamba-cache-size`) across all three hybrid Mamba/GDN service templates (`sglang-ornith-1.5-9b.service`, `sglang-ornith-1.5-35b.service`, `sglang-qwen3.8-27b.service`).
+  - Added resource-adaptive runtime limits in `harness/hardware/probe.py` (`compute_model_runtime_limits()`) and `install.sh`: tight VRAM tiers (`< 14 GB`) or CPU-offloaded models scale to `--max-mamba-cache-size 3 --cuda-graph-max-bs-decode 4`, while pure-GPU `>= 14 GB` tiers use `--max-mamba-cache-size 5 --cuda-graph-max-bs-decode 8`.
+  - Automatically switches `PYTORCH_CUDA_ALLOC_CONF` to `expandable_segments:False` and caps static VRAM fraction to `0.82` on `<= 24 GB` WSL2 GPUs in deployed SGLang units and warmup subshells (avoiding WSL2 GPU-PV `cuMemMap` / CUDA graph conflicts and leaving desktop compositor headroom), while preserving `expandable_segments:True` on native Linux.
+- **Clearer Windows WSL Linux password prompt** (`windows/install-windows.ps1`):
+  - Replaced the two-step `[y/N]` + password prompt with a single masked `Read-Host -AsSecureString` prompt (`Optional Linux password for '<user>' (press Enter to skip - recommended for WSL auto-login)`), preventing passwords typed at a `y/N` prompt from echoing or being silently discarded.
+- Version bump `0.7.6` → `0.7.7`.
 
 ## [v0.7.6] - 2026-11-20
 

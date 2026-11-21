@@ -165,6 +165,7 @@ AssertTest "26 wsl.exe passes --cd ~ for clean UNC execution"  ($src.Contains('-
 AssertTest "27 interactive install.sh only passes -y with -Quiet" ($src.Contains('if ($Quiet) { $installFlags += " -y" }') -and -not $src.Contains('--skip-warmup -y"'))
 AssertTest "28 PS 5.1 safe: no '(if ...)' inside parentheses"     (-not ($src -match '\(\s*if\s*\('))
 AssertTest "29 WSL apt bootstrap installs ninja-build"           ($src.Contains('build-essential ninja-build'))
+AssertTest "30 single masked Linux password prompt (no y/N trap)" ($src.Contains('Optional Linux password for') -and -not $src.Contains('Set a Linux password? [y/N'))
 
 # ---------------------------------------------------------------------------
 $passCount = $script:passCount

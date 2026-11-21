@@ -1,12 +1,12 @@
 #
 # install-windows.ps1
-# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.6).
+# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.7).
 #
 # TLDR:
-#   1) Download install-agent-harness-v0.7.6-windows10-11.ps1 from the release page
+#   1) Download install-agent-harness-v0.7.7-windows10-11.ps1 from the release page
 #      (https://github.com/weignerg/agent-harness/releases).
 #   2) Run ONE command:
-#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.6-windows10-11.ps1
+#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.7-windows10-11.ps1
 #   The command self-elevates, provisions WSL2 + Ubuntu (with systemd persistence and
 #   Task Scheduler auto-resume across the one mandatory reboot), decodes and checksum-
 #   verifies its embedded base64(tar.gz) runtime payload, extracts it into
@@ -16,7 +16,7 @@
 #
 # What it does (one paragraph):
 #   This script is the Windows/WSL2 bootstrap wrapped by release-build/make_windows_installer.ps1
-#   into the self-extracting install-agent-harness-v0.7.6-windows10-11.ps1 artifact. It
+#   into the self-extracting install-agent-harness-v0.7.7-windows10-11.ps1 artifact. It
 #   elevates itself, provisions WSL2 and the Ubuntu distro (handling the single mandatory
 #   reboot via a state marker and logon auto-resume task), installs git/curl/python inside
 #   Ubuntu, configures a default Linux user and [boot] systemd=true in /etc/wsl.conf,
@@ -382,17 +382,17 @@ try {
     $VerifiedPayload = Resolve-VerifiedEmbeddedPayload -ScriptPath $ScriptSelfPath
 } catch {
     Write-Err $_.Exception.Message
-    Write-Err "  1) Download install-agent-harness-v0.7.6-windows10-11.ps1 from the release page, or"
+    Write-Err "  1) Download install-agent-harness-v0.7.7-windows10-11.ps1 from the release page, or"
     Write-Err "     build it from a checkout with: pwsh -NoProfile -File release-build/make_windows_installer.ps1"
     Write-Err "  2) Then run:"
-    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.6-windows10-11.ps1"
+    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.7-windows10-11.ps1"
     exit 1
 }
 
 # ---------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------
-Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.6" -ForegroundColor Magenta
+Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.7" -ForegroundColor Magenta
 Write-Host "-------------------------------------------------------------"
 Write-Host
 Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substring(0, 12) + "...).")
@@ -403,7 +403,7 @@ Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substr
 if (-not (Test-IsAdmin)) {
     Write-Warn "Admin rights required - relaunching elevated..."
     $scriptPath = $ScriptSelfPath
-    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.6-windows10-11.ps1" }
+    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.7-windows10-11.ps1" }
     $argList = Format-SelfInvocationArgs -ScriptPath $scriptPath -BoundParams $script:InitialBoundParams
     Start-Process -FilePath $env:windir\System32\WindowsPowerShell\v1.0\powershell.exe `
                   -Verb RunAs -ArgumentList $argList
@@ -528,25 +528,23 @@ try {
 $ErrorActionPreference = $oldEap
 
 if (-not $Quiet) {
-    $wantPw = [bool]$SetPassword
-    if (-not $wantPw -and (-not $userExists)) {
-        $ans = Read-Host "Set a Linux password? [y/N (Enter = leave empty)]"
-        $wantPw = ($ans -and ($ans.Trim().ToLower() -match '^(y|yes)$'))
-    }
-    if ($wantPw) {
-        $ss = Read-Host -AsSecureString "Type the Linux password, then Enter"
+    $promptForPw = [bool]$SetPassword -or (-not $userExists)
+    if ($promptForPw) {
+        $ss = Read-Host -AsSecureString "Optional Linux password for '$safeUser' (press Enter to skip - recommended for WSL auto-login)"
         $b  = [System.Runtime.InteropServices.Marshal]::SecureStringToBString($ss)
         try {
             $plainPw = [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b)
-            $pwFile = Join-Path $env:TEMP ("agent-harness-pw-" + [Guid]::NewGuid().ToString("N"))
-            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($pwFile, ($safeUser + ":" + $plainPw + "`n"), $utf8NoBom)
+            if (-not [string]::IsNullOrEmpty($plainPw)) {
+                $pwFile = Join-Path $env:TEMP ("agent-harness-pw-" + [Guid]::NewGuid().ToString("N"))
+                $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+                [System.IO.File]::WriteAllText($pwFile, ($safeUser + ":" + $plainPw + "`n"), $utf8NoBom)
+                # Resolve the Windows-side temp path to the WSL view so the bash payload below
+                # (running inside WSL) can actually locate and read the staged password.
+                $pwFileWslSq = ConvertTo-BashSingleQuoted (Convert-WindowsToWslPath $pwFile)
+                $pwInject = "if [ -f '$pwFileWslSq' ]; then chmod 600 '$pwFileWslSq' && chpasswd < '$pwFileWslSq'; rm -f '$pwFileWslSq'; fi; "
+            }
             $plainPw = $null
-            # Resolve the Windows-side temp path to the WSL view so the bash payload below
-            # (running inside WSL) can actually locate and read the staged password.
-            $pwFileWslSq = ConvertTo-BashSingleQuoted (Convert-WindowsToWslPath $pwFile)
         } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBString($b) }
-        $pwInject = "if [ -f '$pwFileWslSq' ]; then chmod 600 '$pwFileWslSq' && chpasswd < '$pwFileWslSq'; rm -f '$pwFileWslSq'; fi; "
     }
     if (-not $userExists) {
         $s = Read-Host "Give '$safeUser' passwordless sudo? [y/N]"
@@ -704,7 +702,7 @@ Write-Ok "install.sh completed successfully."
 # (6) Final summary
 # ---------------------------------------------------------------
 Write-Host ""
-Write-Host "agent-harness v0.7.6 install complete." -ForegroundColor Green
+Write-Host "agent-harness v0.7.7 install complete." -ForegroundColor Green
 Write-Host ""
 Write-Host "What was installed:" -ForegroundColor Cyan
 Write-Host "  - Embedded harness runtime tree extracted to $InstallTarget (Windows side),"
@@ -723,7 +721,7 @@ Write-Host "  - Windows side: remove the runtime dir ($InstallTarget)."
 Write-Host "  - WSL: remove ~/.config/opencode*, ~/.local/share/opencode-sglang-stack, ~/.orchestration"
 Write-Host "  - Optional: wsl.exe --unregister $Dist (removes the distro and its data)."
 Write-Host ""
-Write-Host "One-command start (download install-agent-harness-v0.7.6-windows10-11.ps1, then):" -ForegroundColor Cyan
-Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.6-windows10-11.ps1"
+Write-Host "One-command start (download install-agent-harness-v0.7.7-windows10-11.ps1, then):" -ForegroundColor Cyan
+Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.7-windows10-11.ps1"
 Write-Host ""
 exit 0

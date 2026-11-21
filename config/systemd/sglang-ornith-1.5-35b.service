@@ -9,7 +9,9 @@ EnvironmentFile=-%h/.config/opencode-backends/env
 Environment="SGLANG_UNIT=%n"
 Environment="SGLANG_SERVICE=sglang-ornith-1.5-35b.service"
 Environment="SGLANG_CONTEXT_LENGTH=262144"
+Environment="SGLANG_35B_CUDA_GRAPH_MAX_BS=8"
 Environment="SGLANG_CPU_OFFLOAD_ARGS="
+Environment="SGLANG_35B_MAMBA_ARGS=--max-mamba-cache-size 5 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
 Environment="PATH=%h/.local/share/opencode-sglang-stack/venv/bin:%h/.local/share/opencode-sglang-stack/cuda-home/bin:/opt/cuda/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"
@@ -23,7 +25,10 @@ ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --reasoning-parser qwen3 \
   --mem-fraction-static 0.88 \
   --context-length ${SGLANG_CONTEXT_LENGTH} \
+  --disable-prefill-cuda-graph \
+  --cuda-graph-max-bs-decode ${SGLANG_35B_CUDA_GRAPH_MAX_BS} \
   $SGLANG_CPU_OFFLOAD_ARGS \
+  $SGLANG_35B_MAMBA_ARGS \
   --chunked-prefill-size 2048 \
   --max-running-requests 1 \
   --port ${SGLANG_BACKEND_PORT} \

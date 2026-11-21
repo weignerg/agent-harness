@@ -30,6 +30,11 @@ for _su in "$R/config/systemd/sglang-ornith-1.5-35b.service" "$R/config/systemd/
     else
         fail "$(basename "$_su") missing CCCL CTK compatibility flags"
     fi
+    if grep -q -- '--disable-prefill-cuda-graph' "$_su" && grep -q -- '--cuda-graph-max-bs-decode' "$_su" && grep -q -- '--max-mamba-cache-size 5' "$_su"; then
+        pass "$(basename "$_su") disables prefill CUDA graph and bounds decode/Mamba cache"
+    else
+        fail "$(basename "$_su") missing prefill CUDA graph or Mamba cache bounds"
+    fi
 done
 if grep -qE -- '--context-length [0-9]+\$' "$U"; then fail "corrupted context-length string in template"; else pass "unbroken context-length parameter"; fi
 DEPLOYED="$HOME/.config/systemd/user/sglang-ornith-1.5-35b.service"
