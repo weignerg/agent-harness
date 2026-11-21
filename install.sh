@@ -2203,6 +2203,7 @@ warmup_sglang_service() {
         --context-length "${ctx_len}"
         --chunked-prefill-size 2048
         --max-running-requests 1
+        --max-mamba-cache-size 5
         --port "${sglang_port}"
         --host 127.0.0.1
         --disable-cuda-graph
@@ -2221,9 +2222,13 @@ warmup_sglang_service() {
 
     local resolved_warmup_cuda_home=""
     resolved_warmup_cuda_home="$(resolve_sglang_cuda_home "${STACK_DIR}" 2>/dev/null || true)"
+    local warmup_alloc_conf="expandable_segments:True"
+    if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ]; then
+        warmup_alloc_conf="expandable_segments:False"
+    fi
 
     (
-        export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+        export PYTORCH_CUDA_ALLOC_CONF="${warmup_alloc_conf}"
         export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:--DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK}"
         export FLASHINFER_EXTRA_CUDAFLAGS="${FLASHINFER_EXTRA_CUDAFLAGS:--DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK}"
         [ -d "${STACK_DIR}/venv/bin" ] && export PATH="${STACK_DIR}/venv/bin:$PATH"
@@ -3001,6 +3006,8 @@ deploy_opencode_backend_and_units() {
     local ornith_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('max_context', d.get('max_context', 262144)))" "${gpu_profile}" 2>/dev/null || echo "${max_context}")"
     local ornith_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
     local ornith_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('cpu_offload_gb', d.get('cpu_offload_gb', 0)))" "${gpu_profile}" 2>/dev/null || echo "0")"
+    local ornith_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('max_mamba_cache_size', 5))" "${gpu_profile}" 2>/dev/null || echo "5")"
+    local ornith_cg_max_bs="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('cuda_graph_max_bs_decode', 8))" "${gpu_profile}" 2>/dev/null || echo "8")"
 
     local qwen27b_default_ctx="${max_context:-262144}"
     if [ "${qwen27b_default_ctx:-262144}" -gt 262144 ] 2>/dev/null; then
@@ -3009,10 +3016,35 @@ deploy_opencode_backend_and_units() {
     local qwen27b_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('max_context', ${qwen27b_default_ctx}))" "${gpu_profile}" 2>/dev/null || echo "${qwen27b_default_ctx}")"
     local qwen27b_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
     local qwen27b_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
+    local qwen27b_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('max_mamba_cache_size', 5))" "${gpu_profile}" 2>/dev/null || echo "5")"
+    local qwen27b_cg_max_bs="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('cuda_graph_max_bs_decode', 8))" "${gpu_profile}" 2>/dev/null || echo "8")"
 
     local ornith9b_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('max_context', d.get('max_context', 262144)))" "${gpu_profile}" 2>/dev/null || echo "${max_context}")"
     local ornith9b_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
     local ornith9b_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
+    local ornith9b_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('max_mamba_cache_size', 5))" "${gpu_profile}" 2>/dev/null || echo "5")"
+    local ornith9b_cg_max_bs="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('cuda_graph_max_bs_decode', 8))" "${gpu_profile}" 2>/dev/null || echo "8")"
+
+    local is_wsl_runtime=false
+    if [ "${SGLANG_FORCE_WSL_TUNING:-0}" = "1" ] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ]; then
+        is_wsl_runtime=true
+    fi
+    if [ "$is_wsl_runtime" = true ]; then
+        # On WSL2 GPU-PV, Windows DWM shares GPU VRAM; cap static pool to 0.82 on <=24GB GPUs
+        # so decode CUDA graph capture and Windows desktop compositor always have headroom.
+        local probed_vram_gb_val
+        probed_vram_gb_val="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('vram_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
+        if python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if 0 < v <= 26.0 else 1)" "${probed_vram_gb_val}" 2>/dev/null; then
+            ornith_mem_fraction="$(python3 -c "import sys; print(min(float(sys.argv[1]), 0.82))" "${ornith_mem_fraction}" 2>/dev/null || echo "0.82")"
+            qwen27b_mem_fraction="$(python3 -c "import sys; print(min(float(sys.argv[1]), 0.82))" "${qwen27b_mem_fraction}" 2>/dev/null || echo "0.82")"
+            ornith9b_mem_fraction="$(python3 -c "import sys; print(min(float(sys.argv[1]), 0.82))" "${ornith9b_mem_fraction}" 2>/dev/null || echo "0.82")"
+            mem_fraction="$(python3 -c "import sys; print(min(float(sys.argv[1]), 0.82))" "${mem_fraction}" 2>/dev/null || echo "0.82")"
+        fi
+    fi
+
+    local ornith_mamba_args="--max-mamba-cache-size ${ornith_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+    local qwen27b_mamba_args="--max-mamba-cache-size ${qwen27b_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+    local ornith9b_mamba_args="--max-mamba-cache-size ${ornith9b_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
 
     local probed_model="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model', 'ornith-1.5-35b'))" "${gpu_profile}" 2>/dev/null || echo "ornith-1.5-35b")"
     local probed_model_path="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model_path', 'ornith-ai/Ornith-1.5-35B-A3B-NVFP4'))" "${gpu_profile}" 2>/dev/null || echo "ornith-ai/Ornith-1.5-35B-A3B-NVFP4")"
@@ -3270,6 +3302,16 @@ with open(path, 'w') as f:
                     "/\\[Service\\]/a Environment=\"SGLANG_CPU_OFFLOAD_ARGS=${ornith_offload_args}\"" \
                     "${dest_dir}/sglang-ornith-1.5-35b.service"
             fi
+            if [ -n "${ornith_cg_max_bs:-}" ] && grep -q 'Environment="SGLANG_35B_CUDA_GRAPH_MAX_BS=' "${dest_dir}/sglang-ornith-1.5-35b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_35B_CUDA_GRAPH_MAX_BS=[0-9]*\"|Environment=\"SGLANG_35B_CUDA_GRAPH_MAX_BS=${ornith_cg_max_bs}\"|" \
+                    "${dest_dir}/sglang-ornith-1.5-35b.service"
+            fi
+            if [ -n "${ornith_mamba_args:-}" ] && grep -q 'Environment="SGLANG_35B_MAMBA_ARGS=' "${dest_dir}/sglang-ornith-1.5-35b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_35B_MAMBA_ARGS=[^\"]*\"|Environment=\"SGLANG_35B_MAMBA_ARGS=${ornith_mamba_args}\"|" \
+                    "${dest_dir}/sglang-ornith-1.5-35b.service"
+            fi
             sed -i \
                 "s|--context-length [0-9]*\${SGLANG_CONTEXT_LENGTH}|--context-length \${SGLANG_CONTEXT_LENGTH}|" \
                 "${dest_dir}/sglang-ornith-1.5-35b.service"
@@ -3303,6 +3345,16 @@ with open(path, 'w') as f:
             else
                 sed -i \
                     "/\\[Service\\]/a Environment=\"SGLANG_27B_CPU_OFFLOAD_ARGS=${qwen27b_offload_args}\"" \
+                    "${dest_dir}/sglang-qwen3.8-27b.service"
+            fi
+            if [ -n "${qwen27b_cg_max_bs:-}" ] && grep -q 'Environment="SGLANG_27B_CUDA_GRAPH_MAX_BS=' "${dest_dir}/sglang-qwen3.8-27b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_27B_CUDA_GRAPH_MAX_BS=[0-9]*\"|Environment=\"SGLANG_27B_CUDA_GRAPH_MAX_BS=${qwen27b_cg_max_bs}\"|" \
+                    "${dest_dir}/sglang-qwen3.8-27b.service"
+            fi
+            if [ -n "${qwen27b_mamba_args:-}" ] && grep -q 'Environment="SGLANG_27B_MAMBA_ARGS=' "${dest_dir}/sglang-qwen3.8-27b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_27B_MAMBA_ARGS=[^\"]*\"|Environment=\"SGLANG_27B_MAMBA_ARGS=${qwen27b_mamba_args}\"|" \
                     "${dest_dir}/sglang-qwen3.8-27b.service"
             fi
             if grep -q '\${SGLANG_27B_MEM_FRACTION}' "${dest_dir}/sglang-qwen3.8-27b.service"; then
@@ -3355,26 +3407,40 @@ with open(path, 'w') as f:
                     "/\\[Service\\]/a Environment=\"SGLANG_9B_CPU_OFFLOAD_ARGS=${ornith9b_offload_args}\"" \
                     "${dest_dir}/sglang-ornith-1.5-9b.service"
             fi
+            if [ -n "${ornith9b_cg_max_bs:-}" ] && grep -q 'Environment="SGLANG_9B_CUDA_GRAPH_MAX_BS=' "${dest_dir}/sglang-ornith-1.5-9b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_9B_CUDA_GRAPH_MAX_BS=[0-9]*\"|Environment=\"SGLANG_9B_CUDA_GRAPH_MAX_BS=${ornith9b_cg_max_bs}\"|" \
+                    "${dest_dir}/sglang-ornith-1.5-9b.service"
+            fi
+            if [ -n "${ornith9b_mamba_args:-}" ] && grep -q 'Environment="SGLANG_9B_MAMBA_ARGS=' "${dest_dir}/sglang-ornith-1.5-9b.service"; then
+                sed -i \
+                    "s|Environment=\"SGLANG_9B_MAMBA_ARGS=[^\"]*\"|Environment=\"SGLANG_9B_MAMBA_ARGS=${ornith9b_mamba_args}\"|" \
+                    "${dest_dir}/sglang-ornith-1.5-9b.service"
+            fi
         fi
     done
 
     # Wire valid CUDA_HOME (system /opt/cuda, /usr/local/cuda, or synthesized venv cuda-home) into SGLang units
+    # and disable CUDA VMM expandable_segments on WSL2 GPU-PV where cuMemMap conflicts with CUDA graphs.
     local resolved_sglang_cuda_home=""
     resolved_sglang_cuda_home="$(resolve_sglang_cuda_home "${STACK_DIR}" 2>/dev/null || true)"
-    if [ -n "${resolved_sglang_cuda_home}" ]; then
-        for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
-            local sgl_unit=""
-            for sgl_unit in sglang-ornith-1.5-35b.service sglang-qwen3.8-27b.service sglang-ornith-1.5-9b.service; do
-                if [ -f "${dest_dir}/${sgl_unit}" ]; then
-                    if grep -q '^Environment="CUDA_HOME=' "${dest_dir}/${sgl_unit}"; then
-                        sed -i \
-                            "s|^Environment=\"CUDA_HOME=[^\"]*\"|Environment=\"CUDA_HOME=${resolved_sglang_cuda_home}\"|" \
-                            "${dest_dir}/${sgl_unit}"
-                    fi
+    for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+        local sgl_unit=""
+        for sgl_unit in sglang-ornith-1.5-35b.service sglang-qwen3.8-27b.service sglang-ornith-1.5-9b.service; do
+            if [ -f "${dest_dir}/${sgl_unit}" ]; then
+                if [ -n "${resolved_sglang_cuda_home}" ] && grep -q '^Environment="CUDA_HOME=' "${dest_dir}/${sgl_unit}"; then
+                    sed -i \
+                        "s|^Environment=\"CUDA_HOME=[^\"]*\"|Environment=\"CUDA_HOME=${resolved_sglang_cuda_home}\"|" \
+                        "${dest_dir}/${sgl_unit}"
                 fi
-            done
+                if [ "${is_wsl_runtime:-false}" = true ] && grep -q '^Environment="PYTORCH_CUDA_ALLOC_CONF=' "${dest_dir}/${sgl_unit}"; then
+                    sed -i \
+                        's|^Environment="PYTORCH_CUDA_ALLOC_CONF=.*"|Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False"|' \
+                        "${dest_dir}/${sgl_unit}"
+                fi
+            fi
         done
-    fi
+    done
 
     # Tune T3 Code working directory if custom path requested
     if [ -n "$T3_SERVE_WORKDIR" ]; then
