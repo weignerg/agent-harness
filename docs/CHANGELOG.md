@@ -4,8 +4,17 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.3**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.4**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.4] - 2026-11-20
+
+### Fixed
+- **Fresh-PC Windows PowerShell 5.1 runtime crash in `Get-InstalledDistro`** (`windows/install-windows.ps1`):
+  - Replaced invalid PS 5.1 `[int](if (...) { ... } else { ... })` parenthesized expression (triggered on fresh machines where `wsl.exe` returns non-zero before WSL is installed) with standard `if`/`else`, hoisted inline `if` out of the return hashtable, and wrapped `wsl.exe` queries with `$ErrorActionPreference = "Continue"`.
+  - Used `wsl.exe --install -d Ubuntu --no-launch` (with fallback) so Ubuntu OOBE does not collide with the installer's Step 3b user setup.
+- Added PS 5.1 parenthesized-`if` regression guard in `windows/tests/wsl-bootstrap.tests.ps1`.
+- Version bump `0.7.3` → `0.7.4`.
 
 ## [v0.7.3] - 2026-11-20
 
