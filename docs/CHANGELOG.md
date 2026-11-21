@@ -4,8 +4,40 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.1**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.2**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.2] - 2026-11-20
+
+### Added
+- **Two self-extracting release artifacts** (`release-build/make_linux_installer.sh`,
+  `release-build/make_windows_installer.ps1`, `release-build/release-test`): deterministic
+  `base64(tar.gz)` self-extracting installers (`install-agent-harness-v0.7.2-linux.sh` and
+  `install-agent-harness-v0.7.2-windows10-11.ps1`) with embedded SHA-256 verification before
+  extraction/execution; removes the legacy separate source-tarball release path. —
+  [#64](https://github.com/weignerg/agent-harness/issues/64),
+  [#65](https://github.com/weignerg/agent-harness/issues/65)
+- **Guided per-runtime configuration wizard + human-confirmed T3 completion gate** in
+  `install.sh`: interactive checklist covering OpenCode, Claude Code, and Antigravity / T3 Code
+  pairing, `OPENCODE_SERVER_USERNAME` ↔ WSL `[user] default=` reconciliation, and a
+  human-confirmed end-to-end T3 Supreme Orchestrator verification gate. —
+  [#67](https://github.com/weignerg/agent-harness/issues/67)
+- **Windows/WSL bootstrap test suite** (`windows/tests/wsl-bootstrap.tests.ps1`) and guided
+  wizard/gate regression suite (`tests/test_guided_config_gate.sh`).
+
+### Fixed
+- **WSL2 bootstrap hardening** (`windows/install-windows.ps1`): rewritten `Get-InstalledDistro`
+  exact-instance detection with `0x80070xxx` error surfacing, `[boot] systemd=true` persistence
+  in `/etc/wsl.conf` (and removal of `--no-healthcheck`), interactive Linux username/password/sudo
+  setup decoupled from Windows login, and Task Scheduler at-logon auto-resume across the
+  mandatory WSL reboot. — [#66](https://github.com/weignerg/agent-harness/issues/66)
+
+### Changed
+- **T3 top-level-thread dispatch for team-orchestrators**: refactored harness orchestration rules,
+  `core/manifest.json`, and `harness/installer/compiler.py` so per-issue team-orchestrators
+  launch as T3 top-level threads (gated on running under T3 Code) with durable `variant: high`
+  options compilation. — [#68](https://github.com/weignerg/agent-harness/issues/68)
+- Version bump `0.7.1` → `0.7.2`.
 
 ## [v0.7.1] - 2026-11-16
 
