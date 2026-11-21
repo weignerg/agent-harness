@@ -46,6 +46,14 @@ Across all supported runtimes, roles align strictly to model reasoning tiers wit
 
 ---
 
+## T3 Code Dispatch — Per-Issue team-orchestrators as Top-Level Threads
+
+- **Canonical dispatch (T3 Code only, gated by the `t3-code` tools being present or `T3_SERVE_PORT` set):** `supreme-orchestrator` launches each per-issue `team-orchestrator` as an **isolated T3 top-level thread**, not a native subagent — via `t3_thread_launch` / `create_threads`, `title: "Issue #<n>: <description> (Team Orchestrator)"`, model `local-sglang/ornith-1.5-35b`, provider option `variant: "high"`. Each thread is its own session with the subagent budget to coordinate `architect`, `worker`, `tester`, `reviewer`, `scout`, and `grunt`.
+- **Native subagent fallback (NOT the primary top-level dispatch):** `delegate_task` with `isolation: "worktree"` is retained only when a `team-orchestrator` must run as a nested subagent inside an existing thread.
+- **Other runtimes (OpenCode-native / Claude Code / AGY):** use that runtime's own launch method; the T3 instructions above are gated "only when running under T3 Code".
+
+---
+
 ## Orchestrator Non-Termination Invariant
 - **Never Kill `supreme-orchestrator` or `team-orchestrator`**: Every agent is strictly prohibited from killing, stopping, or terminating `supreme-orchestrator` or any `team-orchestrator` instance — neither via OS commands (`kill`, `pkill`, `killall`, `systemctl stop`) nor via runtime task or subagent management tools.
 - **Directory Discipline Invariant**: Never create, resolve, or write to an ad-hoc `.orchestration` directory inside a git worktree or arbitrary working subdirectory. All task handoffs, memory indices, logs, and worktrees must strictly bind to the authoritative anchored `.orchestration` root (either `<main_repo>/.orchestration` for local harnesses or `~/.orchestration` for global harnesses).

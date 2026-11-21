@@ -58,6 +58,9 @@
       "tier": "heavy",
       "mode": "primary",
       "description": "Single human-facing primary: triages requirements, awaits human agreement, then delegates to exactly one per-issue team-orchestrator; never spawns leaves, edits files, runs tests, or merges",
+      "options": {
+        "variant": "high"
+      },
       "readonly": true,
       "tools": {
         "write": false,

@@ -29,7 +29,12 @@
 param(
   [string]$InstallTarget = "$env:USERPROFILE\agent-harness",  # canonical harness source dir
   [string]$Dist          = "Ubuntu",                          # WSL distro
-  [switch]$Refresh       # re-copy this bundle over an existing $InstallTarget (update flow)
+  [switch]$Refresh,                                            # re-copy this bundle over an existing $InstallTarget (update flow)
+  [string]$Profile   = "quick",   # quick | full | manual  (recorded feature set; install.sh has no profile flag)
+  [string]$LinuxUser = "user",    # Linux login name; defaults to sanitized $env:USERNAME
+  [switch]$SetPassword,           # if set, prompt for + apply a Linux password (else empty-password convenience)
+  [switch]$NoSudo,                # if set, skip passwordless sudo (account still created)
+  [switch]$Quiet                  # non-interactive: never prompt, use all defaults
 )
 
 $StateDir  = Join-Path $env:LOCALAPPDATA "agent-harness"
@@ -97,27 +102,81 @@ function Get-WslFeatureState {
 }
 
 function Get-InstalledDistro {
-    # Returns $true if the configured $Dist distro is present. Distinguish the probe cases
-    # by TEXT, not by exit code alone. Matching is case-insensitive on the distro name.
-    $output = $null
-    try {
-        $output = wsl.exe -l -v 2>&1 | Out-String
-    } catch {
-        $output = [string]$_.Exception.Message
+    param(
+        # When supplied, parse this directly instead of invoking wsl.exe. Tests use this to
+        # feed representative `wsl.exe -l` output so the detection logic is unit-testable on
+        # non-Windows hosts. $null => query the live system.
+        [string]$RawOutput = $null
+    )
+
+    # Returns a hashtable: { present=$false missing=$false status="<text>" code="<0x..>" }.
+    #  present = case-insensitive match of $Dist in the *exact* instance-name list.
+    #  missing = !(present); $true => it is safe to recommend `wsl.exe --install -d $Dist`.
+    #  code    = a WSL 0x80070xxx code surfaced VERBATIM, or "" if none.
+    $present = $false
+    $errHex  = ""
+
+    if (-not [string]::IsNullOrEmpty($RawOutput)) {
+        $blob = $RawOutput
     }
-    if ([string]::IsNullOrEmpty($output)) { return $false }
-
-    # Case: WSL is installed but has no distros yet.
-    if ($output -match 'no installed distributions') { return $false }
-
-    # Case: WSL not ready (optional feature not enabled / hypervisor not running).
-    if ($output -match '0x8007019e|0x80370102|Windows Subsystem for Linux has no installed distributions') {
-        return $false
+    else {
+        $listTxt  = $null; $listCode  = 0
+        $statusTxt = $null; $statusC  = 0
+        try { $listTxt  = wsl.exe -l --list  2>&1 | Out-String; $listCode  = $LASTEXITCODE }
+        catch { $listCode  = [UInt32]$_.Exception.HResult }
+        try { $statusTxt = wsl.exe --status  2>&1 | Out-String; $statusC  = $LASTEXITCODE }
+        catch { $statusC  = [UInt32]$_.Exception.HResult }
+        $blob = ($listTxt + "`r`n" + $statusTxt)
+        if ($listCode  -ne 0 -or $statusC  -ne 0) {
+            $rc = if ($listCode  -ne 0) { $listCode } else { $statusC }
+            $errHex = ('0x{0:X8}' -f ([UInt32]$rc))
+        }
     }
 
-    # Case: a row like "*? Ubuntu  Stopped  2" -> configured distro present.
-    if ($output -match [regex]::Escape($Dist)) { return $true }
-    return $false
+    # Surface any 0x80070xxx WSL error code from the output VERBATIM.
+    if ($errHex -eq "" -and ($blob -match '(0x80[0-9a-fA-F]{6})')) { $errHex = $Matches[0] }
+
+    # WSL not ready / no distros  => "missing", recommend install, surface any hex code.
+    if ($blob -match '0x8007019e|0x80370102|Windows Subsystem for Linux has no installed distributions') {
+        return @{ present=$false; missing=$true; status="WSL not ready"; code=$errHex }
+    }
+    if ([string]::IsNullOrWhiteSpace($blob.Trim())) {
+        return @{ present=$false; missing=$true; status="WSL not installed"; code=$errHex }
+    }
+    if ($blob -match 'no installed distributions') {
+        return @{ present=$false; missing=$true; status="WSL installed; no distros"; code=$errHex }
+    }
+
+    # Normalise instance names: drop header rows, leading "*"/"*?" status markers, and a
+    # trailing "?". Then match against $Dist (case-insensitive).
+    $names = ($blob -split "`r?`n") | ForEach-Object { $_.Trim() } `
+                  | ForEach-Object { $_ -replace '^\*[?]?\s+','' }   # drop "*?"/"*" marker prefix
+                  | ForEach-Object { $_ -replace '\?\s*$','' }          # ignore trailing "?"
+                  | Where-Object { $_ -and $_ -notmatch '^(NAME|Version|version|Downloading|Installing|---|—|)$' }
+
+    # Match each row's instance NAME = the first whitespace-delimited token (the distro
+    # column), stripping surrounding double quotes from a quoted/renamed instance. Exact
+    # token match wins; a case-insensitive substring match is kept only as a lenient
+    # fallback so a distro name that the user configured is never missed (no false
+    # negative). NOTE: this means "Ubuntu" still matches a renamed "Ubuntu-22.04"; that is
+    # the intentional lenient behavior called for by the kickoff.
+    $tokens = foreach ($n in $names) {
+        $tok = ($n -split '\s+', 2)[0]               # instance name = first column token
+        if ($tok -match '^"(.*)"$') { $tok = $Matches[1] }  # strip surrounding quotes
+        $tok
+    }
+    # Pass 1: exact (case-insensitive) instance-name match.
+    foreach ($t in $tokens) { if ($t -ieq $Dist) { $present = $true; break } }
+    # Pass 2: lenient case-insensitive substring fallback, only if no exact hit.
+    if (-not $present) {
+        foreach ($t in $tokens) {
+            if ($t.IndexOf($Dist, [StringComparison]::InvariantCultureIgnoreCase) -ge 0) { $present = $true; break }
+        }
+    }
+
+    return @{ present=$present; missing=(-$present);
+              status = if ($present) { "$Dist present" } else { "$Dist absent (recommend install)" };
+              code   = $errHex }
 }
 
 function Convert-WindowsToWslPath($winPath) {
@@ -139,6 +198,43 @@ function Read-State {
 function Write-State($token) {
     if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Force -Path $StateDir | Out-Null }
     Set-Content -Path $StateFile -Value [string]$token -NoNewline
+}
+
+# ---------------------------------------------------------------
+# Auto-resume after reboot: register an "at logon" Task Scheduler task
+# that re-invokes THIS script (idempotent; ReRegister overwrites any
+# existing task of the same name). Registered in CASE A before the
+# mandatory reboot; removed once the install reaches READY.
+# ---------------------------------------------------------------
+function Register-WslInstallResume {
+    try {
+        $name = "agent-harness-wsl-install-resume"
+        $psBin = Join-Path $env:windir "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $arg   = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
+        $act   = New-ScheduledTaskAction  -Execute $psBin -Argument $arg -WorkingDirectory $BundleRoot
+        $trig  = New-ScheduledTaskTrigger  -AtLogOn
+        $user  = ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+        # -RunLevel Highest is the canonical privilege; New-ScheduledTaskPrincipal has no
+        # -RequirePrivilege parameter, so omit it (passing it threw and silently skipped
+        # registration, defeating the post-reboot auto-resume feature).
+        $princ = New-ScheduledTaskPrincipal -UserId $user -RunLevel Highest
+        Register-ScheduledTask -TaskName $name -Action $act -Trigger $trig `
+                               -Principal $princ -Description "Resume agent-harness WSL install after login." `
+                               -Force | Out-Null
+        Write-Ok "Auto-resume registered: after reboot, on your next log-in this setup continues automatically."
+    } catch {
+        Write-Warn "Auto-resume registration skipped: $($_.Exception.Message)"
+    }
+}
+
+function Unregister-WslInstallResume {
+    $name = "agent-harness-wsl-install-resume"
+    try {
+        Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction Stop | Out-Null
+        Write-Ok "Auto-resume task removed (install finished)."
+    } catch {
+        # Not an error if the task was never registered / already gone.
+    }
 }
 
 # ---------------------------------------------------------------
@@ -183,7 +279,7 @@ Write-Ok "Running with administrator privileges."
 # ---------------------------------------------------------------
 $featState = Get-WslFeatureState
 $hasDistro = Get-InstalledDistro
-Write-Step ("WSL feature state: " + $featState + " ; " + $Dist + " present: " + $hasDistro + " ; state marker: '" + (Read-State) + "'")
+Write-Step ("WSL feature state: " + $featState + " ; " + $Dist + " present: " + $hasDistro.present + " ; " + $hasDistro.status + " ; state marker: '" + (Read-State) + "'")
 
 if ($featState -eq "Disabled") {
     # CASE A - Fresh: enable WSL feature + install the distro; a reboot is required to finish.
@@ -193,6 +289,7 @@ if ($featState -eq "Disabled") {
     $ErrorActionPreference = $oldEap
     if ($rc -ne 0) { Write-Warn "wsl.exe --install returned exit code $rc (continuing)"; }
     Write-State "PENDING_REBOOT"
+    Register-WslInstallResume
     Write-Host ""
     Write-Err "WSL + $Dist are being installed. A REBOOT is required to finish."
     Write-Err "Please REBOOT your machine now."
@@ -208,7 +305,7 @@ elseif ($featState -eq "Enabled (Pending Reboot)" -or $featState -eq "Disabled (
 }
 else {
     # featState == "Enabled"
-    if (-not $hasDistro) {
+    if (-not $hasDistro.present) {
         # CASE C - WSL enabled, but the distro is not installed yet.
         Write-Step "WSL is enabled; installing the $Dist distro..."
         $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
@@ -241,15 +338,81 @@ Write-Ok "WSL tooling present."
 # via an empty password + passwordless sudo. This is documented (and reversible) in
 # docs/WINDOWS.md; run "passwd <user>" inside WSL to set a real password if desired.
 #
-# The payload is built so PowerShell does NOT expand the inner shell: the only PowerShell
-# variable is $u, injected by concatenation. $u is sanitized (non-alphanumerics stripped,
-# lowercased, fallback 'user') before embedding, so injection is impossible.
-$u = ($env:USERNAME -replace '[^a-zA-Z0-9]','').ToLower(); if ([string]::IsNullOrEmpty($u)) { $u = "user" }
+# ---------------------------------------------------------------
+# (3b) First-run identity. INTERACTIVE, and DECOUPLED from the Windows
+#      login ($env:USERNAME): the Linux user can differ from the Windows
+#      account. Prompts only when the target Linux user does NOT already
+#      exist, so (a) a fresh box is asked (typically on the post-reboot
+#      resume run, immediately before the user is created) and (b) later
+#      re-runs are SILENT (user already present) -> non-interactive resume.
+#      "-Quiet" never prompts. The Profile choice is recorded to the state
+#      dir (install.sh has no profile flag). Password is staged in a 0600
+#      temp file so it never appears on a command line.
+# ---------------------------------------------------------------
+$profile = if ($Quiet) { "quick" } else { ($Profile.ToLower()) }
+if ($profile -notin @("quick", "full", "manual")) { $profile = "quick" }
+
+# Preferred Linux login: explicit -LinuxUser, else sanitized $env:USERNAME, else 'user'.
+if ($Quiet) {
+    $linuxUser = $LinuxUser
+} else {
+    $prompted = Read-Host "Linux username [$($LinuxUser)]"
+    $linuxUser = if ($prompted) { $prompted } else { $LinuxUser }
+}
+$safeUser = ($linuxUser -replace '[^a-zA-Z0-9]', '').ToLower()
+if ([string]::IsNullOrEmpty($safeUser)) { $safeUser = "user" }
+
+# Does the Linux user already exist? (Skip prompting / creation-work if so.)
+$pwFile = ""
+$pwInject = ""
+$userExists = $false
+$oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+try {
+    wsl.exe -d $Dist -- bash -lc "id '$safeUser' >/dev/null 2>&1"
+    $userExists = ($LASTEXITCODE -eq 0)
+} catch { $userExists = $false }
+$ErrorActionPreference = $oldEap
+
+if (-not $userExists -and (-not $Quiet)) {
+    $ans = Read-Host "Set a Linux password? [Enter = leave empty (convenience)]"
+    if ($ans) {
+        $ss = Read-Host -AsSecureString "Type the Linux password, then Enter"
+        $b  = [System.Runtime.InteropServices.Marshal]::SecureStringToBString($ss)
+        try {
+            $pwFile = Join-Path $env:TEMP ("agent-harness-pw-" + [Guid]::NewGuid().ToString("N"))
+            [File]::WriteAllText($pwFile, [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b))
+            # Resolve the Windows-side temp path to the WSL view so the bash payload below
+            # (running inside WSL) can actually locate and read the staged password.
+            $pwFileWsl = Convert-WindowsToWslPath $pwFile
+        } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBString($b) }
+        $pwInject = "; [ -f '$pwFileWsl' ] && chmod 600 '$pwFileWsl' && chpasswd < '$pwFileWsl'; rm -f '$pwFileWsl'; "
+    }
+    $s = Read-Host "Give '$safeUser' passwordless sudo? [y/N]"
+    $sudoOK = (-not [bool]$NoSudo) -and ($s -and $s.Trim().ToLower() -eq 'y')
+} else {
+    $sudoOK = -not [bool]$NoSudo
+}
+
+# Record the chosen profile for later reference (does not affect resume token logic).
+try {
+    if (-not (Test-Path $StateDir)) { New-Item -ItemType Directory -Force -Path $StateDir | Out-Null }
+    Set-Content -Path (Join-Path $StateDir "profile") -Value $profile -Force -ErrorAction SilentlyContinue
+} catch { }
+
+$sudoFlag = if ($sudoOK) { "1" } else { "0" }   # PowerShell substitutes literal 1/0 (injection-safe)
+
 $inner = "set -e; " +
-  "if ! id '$u' >/dev/null 2>&1; then useradd -m -s /bin/bash '$u'; fi; " +
-  "echo '$u ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent-harness; chmod 440 /etc/sudoers.d/agent-harness; " +
-  "usermod -p '' '$u'; " +
-  "if ! grep -q '^\[user\]' /etc/wsl.conf 2>/dev/null; then printf '[user]\ndefault=$u\n' >> /etc/wsl.conf; fi"
+  "if ! id '$safeUser' >/dev/null 2>&1; then useradd -m -s /bin/bash '$safeUser'; fi; " +
+  "usermod -aG sudo '$safeUser'; " +
+  "if [ $sudoFlag ] = 1; then echo '$safeUser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent-harness; chmod 440 /etc/sudoers.d/agent-harness; fi; " +
+  "usermod -p '' '$safeUser'; " +               # empty password is the default convenience
+  $pwInject +
+  "if [ ! -f /etc/wsl.conf ]; then : > /etc/wsl.conf; fi; " +
+  "grep -q '^\\[boot\\]' /etc/wsl.conf 2>/dev/null || printf '[boot]\nsystemd=true\n'  >> /etc/wsl.conf; " +
+  "grep -q '^\\[user\\]' /etc/wsl.conf 2>/dev/null || printf '[user]\ndefault=$safeUser\n' >> /etc/wsl.conf"
+
+# Backwards-compatible alias for the downstream success message.
+$u = $safeUser
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
     wsl.exe -d $Dist -u root -- bash -lc $inner
@@ -259,7 +422,14 @@ $ErrorActionPreference = $oldEap
 if ($rc -ne 0) { Write-Err "Default user setup failed (exit code $rc)"; exit $rc }
 Write-Ok "Default WSL user '$u' ready (empty password, passwordless sudo)."
 
+# Force WSL up fresh so the new /etc/wsl.conf [boot] systemd=true takes effect on the
+# next launch (the running distro otherwise keeps its stale boot config). --shutdown is
+# idempotent and safe when WSL is already down.
+wsl.exe --shutdown
+
 Write-State "READY"
+# Install reached READY: the post-reboot auto-resume task is no longer needed.
+Unregister-WslInstallResume
 
 # ---------------------------------------------------------------
 # (4) Copy this source bundle to the canonical install target
@@ -310,7 +480,7 @@ Write-Step "Running the harness installer inside WSL..."
 $code = 0
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -- bash -lc "cd '$wslInstallTargetSq' && ./install.sh --global --target all --with-backends --no-firewall --no-obsidian --no-healthcheck --skip-warmup -y"
+    wsl.exe -d $Dist -- bash -lc "cd '$wslInstallTargetSq' && ./install.sh --global --target all --with-backends --no-firewall --no-obsidian --skip-warmup -y"
     $code = $LASTEXITCODE
 } catch {
     $code = -1

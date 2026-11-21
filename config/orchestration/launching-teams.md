@@ -104,10 +104,21 @@ In Google Antigravity (`agy`), multi-tier orchestration operates natively via in
 
 ### 4.3 T3 Code Launch & Thread Orchestration
 
-When running inside T3 Code (detected via `t3-code` tools or `T3_SERVE_PORT`), `supreme-orchestrator` dispatches `team-orchestrator` instances as dedicated project threads:
+When running inside T3 Code (detected via `t3-code` tools or `T3_SERVE_PORT`), `supreme-orchestrator` dispatches `team-orchestrator` instances as **isolated top-level project threads, not native subagents**:
 
 1. **Pre-flight Check**: Call `orchestrator_capabilities` once per thread before dispatching.
-2. **Worktree Delegation**: Use `delegate_task` with `isolation: "worktree"` to ensure the team orchestrator works within an isolated git worktree branch in the same project:
+2. **Canonical Dispatch (PRIMARY) — Top-Level Thread**: Launch each per-issue `team-orchestrator` as its own top-level thread via `create_threads` / `t3_thread_launch`:
+   ```json
+   {
+     "title": "Issue #<n>: <description> (Team Orchestrator)",
+     "target": {
+       "model": "local-sglang/ornith-1.5-35b",
+       "options": { "variant": "high" }
+     }
+   }
+   ```
+   Model `local-sglang/ornith-1.5-35b` with provider `variant: "high"`.
+3. **Native Subagent Fallback (NOT the primary top-level dispatch)**: Keep `delegate_task` with `isolation: "worktree"` only when a `team-orchestrator` must run as a *nested* subagent inside another thread:
    ```json
    {
      "isolation": "worktree",
@@ -117,7 +128,6 @@ When running inside T3 Code (detected via `t3-code` tools or `T3_SERVE_PORT`), `
      }
    }
    ```
-3. **Independent Thread Launch**: When creating new top-level threads for distinct issues, call `create_threads` or `t3_thread_launch` setting `title: "Issue #<n>: <description> (Team Orchestrator)"` under the project environment.
 4. **Thread Coordination**:
    - Check status using `t3_thread_read` or follow the running delegate's `next`.
    - Never poll in a tight loop.
@@ -132,7 +142,8 @@ When the user starts the teams, give one block per team in exactly this format, 
 #: <n> - Team: <short name> - Work: <one line>
 Start command: `cd <repo> && opencode run --name '<Branch_Name>' 'Role: Team Orchestrator. Read ~/.config/opencode/orchestration/kickoffs/<file>.md and follow it as your kickoff.'`
 Claude background command: `claude --bg -n "<Branch_Name>" --agent team-orchestrator --add-dir "<worktree_path>" -p "Role: Team Orchestrator. Read ~/.claude/orchestration/kickoffs/<file>.md and follow it as your kickoff."`
-T3 Code delegate: `delegate_task(isolation="worktree", task="Role: Team Orchestrator. Read .orchestration/kickoffs/<file>.md and follow it as your kickoff.", target={"model": "local-sglang/ornith-1.5-35b"})`
+T3 Code top-level thread (primary): `create_threads(title="Issue #<n>: <description> (Team Orchestrator)", target={"model": "local-sglang/ornith-1.5-35b", "options": {"variant": "high"}})`
+T3 Code subagent (fallback, NOT primary): `delegate_task(isolation="worktree", task="Role: Team Orchestrator. Read .orchestration/kickoffs/<file>.md and follow it as your kickoff.", target={"model": "local-sglang/ornith-1.5-35b"})`
 ────────────────────────────────────────
 ```
 
