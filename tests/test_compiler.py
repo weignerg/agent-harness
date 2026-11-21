@@ -923,5 +923,39 @@ class TestModelCompilerAndProfiles(unittest.TestCase):
         self.assertIn("delegate_task(isolation=\"worktree\"", config_supreme)
 
 
+class TestSupremeOrchestratorVariantDurability(unittest.TestCase):
+    """Issue #68: `variant: high` for the supreme-orchestrator ships durably via
+    manifest + compiler options block, so it survives compile (extract_body strips
+    raw frontmatter and would otherwise drop a hand-added option)."""
+
+    def setUp(self):
+        self.manifest_path = CORE_DIR / "manifest.json"
+        self.assertTrue(self.manifest_path.is_file(), "core/manifest.json not found")
+        self.manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        self.roles = self.manifest.get("roles", {})
+
+    def test_manifest_carries_variant_high_for_supreme(self):
+        opts = self.roles.get("supreme-orchestrator", {}).get("options")
+        self.assertIsInstance(opts, dict, "supreme-orchestrator.options must be a block")
+        self.assertEqual(opts.get("variant"), "high")
+
+    def test_compile_opencode_frontmatter_emits_options_block(self):
+        tier_models = self.manifest["model_tiers"]
+        fm = compile_opencode_frontmatter("supreme-orchestrator", self.roles["supreme-orchestrator"], tier_models)
+        self.assertIn("options:", fm)
+        self.assertIn("variant: high", fm)
+
+    def test_compile_agents_deploys_variant_high_and_top_level_thread(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_dir = Path(tmp_dir)
+            compile_agents(core_dir=CORE_DIR, target_runtime="opencode", output_dir=out_dir)
+            supreme = (out_dir / "supreme-orchestrator.md").read_text(encoding="utf-8")
+            # Durability: compiled frontmatter still carries the option after compile.
+            self.assertIn("variant: high", supreme)
+            # Dispatch wording: top-level T3 thread dispatch documented in the prompt body.
+            self.assertIn("t3_thread_launch", supreme)
+            self.assertIn("top-level thread", supreme.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
