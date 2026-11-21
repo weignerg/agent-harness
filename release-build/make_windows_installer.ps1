@@ -30,7 +30,7 @@ $here     = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $here "..")).Path
 $pyprojectText = [System.IO.File]::ReadAllText((Join-Path $repoRoot "pyproject.toml"))
 $verMatch = [regex]::Match($pyprojectText, '(?m)^version\s*=\s*"([^"]+)"')
-$version  = if ($verMatch.Success) { "v" + $verMatch.Groups[1].Value } else { "v0.7.2" }
+$version  = if ($verMatch.Success) { "v" + $verMatch.Groups[1].Value } else { "v0.7.3" }
 $outName  = "install-agent-harness-${version}-windows10-11.ps1"
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
