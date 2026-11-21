@@ -9,7 +9,8 @@
 #             + base64(payload)
 #   On run  : awk locates the marker line, decodes base64, verifies SHA-256
 #             BEFORE extraction/execution, extracts into a persistent runtime
-#             directory (or HARNESS_EXTRACT_DIR), cd's into it, and execs
+#             directory (or HARNESS_EXTRACT_DIR), exports
+#             AGENT_HARNESS_CANONICAL_ROOT, cd's into it, and execs
 #             `bash install.sh "$@"` (args pass-through).
 #   Excludes: .git, build/, .venv, uv.lock, tests/, release-build/, __pycache__.
 #   Builder scripts are NOT shipped inside the artifact.
@@ -25,6 +26,8 @@ MARKER='#''__HARNESS_PKG_EOF__'
 
 OUT_DIR="${1:-${REPO_ROOT}/dist}"
 mkdir -p "${OUT_DIR}"
+# Canonicalize OUT_DIR BEFORE changing working directory to REPO_ROOT.
+OUT_DIR="$(cd "${OUT_DIR}" && pwd)"
 
 # Payload file tree (relative to the repo root).
 PAYLOAD_PATHS=(harness config scripts core install.sh)
@@ -36,8 +39,8 @@ _b64="$(mktemp)"
 cleanup() { rm -f "${_raw}" "${_b64}"; }
 trap cleanup EXIT
 
-# Build gzip tarball of the runtime tree, excluding caches/build/git/tests.
-tar -czf "${_raw}" \
+# Build deterministic gzip tarball (no gzip timestamp header) excluding caches/git/tests.
+GZIP=-n tar -czf "${_raw}" \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   --exclude='*.pyo' \
@@ -71,8 +74,8 @@ HDR_TOP
   cat <<'HDR_BODY'
 SNIPPET_MARKER='#''__HARNESS_PKG_EOF__'
 
-# Locate the line immediately after the sentinel marker.
-_start="$(awk -v m="${SNIPPET_MARKER}" '$0==m {print NR+1; exit}' "$0")"
+# Locate the line immediately after the sentinel marker (stdin redirect avoids '=' path bug).
+_start="$(awk -v m="${SNIPPET_MARKER}" '$0==m {print NR+1; exit}' < "$0")"
 if [ -z "${_start}" ]; then
   echo "install-agent-harness: payload marker '${SNIPPET_MARKER}' not found in artifact." >&2
   exit 1
@@ -82,7 +85,7 @@ _pkg="$(mktemp)"
 trap 'rm -f "${_pkg}"' EXIT
 
 # Decode base64 payload (base64 -d is portable across GNU/BSD/BusyBox).
-awk "NR>=${_start}" "$0" | base64 -d > "${_pkg}"
+awk "NR>=${_start}" < "$0" | base64 -d > "${_pkg}"
 
 # Verify payload SHA-256 BEFORE extracting or executing install.sh.
 if command -v sha256sum >/dev/null 2>&1; then
@@ -104,10 +107,10 @@ fi
 # Resolve extraction directory. Use a persistent directory under $HOME by default
 # so symlinks created by install.sh survive reboots, or honor HARNESS_EXTRACT_DIR.
 if [ -n "${HARNESS_EXTRACT_DIR:-}" ]; then
-  _extract="${HARNESS_EXTRACT_DIR}"
-  mkdir -p "${_extract}"
+  mkdir -p "${HARNESS_EXTRACT_DIR}"
+  _extract="$(cd "${HARNESS_EXTRACT_DIR}" && pwd)"
 elif [ -n "${HOME:-}" ] && mkdir -p "${XDG_DATA_HOME:-${HOME}/.local/share}/agent-harness/runtime" 2>/dev/null; then
-  _extract="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-harness/runtime"
+  _extract="$(cd "${XDG_DATA_HOME:-${HOME}/.local/share}/agent-harness/runtime" && pwd)"
 else
   _extract="$(mktemp -d)"
 fi
@@ -123,6 +126,9 @@ if [ "${HARNESS_EXTRACT_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
+# Pin canonical root to the extracted directory so an unrelated parent .git repo
+# (e.g., $HOME/.git dotfiles) cannot hijack install.sh's resolve_canonical_repo_dir().
+export AGENT_HARNESS_CANONICAL_ROOT="${AGENT_HARNESS_CANONICAL_ROOT:-${_extract}}"
 cd "${_extract}"
 exec bash "${_extract}/install.sh" "$@"
 HDR_BODY

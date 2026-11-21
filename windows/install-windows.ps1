@@ -173,7 +173,7 @@ function Get-InstalledDistro {
         }
     }
 
-    return @{ present=$present; missing=(-$present);
+    return @{ present=$present; missing=(-not $present);
               status = if ($present) { "$Dist present" } else { "$Dist absent (recommend install)" };
               code   = $errHex }
 }
@@ -182,7 +182,7 @@ function Convert-WindowsToWslPath($winPath) {
     # C:\Users\X\agent-harness -> /mnt/c/Users/X/agent-harness
     if ($winPath -notmatch '^[A-Za-z]:\\') { return $winPath }
     $drive = $winPath.Substring(0,1).ToLower()
-    $rest  = $winPath.Substring(2).Replace('\','/')
+    $rest  = $winPath.Substring(2).Replace('\','/').TrimStart('/')
     return "/mnt/$drive/$rest"
 }
 
@@ -205,13 +205,39 @@ function Write-State($token) {
 # existing task of the same name). Registered in CASE A before the
 # mandatory reboot; removed once the install reaches READY.
 # ---------------------------------------------------------------
+function Format-SelfInvocationArgs {
+    param(
+        [string]$ScriptPath,
+        [hashtable]$BoundParams = @{}
+    )
+    $parts = New-Object System.Collections.Generic.List[string]
+    $parts.Add("-NoProfile")
+    $parts.Add("-ExecutionPolicy")
+    $parts.Add("Bypass")
+    $parts.Add("-File")
+    $parts.Add(('"' + ($ScriptPath -replace '"', '\"') + '"'))
+    foreach ($key in ($BoundParams.Keys | Sort-Object)) {
+        $val = $BoundParams[$key]
+        if ($val -is [System.Management.Automation.SwitchParameter]) {
+            if ($val.IsPresent) {
+                $parts.Add("-$key")
+            }
+        } elseif ($null -ne $val) {
+            $escaped = ([string]$val) -replace '"', '\"'
+            $parts.Add("-$key")
+            $parts.Add(('"' + $escaped + '"'))
+        }
+    }
+    return ($parts -join " ")
+}
+
 function Register-WslInstallResume {
     try {
         $name = "agent-harness-wsl-install-resume"
         $psBin = Join-Path $env:windir "System32\WindowsPowerShell\v1.0\powershell.exe"
         $selfPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
         $workDir  = if ($selfPath) { Split-Path -Parent $selfPath } else { (Get-Location).Path }
-        $arg   = "-NoProfile -ExecutionPolicy Bypass -File `"$selfPath`""
+        $arg   = Format-SelfInvocationArgs -ScriptPath $selfPath -BoundParams $script:InitialBoundParams
         $act   = New-ScheduledTaskAction  -Execute $psBin -Argument $arg -WorkingDirectory $workDir
         $trig  = New-ScheduledTaskTrigger  -AtLogOn
         $user  = ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
@@ -276,15 +302,47 @@ function Get-EmbeddedPayload {
     }
 }
 
+function Resolve-VerifiedEmbeddedPayload {
+    param([string]$ScriptPath)
+    $info = Get-EmbeddedPayload -ScriptPath $ScriptPath
+    if (-not $info.found) {
+        throw "No embedded runtime payload found in this script (missing '#__HARNESS_PKG_EOF__' sentinel)."
+    }
+    if ([string]::IsNullOrWhiteSpace($info.expectedSha) -or ($info.expectedSha -notmatch '^[0-9a-f]{64}$')) {
+        throw "Missing or malformed embedded '# HARNESS_PAYLOAD_SHA256=<64-hex>' header; refusing to proceed."
+    }
+    $bytes = [Convert]::FromBase64String($info.payloadB64)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $actualSha = -join (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }))
+    } finally {
+        $sha.Dispose()
+    }
+    if ($actualSha -ne $info.expectedSha) {
+        throw ("Embedded payload SHA-256 mismatch (expected=$($info.expectedSha) actual=$actualSha); refusing to proceed.")
+    }
+    return @{
+        bytes  = $bytes
+        sha256 = $actualSha
+    }
+}
+
+# Capture top-level CLI parameters so self-elevation and post-reboot resume preserve flags (e.g. -Refresh).
+$script:InitialBoundParams = @{}
+foreach ($kv in $PSBoundParameters.GetEnumerator()) {
+    $script:InitialBoundParams[$kv.Key] = $kv.Value
+}
+
 # ---------------------------------------------------------------
-# Embedded payload pre-check: this script is the self-extracting
-# artifact built by release-build/make_windows_installer.ps1.
-# Fail fast if invoked as the raw unbuilt template without a payload.
+# Embedded payload pre-check & SHA-256 verification (FAIL-CLOSED):
+# Runs BEFORE UAC elevation, WSL mutations, or extraction so a
+# corrupted/unbuilt script fails fast without mutating the host.
 # ---------------------------------------------------------------
 $ScriptSelfPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
-$EmbeddedPayload = Get-EmbeddedPayload -ScriptPath $ScriptSelfPath
-if (-not $EmbeddedPayload.found) {
-    Write-Err "No embedded runtime payload found in this script (missing '#__HARNESS_PKG_EOF__' sentinel)."
+try {
+    $VerifiedPayload = Resolve-VerifiedEmbeddedPayload -ScriptPath $ScriptSelfPath
+} catch {
+    Write-Err $_.Exception.Message
     Write-Err "  1) Download install-agent-harness-v0.7.1-windows10-11.ps1 from the release page, or"
     Write-Err "     build it from a checkout with: pwsh -NoProfile -File release-build/make_windows_installer.ps1"
     Write-Err "  2) Then run:"
@@ -298,15 +356,16 @@ if (-not $EmbeddedPayload.found) {
 Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.1" -ForegroundColor Magenta
 Write-Host "-------------------------------------------------------------"
 Write-Host
+Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substring(0, 12) + "...).")
 
 # ---------------------------------------------------------------
-# (1) Admin check / self-elevate
+# (1) Admin check / self-elevate (forwards all CLI parameters, incl. -Refresh)
 # ---------------------------------------------------------------
 if (-not (Test-IsAdmin)) {
     Write-Warn "Admin rights required - relaunching elevated..."
     $scriptPath = $ScriptSelfPath
     if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.1-windows10-11.ps1" }
-    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+    $argList = Format-SelfInvocationArgs -ScriptPath $scriptPath -BoundParams $script:InitialBoundParams
     Start-Process -FilePath $env:windir\System32\WindowsPowerShell\v1.0\powershell.exe `
                   -Verb RunAs -ArgumentList $argList
     exit 0
@@ -471,32 +530,19 @@ Write-State "READY"
 Unregister-WslInstallResume
 
 # ---------------------------------------------------------------
-# (4) Self-extract the embedded base64(tar.gz) runtime payload to
-#     $InstallTarget via WSL tar. Verifies embedded SHA-256 BEFORE
-#     writing or extracting. Idempotent: skipped if already extracted
-#     unless -Refresh is passed.
+# (4) Self-extract the verified base64(tar.gz) runtime payload to
+#     $InstallTarget via WSL tar. Payload was already decoded and
+#     SHA-256 verified (fail-closed) at startup before any mutations.
+#     Idempotent: skipped if already extracted unless -Refresh is passed.
 # ---------------------------------------------------------------
 $wslInstallTarget   = Convert-WindowsToWslPath $InstallTarget
 $wslInstallTargetSq = ConvertTo-BashSingleQuoted $wslInstallTarget
 $bundleHasInstallSh = Test-Path (Join-Path $InstallTarget "install.sh")
 if ($Refresh.IsPresent -or -not $bundleHasInstallSh) {
-    Write-Step "Decoding and verifying embedded runtime payload..."
-    $payloadBytes = [Convert]::FromBase64String($EmbeddedPayload.payloadB64)
-    if (-not [string]::IsNullOrEmpty($EmbeddedPayload.expectedSha)) {
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        try {
-            $actualSha = -join (($sha.ComputeHash($payloadBytes) | ForEach-Object { $_.ToString("x2") }))
-        } finally {
-            $sha.Dispose()
-        }
-        if ($actualSha -ne $EmbeddedPayload.expectedSha) {
-            Write-Err "Embedded payload SHA-256 mismatch! Refusing to extract."
-            Write-Err "  expected: $($EmbeddedPayload.expectedSha)"
-            Write-Err "  actual  : $actualSha"
-            exit 1
-        }
-        Write-Ok "Embedded payload SHA-256 verified ($($actualSha.Substring(0, 12))...)."
+    if (-not $VerifiedPayload -or -not $VerifiedPayload.bytes) {
+        $VerifiedPayload = Resolve-VerifiedEmbeddedPayload -ScriptPath $ScriptSelfPath
     }
+    $payloadBytes = $VerifiedPayload.bytes
 
     New-Item -ItemType Directory -Force -Path $InstallTarget | Out-Null
     $tempPkg = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-harness-pkg-" + [Guid]::NewGuid().ToString("N") + ".tar.gz")
@@ -529,6 +575,9 @@ if ($Refresh.IsPresent -or -not $bundleHasInstallSh) {
 # (5) Run the installer inside WSL (stream + surface exit code).
 #     The WSL target path is single-quoted inside bash, so it is
 #     made apostrophe-safe via ConvertTo-BashSingleQuoted.
+#     Pin AGENT_HARNESS_CANONICAL_ROOT and invoke `bash ./install.sh`
+#     so DrvFS execute-bit issues and unrelated parent .git repos
+#     cannot break execution or canonical repo resolution.
 # ---------------------------------------------------------------
 
 # Pre-flight: confirm the Linux view of the target exists (quote-safe path).
@@ -548,7 +597,7 @@ Write-Step "Running the harness installer inside WSL..."
 $code = 0
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -- bash -lc "cd '$wslInstallTargetSq' && ./install.sh --global --target all --with-backends --no-firewall --no-obsidian --skip-warmup -y"
+    wsl.exe -d $Dist -- bash -lc "cd '$wslInstallTargetSq' && AGENT_HARNESS_CANONICAL_ROOT='$wslInstallTargetSq' bash ./install.sh --global --target all --with-backends --no-firewall --no-obsidian --skip-warmup -y"
     $code = $LASTEXITCODE
 } catch {
     $code = -1

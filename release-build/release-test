@@ -4,15 +4,21 @@
 # release artifacts BEFORE executing install.sh.
 #
 # Checks:
-#   CHECK 1 (Builder output)      : builders emit EXACTLY two artifacts (no extras)
+#   CHECK 1 (Builder output)      : builders invoked with relative OutputDir from
+#                                   outside repo emit EXACTLY two artifacts
 #   CHECK 2 (Linux self-extract)  : chmod +x sandbox self-extract + SHA-256 match
 #                                   + full runtime tree + excluded paths absent
 #   CHECK 3 (Linux tamper check)  : corrupted payload rejected BEFORE extraction
-#   CHECK 4 (Linux install.sh)    : dry-run from extracted dir resolves it as
-#                                   the canonical repo (not the git checkout)
-#   CHECK 5 (Windows AST + .NET)  : built .ps1 has 0 PowerShell parse errors;
-#                                   .NET decodes + SHA-256 matches BEFORE exec;
-#                                   extracts full runtime tree, excludes clean
+#   CHECK 4 (Linux install.sh)    : dry-run via relative HARNESS_EXTRACT_DIR inside
+#                                   an unrelated parent .git repo resolves extracted
+#                                   dir alone as canonical repo (not git parent)
+#   CHECK 5 (Windows real code)   : built .ps1 has UTF-8 BOM + 0 PS parse errors;
+#                                   invokes the artifact's OWN AST functions
+#                                   (Resolve-VerifiedEmbeddedPayload, etc.) for:
+#                                   clean decode+extract, mutated-SHA reject,
+#                                   missing-SHA fail-closed reject, bad-b64 reject,
+#                                   -Refresh arg forwarding, and unbuilt template
+#                                   fail-fast exit
 #   CHECK 6 (Source-bundle clean) : old agent-harness-v0.7.1-source.tar.gz path
 #                                   removed from ps1, docs/WINDOWS.md, README.md
 # ==============================================================================
@@ -27,22 +33,19 @@ WINDOWS_ART="install-agent-harness-${VERSION}-windows10-11.ps1"
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
-mkdir -p "${WORK}/dist" "${WORK}/sandbox-bin" "${WORK}/linux-extract" \
-         "${WORK}/linux-dryrun" "${WORK}/sandbox-home" "${WORK}/win-extract"
+mkdir -p "${WORK}/caller" "${WORK}/sandbox-bin" "${WORK}/linux-extract" \
+         "${WORK}/parent-git" "${WORK}/sandbox-home" "${WORK}/win-extract"
 
 STATUS=0
 CHECKS=0
 ok()  { CHECKS=$((CHECKS+1)); echo "  CHECK ${CHECKS}: OK    $*"; }
 bad() { CHECKS=$((CHECKS+1)); echo "  CHECK ${CHECKS}: FAIL  $*" >&2; STATUS=1; }
 
-# --- tooling discovery --------------------------------------------------------
+# --- tooling discovery (PATH or explicit PWSH env override; no /tmp fallback) --
 PWSH_BIN="${PWSH:-$(command -v pwsh 2>/dev/null || true)}"
-if [ -z "${PWSH_BIN}" ] && [ -x /tmp/opencode/pwsh ]; then
-  PWSH_BIN="/tmp/opencode/pwsh"
-fi
-
-if [ -z "${PWSH_BIN}" ]; then
+if [ -z "${PWSH_BIN}" ] || [ ! -x "${PWSH_BIN}" ]; then
   echo "release-test: ERROR: pwsh is required to build and validate the Windows artifact." >&2
+  echo "  Install pwsh on PATH or pass PWSH=/path/to/pwsh." >&2
   exit 1
 fi
 
@@ -59,40 +62,45 @@ has_clean_runtime_tree() {
 }
 
 echo "============================================================"
-echo "Building both self-extracting artifacts into ${WORK}/dist"
+echo "Building both self-extracting artifacts via relative ./dist from outside repo"
 echo "============================================================"
-bash "${HERE}/make_linux_installer.sh" "${WORK}/dist" || { bad "make_linux_installer.sh failed"; exit 1; }
-"${PWSH_BIN}" -NoProfile -File "${HERE}/make_windows_installer.ps1" -OutputDir "${WORK}/dist" || { bad "make_windows_installer.ps1 failed"; exit 1; }
+(
+  cd "${WORK}/caller"
+  bash "${HERE}/make_linux_installer.sh" "./dist"
+  "${PWSH_BIN}" -NoProfile -File "${HERE}/make_windows_installer.ps1" -OutputDir "./dist"
+) || { bad "builder invocation with relative OutputDir failed"; exit 1; }
+
+DIST_DIR="${WORK}/caller/dist"
 
 echo "============================================================"
 echo "Running release-test verification checks"
 echo "============================================================"
 
 # CHECK 1 -- Builders emit EXACTLY two files (no source-only / sidecar extras)
-mapfile -t BUILT_FILES < <(LC_ALL=C ls -1 "${WORK}/dist" | sort)
+mapfile -t BUILT_FILES < <(LC_ALL=C ls -1 "${DIST_DIR}" | sort)
 if [ "${#BUILT_FILES[@]}" -eq 2 ] \
    && [ "${BUILT_FILES[0]}" = "${LINUX_ART}" ] \
    && [ "${BUILT_FILES[1]}" = "${WINDOWS_ART}" ]; then
-  ok "builder output: emitted EXACTLY 2 artifacts (${LINUX_ART}, ${WINDOWS_ART})"
+  ok "builder output: relative-path build emitted EXACTLY 2 artifacts (${LINUX_ART}, ${WINDOWS_ART})"
 else
   bad "builder output: expected exactly 2 artifacts, found ${#BUILT_FILES[@]}: ${BUILT_FILES[*]}"
 fi
 
 # Install both artifacts into an isolated sandbox directory (chmod +x)
-cp "${WORK}/dist/${LINUX_ART}" "${WORK}/sandbox-bin/${LINUX_ART}"
+cp "${DIST_DIR}/${LINUX_ART}" "${WORK}/sandbox-bin/${LINUX_ART}"
 chmod +x "${WORK}/sandbox-bin/${LINUX_ART}"
-cp "${WORK}/dist/${WINDOWS_ART}" "${WORK}/sandbox-bin/${WINDOWS_ART}"
+cp "${DIST_DIR}/${WINDOWS_ART}" "${WORK}/sandbox-bin/${WINDOWS_ART}"
 chmod +x "${WORK}/sandbox-bin/${WINDOWS_ART}"
 
 LINUX_SANDBOX="${WORK}/sandbox-bin/${LINUX_ART}"
 WIN_SANDBOX="${WORK}/sandbox-bin/${WINDOWS_ART}"
 
 # CHECK 2 -- Linux artifact self-extracts + checksum verified BEFORE executing install.sh
-LINUX_EMBED_SHA="$(awk -F= '/^# HARNESS_PAYLOAD_SHA256=/{print $2; exit}' "${LINUX_SANDBOX}")"
-LINUX_START="$(awk -v m='#''__HARNESS_PKG_EOF__' '$0==m {print NR+1; exit}' "${LINUX_SANDBOX}")"
+LINUX_EMBED_SHA="$(awk -F= '/^# HARNESS_PAYLOAD_SHA256=/{print $2; exit}' < "${LINUX_SANDBOX}")"
+LINUX_START="$(awk -v m='#''__HARNESS_PKG_EOF__' '$0==m {print NR+1; exit}' < "${LINUX_SANDBOX}")"
 LINUX_DECODED_SHA=""
 if [ -n "${LINUX_START}" ]; then
-  LINUX_DECODED_SHA="$(awk "NR>=${LINUX_START}" "${LINUX_SANDBOX}" | base64 -d | sha256sum | awk '{print $1}')"
+  LINUX_DECODED_SHA="$(awk "NR>=${LINUX_START}" < "${LINUX_SANDBOX}" | base64 -d | sha256sum | awk '{print $1}')"
 fi
 
 if [ -n "${LINUX_EMBED_SHA}" ] && [ "${LINUX_EMBED_SHA}" = "${LINUX_DECODED_SHA}" ] \
@@ -116,79 +124,150 @@ else
   bad "Linux tamper check: tampered artifact was not rejected"
 fi
 
-# CHECK 4 -- Linux artifact executes install.sh --dry-run and resolves extracted dir as canonical repo
-if HOME="${WORK}/sandbox-home" HARNESS_EXTRACT_DIR="${WORK}/linux-dryrun" \
-   "${LINUX_SANDBOX}" --dry-run --target all --non-interactive -y > "${WORK}/linux-dryrun.log" 2>&1 \
-   && grep -Fq "${WORK}/linux-dryrun/core" "${WORK}/linux-dryrun.log" \
-   && ! grep -Fq "${REPO_ROOT}/core" "${WORK}/linux-dryrun.log"; then
-  ok "Linux install.sh resolution: dry-run resolved extracted dir alone as canonical repo (exit 0)"
+# CHECK 4 -- Linux artifact with relative HARNESS_EXTRACT_DIR inside an unrelated parent .git repo
+# proves relative-path canonicalization AND that parent .git cannot hijack canonical repo resolution.
+git init -q "${WORK}/parent-git"
+if (
+  cd "${WORK}/parent-git"
+  HOME="${WORK}/sandbox-home" HARNESS_EXTRACT_DIR="./rel-extract" \
+    "${LINUX_SANDBOX}" --dry-run --target all --non-interactive -y > "${WORK}/linux-dryrun.log" 2>&1
+) && grep -Fq "${WORK}/parent-git/rel-extract/core" "${WORK}/linux-dryrun.log" \
+  && ! grep -Fq "${REPO_ROOT}/core" "${WORK}/linux-dryrun.log" \
+  && ! grep -Fq "${WORK}/parent-git/core" "${WORK}/linux-dryrun.log"; then
+  ok "Linux install.sh resolution: relative HARNESS_EXTRACT_DIR + parent .git resolved extracted dir alone (exit 0)"
 else
-  bad "Linux install.sh resolution: dry-run failed or leaked git repo path (see ${WORK}/linux-dryrun.log)"
+  bad "Linux install.sh resolution: dry-run failed or leaked parent/repo path (see ${WORK}/linux-dryrun.log)"
   tail -n 20 "${WORK}/linux-dryrun.log" >&2 || true
 fi
 
-# CHECK 5 -- Windows artifact: 0 PowerShell parse errors + .NET decode + SHA-256 check + clean tree
+# CHECK 5 -- Windows artifact: UTF-8 BOM + 0 PS parse errors + invoke REAL artifact functions
+# (no parallel reimplementation): verify clean decode, tamper/missing-SHA/bad-b64 rejection,
+# arg forwarding (-Refresh), path quoting, and unbuilt template fail-fast.
 WIN_VERIFY_PS1="${WORK}/verify-win.ps1"
 cat > "${WIN_VERIFY_PS1}" <<'PS1'
-param([string]$ArtifactPath, [string]$OutTarGz)
+param(
+    [string]$ArtifactPath,
+    [string]$TemplatePath,
+    [string]$WorkDir,
+    [string]$OutTarGz
+)
 $ErrorActionPreference = "Stop"
 
-# (a) Full PowerShell AST parse check on the assembled self-extracting artifact.
+# (a) Verify UTF-8 BOM (0xEF 0xBB 0xBF) for Windows PowerShell 5.1 compatibility.
+$rawBytes = [System.IO.File]::ReadAllBytes($ArtifactPath)
+if ($rawBytes.Length -lt 3 -or $rawBytes[0] -ne 0xEF -or $rawBytes[1] -ne 0xBB -or $rawBytes[2] -ne 0xBF) {
+    throw "Missing UTF-8 BOM on built Windows artifact: $ArtifactPath"
+}
+
+# (b) Full PowerShell AST parse check on the assembled self-extracting artifact.
 $tokens = $null
 $errs   = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile($ArtifactPath, [ref]$tokens, [ref]$errs)
+$ast    = [System.Management.Automation.Language.Parser]::ParseFile($ArtifactPath, [ref]$tokens, [ref]$errs)
 if ($errs -and $errs.Count -gt 0) {
     $errs | ForEach-Object { Write-Error "PARSE ERROR: $($_.Message) at $($_.Extent.Text)" }
     exit 10
 }
 
-# (b) Locate sentinel & embedded SHA-256, decode via .NET, verify SHA-256 BEFORE extract.
-$lines = [System.IO.File]::ReadAllLines($ArtifactPath)
-$marker = "#" + "__HARNESS_PKG_EOF__"
-$expectedSha = ""
-$markerIdx = -1
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match '^# HARNESS_PAYLOAD_SHA256=([0-9a-fA-F]{64})$') {
-        $expectedSha = $Matches[1].ToLowerInvariant()
+# (c) Load the artifact's OWN function definitions via AST (no mock reimplementation).
+$needed = @(
+    "ConvertTo-BashSingleQuoted",
+    "Convert-WindowsToWslPath",
+    "Format-SelfInvocationArgs",
+    "Get-EmbeddedPayload",
+    "Resolve-VerifiedEmbeddedPayload"
+)
+$fullText = $ast.Extent.Text
+foreach ($fnName in $needed) {
+    $marker = "function $fnName"
+    $startPos = $fullText.IndexOf($marker)
+    if ($startPos -lt 0) { throw "Function '$fnName' not found in built artifact" }
+    # Match balanced braces to extract exact function definition text.
+    $braceStart = $fullText.IndexOf("{", $startPos)
+    if ($braceStart -lt 0) { throw "Opening brace not found for '$fnName'" }
+    $depth = 0
+    $endPos = -1
+    for ($i = $braceStart; $i -lt $fullText.Length; $i++) {
+        $ch = $fullText[$i]
+        if ($ch -eq '{') { $depth++ }
+        elseif ($ch -eq '}') {
+            $depth--
+            if ($depth -eq 0) { $endPos = $i; break }
+        }
     }
-    if ($lines[$i] -ceq $marker) {
-        $markerIdx = $i
-        break
-    }
-}
-if ($markerIdx -lt 0 -or [string]::IsNullOrEmpty($expectedSha)) {
-    Write-Error "Missing marker or HARNESS_PAYLOAD_SHA256 in $ArtifactPath"
-    exit 11
+    if ($endPos -lt 0) { throw "Unbalanced braces for '$fnName'" }
+    $fnText = $fullText.Substring($startPos, ($endPos - $startPos + 1))
+    Invoke-Expression $fnText
 }
 
-$b64Lines = New-Object System.Collections.Generic.List[string]
-for ($j = $markerIdx + 1; $j -lt $lines.Count; $j++) {
-    if ($lines[$j] -ceq "#>") { break }
-    $b64Lines.Add($lines[$j])
+# (d) Invoke the artifact's own Resolve-VerifiedEmbeddedPayload on the real built artifact.
+$verified = Resolve-VerifiedEmbeddedPayload -ScriptPath $ArtifactPath
+if (-not $verified.bytes -or $verified.bytes.Length -lt 1000) {
+    throw "Decoded payload unexpectedly small or empty"
 }
-$bytes = [Convert]::FromBase64String(($b64Lines -join "`n"))
-$sha = [System.Security.Cryptography.SHA256]::Create()
-try {
-    $actualSha = -join (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }))
-} finally {
-    $sha.Dispose()
+[System.IO.File]::WriteAllBytes($OutTarGz, $verified.bytes)
+
+# (e) Negative test 1: mutated SHA-256 header MUST throw.
+$mutShaPath = Join-Path $WorkDir "win-mut-sha.ps1"
+$origText = [System.IO.File]::ReadAllText($ArtifactPath)
+$mutShaText = [regex]::Replace($origText, '(?m)^# HARNESS_PAYLOAD_SHA256=[0-9a-fA-F]{64}$', '# HARNESS_PAYLOAD_SHA256=' + ('0' * 64))
+[System.IO.File]::WriteAllText($mutShaPath, $mutShaText, [System.Text.UTF8Encoding]::new($true))
+$threw = $false
+try { [void](Resolve-VerifiedEmbeddedPayload -ScriptPath $mutShaPath) } catch { $threw = $true }
+if (-not $threw) { throw "Mutated SHA-256 header was NOT rejected!" }
+
+# (f) Negative test 2: stripped SHA-256 header MUST fail closed (throw).
+$noShaPath = Join-Path $WorkDir "win-no-sha.ps1"
+$noShaText = [regex]::Replace($origText, '(?m)^# HARNESS_PAYLOAD_SHA256=[0-9a-fA-F]{64}\r?\n', '')
+[System.IO.File]::WriteAllText($noShaPath, $noShaText, [System.Text.UTF8Encoding]::new($true))
+$threw = $false
+try { [void](Resolve-VerifiedEmbeddedPayload -ScriptPath $noShaPath) } catch { $threw = $true }
+if (-not $threw) { throw "Stripped SHA-256 header was NOT rejected (fail-open regression)!" }
+
+# (g) Negative test 3: corrupted base64 payload byte MUST throw.
+$badB64Path = Join-Path $WorkDir "win-bad-b64.ps1"
+$markerStr = "`n#" + "__HARNESS_PKG_EOF__`n"
+$mPos = $origText.LastIndexOf($markerStr)
+if ($mPos -lt 0) { throw "Actual sentinel line not found in built artifact" }
+$b64Start = $mPos + $markerStr.Length
+$firstChar = $origText[$b64Start]
+$flipped = if ($firstChar -eq 'A') { 'B' } else { 'A' }
+$badB64Text = $origText.Substring(0, $b64Start) + $flipped + $origText.Substring($b64Start + 1)
+[System.IO.File]::WriteAllText($badB64Path, $badB64Text, [System.Text.UTF8Encoding]::new($true))
+$threw = $false
+try { [void](Resolve-VerifiedEmbeddedPayload -ScriptPath $badB64Path) } catch { $threw = $true }
+if (-not $threw) { throw "Corrupted base64 payload byte was NOT rejected!" }
+
+# (h) Verify self-elevation/resume arg forwarding preserves -Refresh and spaced paths.
+$fwd = Format-SelfInvocationArgs -ScriptPath "C:\My Downloads\install.ps1" -BoundParams @{
+    Refresh = [System.Management.Automation.SwitchParameter]::new($true)
+    InstallTarget = "C:\Users\O'Brien\agent harness"
 }
-if ($actualSha -ne $expectedSha) {
-    Write-Error "SHA-256 mismatch: expected=$expectedSha actual=$actualSha"
-    exit 12
+if ($fwd -notmatch '-Refresh' -or $fwd -notmatch 'O''Brien\\agent harness') {
+    throw "Format-SelfInvocationArgs dropped -Refresh or InstallTarget: $fwd"
 }
-[System.IO.File]::WriteAllBytes($OutTarGz, $bytes)
-Write-Output $actualSha
+
+# (i) Verify WSL path conversion + bash single-quote escaping with apostrophe & space.
+$wslP = ConvertTo-BashSingleQuoted (Convert-WindowsToWslPath "C:\Users\O'Brien\agent harness")
+if ($wslP -ne "/mnt/c/Users/O'\''Brien/agent harness") {
+    throw "Unexpected WSL escaped path: $wslP"
+}
+
+Write-Output $verified.sha256
 PS1
 
-WIN_DECODED_SHA="$("${PWSH_BIN}" -NoProfile -File "${WIN_VERIFY_PS1}" "${WIN_SANDBOX}" "${WORK}/win.tar.gz" 2>&1)"
+WIN_DECODED_SHA="$("${PWSH_BIN}" -NoProfile -File "${WIN_VERIFY_PS1}" "${WIN_SANDBOX}" "${REPO_ROOT}/windows/install-windows.ps1" "${WORK}" "${WORK}/win.tar.gz" 2>&1)"
 WIN_RC=$?
+# Also execute the raw unbuilt template directly and assert it fails fast (exit != 0) before elevation/WSL.
+"${PWSH_BIN}" -NoProfile -File "${REPO_ROOT}/windows/install-windows.ps1" > "${WORK}/unbuilt-template.log" 2>&1
+UNBUILT_RC=$?
+
 if [ "${WIN_RC}" -eq 0 ] \
+   && [ "${UNBUILT_RC}" -ne 0 ] \
    && tar -xzf "${WORK}/win.tar.gz" -C "${WORK}/win-extract" \
    && has_clean_runtime_tree "${WORK}/win-extract"; then
-  ok "Windows artifact: 0 PS parse errors, .NET SHA-256 verified (${WIN_DECODED_SHA:0:12}...) + full clean runtime tree"
+  ok "Windows artifact: UTF-8 BOM, 0 parse errors, real AST verify/tamper/fail-closed/arg-fwd/unbuilt-fail-fast (${WIN_DECODED_SHA:0:12}...)"
 else
-  bad "Windows artifact: parse, .NET decode/checksum, or tree check failed: ${WIN_DECODED_SHA}"
+  bad "Windows artifact check failed (win_rc=${WIN_RC}, unbuilt_rc=${UNBUILT_RC}): ${WIN_DECODED_SHA}"
 fi
 
 # CHECK 6 -- Old source-bundle release path removed from active installer and docs
