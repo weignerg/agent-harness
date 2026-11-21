@@ -60,6 +60,15 @@ OPENCODE_SERVER_HOST=0.0.0.0
 ```
 
 > [!IMPORTANT]
+> In **WSL**, `OPENCODE_SERVER_USERNAME` must match the WSL **auto-login** account declared
+> by `wsl.conf` `[user] default=<user>`. The headless server authenticates as the account
+> systemd starts it under; if the username differs, clients can reach port 4096 but be
+> rejected. `install.sh` flags and (interactively) reconciles this mismatch, and the T3 /
+> Antigravity provider `Username` must use the same WSL account. See
+> [WINDOWS.md](./WINDOWS.md#the-opensource-server-username--wsl-default-user-cross-check)
+> for the full walkthrough.
+
+> [!IMPORTANT]
 > The server password is automatically generated during `install.sh` if not already present. Permissions on the configuration file are locked to `0600` (`chmod 0600 ~/.config/opencode-backends/env`) so unprivileged users cannot read stored secrets.
 
 ### 2.3 Operational Commands
