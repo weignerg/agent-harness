@@ -1987,6 +1987,94 @@ print_completion_summary() {
     echo ""
 }
 
+resolve_sglang_cuda_home() {
+    local stack_dir="${1:-${STACK_DIR}}"
+    local cand=""
+
+    if [ "${SGLANG_SKIP_SYSTEM_CUDA:-0}" != "1" ]; then
+        for cand in "${CUDA_HOME:-}" "/opt/cuda" "/usr/local/cuda"; do
+            if [ -n "${cand}" ] && [ -x "${cand}/bin/nvcc" ]; then
+                echo "${cand}"
+                return 0
+            fi
+        done
+    fi
+
+    local venv_cu_dir=""
+    local sp_dir=""
+    for sp_dir in "${stack_dir}"/venv/lib/python*/site-packages; do
+        [ -d "${sp_dir}/nvidia" ] || continue
+        for cand in "${sp_dir}/nvidia/cu13" "${sp_dir}/nvidia/cu12" "${sp_dir}/nvidia/cuda_nvcc" "${sp_dir}"/nvidia/*; do
+            if [ -d "${cand}" ] && [ -x "${cand}/bin/nvcc" ]; then
+                venv_cu_dir="${cand}"
+                break 2
+            fi
+        done
+    done
+
+    if [ -n "${venv_cu_dir}" ]; then
+        local cuda_home_dir="${stack_dir}/cuda-home"
+        local nvidia_root
+        nvidia_root="$(dirname "${venv_cu_dir}")"
+        rm -rf "${cuda_home_dir}" 2>/dev/null || true
+        mkdir -p "${cuda_home_dir}/lib/stubs"
+
+        ln -s "${venv_cu_dir}/bin" "${cuda_home_dir}/bin"
+        if [ -d "${venv_cu_dir}/include" ]; then
+            ln -s "${venv_cu_dir}/include" "${cuda_home_dir}/include"
+        elif [ -d "${nvidia_root}/cuda_runtime/include" ]; then
+            ln -s "${nvidia_root}/cuda_runtime/include" "${cuda_home_dir}/include"
+        fi
+        [ -d "${venv_cu_dir}/nvvm" ] && ln -s "${venv_cu_dir}/nvvm" "${cuda_home_dir}/nvvm"
+        [ -d "${venv_cu_dir}/cccl" ] && ln -s "${venv_cu_dir}/cccl" "${cuda_home_dir}/cccl"
+
+        local lib_src=""
+        local lib_entry=""
+        for lib_src in "${venv_cu_dir}/lib" "${nvidia_root}/cuda_runtime/lib"; do
+            [ -d "${lib_src}" ] || continue
+            for lib_entry in "${lib_src}"/*; do
+                [ -e "${lib_entry}" ] || continue
+                local base_name
+                base_name="$(basename "${lib_entry}")"
+                [ -e "${cuda_home_dir}/lib/${base_name}" ] || ln -s "${lib_entry}" "${cuda_home_dir}/lib/${base_name}"
+            done
+        done
+
+        if [ ! -e "${cuda_home_dir}/lib/libcudart.so" ]; then
+            local rt_lib=""
+            for rt_lib in "${cuda_home_dir}"/lib/libcudart.so.*; do
+                if [ -e "${rt_lib}" ]; then
+                    ln -s "$(basename "${rt_lib}")" "${cuda_home_dir}/lib/libcudart.so"
+                    break
+                fi
+            done
+        fi
+
+        local driver_lib=""
+        for driver_lib in \
+            /usr/lib/wsl/lib/libcuda.so \
+            /usr/lib/wsl/lib/libcuda.so.1 \
+            /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+            /usr/lib/libcuda.so.1 \
+            /usr/lib64/libcuda.so.1; do
+            if [ -e "${driver_lib}" ]; then
+                ln -s "${driver_lib}" "${cuda_home_dir}/lib/stubs/libcuda.so"
+                break
+            fi
+        done
+
+        ln -s "lib" "${cuda_home_dir}/lib64"
+        echo "${cuda_home_dir}"
+        return 0
+    fi
+
+    if [ -d "/usr/local/cuda" ]; then
+        echo "/usr/local/cuda"
+    else
+        echo "/opt/cuda"
+    fi
+}
+
 warmup_sglang_service() {
     if [ "$SKIP_WARMUP" = true ]; then
         echo "  ℹ️  SGLang model warmup skipped (--skip-warmup)."
@@ -2131,10 +2219,16 @@ warmup_sglang_service() {
         run_args+=(--kv-cache-dtype "${warmup_kv_dtype}")
     fi
 
+    local resolved_warmup_cuda_home=""
+    resolved_warmup_cuda_home="$(resolve_sglang_cuda_home "${STACK_DIR}" 2>/dev/null || true)"
+
     (
         export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
-        [ -d "/opt/cuda/bin" ] && export PATH="/opt/cuda/bin:$PATH"
-        [ -d "/opt/cuda" ] && export CUDA_HOME="/opt/cuda"
+        [ -d "${STACK_DIR}/venv/bin" ] && export PATH="${STACK_DIR}/venv/bin:$PATH"
+        if [ -n "${resolved_warmup_cuda_home}" ] && [ -d "${resolved_warmup_cuda_home}" ]; then
+            export CUDA_HOME="${resolved_warmup_cuda_home}"
+            [ -d "${resolved_warmup_cuda_home}/bin" ] && export PATH="${resolved_warmup_cuda_home}/bin:$PATH"
+        fi
         if [ -f "${BACKEND_DIR}/env" ]; then
             set -a
             . "${BACKEND_DIR}/env"
@@ -2393,7 +2487,11 @@ verify_backend_healthchecks() {
 
         if [ "$sglang_local_ready" = true ]; then
             systemctl --user enable "${svc_name}" 2>/dev/null || true
-            systemctl --user start "${svc_name}" 2>/dev/null || true
+            if curl -sf --max-time 2 "http://127.0.0.1:${SGLANG_BACKEND_PORT:-30001}/v1/models" >/dev/null 2>&1; then
+                systemctl --user start "${svc_name}" 2>/dev/null || true
+            else
+                systemctl --user restart "${svc_name}" 2>/dev/null || true
+            fi
         else
             systemctl --user stop "${svc_name}" 2>/dev/null || true
         fi
@@ -3257,6 +3355,24 @@ with open(path, 'w') as f:
             fi
         fi
     done
+
+    # Wire valid CUDA_HOME (system /opt/cuda, /usr/local/cuda, or synthesized venv cuda-home) into SGLang units
+    local resolved_sglang_cuda_home=""
+    resolved_sglang_cuda_home="$(resolve_sglang_cuda_home "${STACK_DIR}" 2>/dev/null || true)"
+    if [ -n "${resolved_sglang_cuda_home}" ]; then
+        for dest_dir in "${systemd_dest}" "${backend_env_dir}"; do
+            local sgl_unit=""
+            for sgl_unit in sglang-ornith-1.5-35b.service sglang-qwen3.8-27b.service sglang-ornith-1.5-9b.service; do
+                if [ -f "${dest_dir}/${sgl_unit}" ]; then
+                    if grep -q '^Environment="CUDA_HOME=' "${dest_dir}/${sgl_unit}"; then
+                        sed -i \
+                            "s|^Environment=\"CUDA_HOME=[^\"]*\"|Environment=\"CUDA_HOME=${resolved_sglang_cuda_home}\"|" \
+                            "${dest_dir}/${sgl_unit}"
+                    fi
+                fi
+            done
+        done
+    fi
 
     # Tune T3 Code working directory if custom path requested
     if [ -n "$T3_SERVE_WORKDIR" ]; then

@@ -19,6 +19,13 @@ need '--context-length (262144|\$\{?SGLANG_CONTEXT_LENGTH)' "256k context (defau
 need 'Environment="SGLANG_CONTEXT_LENGTH=262144"' "explicit SGLANG_CONTEXT_LENGTH default"
 need 'PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True' "expandable_segments allocator"
 need 'CUDA_HOME=/opt/cuda' "CUDA_HOME"
+for _su in "$R/config/systemd/sglang-ornith-1.5-35b.service" "$R/config/systemd/sglang-ornith-1.5-9b.service" "$R/config/systemd/sglang-qwen3.8-27b.service"; do
+    if grep -q 'opencode-sglang-stack/venv/bin' "$_su" && grep -q 'opencode-sglang-stack/cuda-home/bin' "$_su"; then
+        pass "$(basename "$_su") PATH includes venv/bin and cuda-home/bin"
+    else
+        fail "$(basename "$_su") PATH missing venv/bin or cuda-home/bin"
+    fi
+done
 if grep -qE -- '--context-length [0-9]+\$' "$U"; then fail "corrupted context-length string in template"; else pass "unbroken context-length parameter"; fi
 DEPLOYED="$HOME/.config/systemd/user/sglang-ornith-1.5-35b.service"
 if [ -f "$DEPLOYED" ]; then
