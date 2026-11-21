@@ -2224,6 +2224,8 @@ warmup_sglang_service() {
 
     (
         export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+        export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:--DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK}"
+        export FLASHINFER_EXTRA_CUDAFLAGS="${FLASHINFER_EXTRA_CUDAFLAGS:--DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK}"
         [ -d "${STACK_DIR}/venv/bin" ] && export PATH="${STACK_DIR}/venv/bin:$PATH"
         if [ -n "${resolved_warmup_cuda_home}" ] && [ -d "${resolved_warmup_cuda_home}" ]; then
             export CUDA_HOME="${resolved_warmup_cuda_home}"
@@ -2658,7 +2660,7 @@ verify_backend_healthchecks() {
     else
         echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
         local sglang_ok=false
-        local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-240}}}"
+        local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-360}}}"
         local elapsed=0
         local model_name="${PROBED_MODEL_NAME:-ornith}"
 
