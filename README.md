@@ -14,7 +14,7 @@
 - 🧠 [Obsidian Vaults & ColBERT Memory](docs/vault_and_memory_guide.md) (`docs/vault_and_memory_guide.md`) — FastMCP `vault-memory`, CPU late-interaction scoring, and sub-vaults.
 - ⚡ [Inference & Hardware Tuning Guide](docs/inference_architecture.md) (`docs/inference_architecture.md`) — SGLang RadixAttention, NVFP4 precision, OOM recovery, and GPU probing.
 - 🏛️ [Master Specification & Unified Architecture](docs/unified_architecture.md) (`docs/unified_architecture.md`) — Polymorphic engine, state machines, and multi-CLI governance.
-- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 11 WSL2 bootstrap: download and extract the v0.7.1 source bundle, then run a single command to provision WSL, copy the bundle, and install the harness inside WSL.
+- 🪟 [Windows (WSL) One-Command Install](docs/WINDOWS.md) (`docs/WINDOWS.md`) — Windows 10/11 WSL2 self-extracting installer: download `install-agent-harness-v0.7.1-windows10-11.ps1` and run a single command to provision WSL, self-extract the runtime tree, and install the harness inside WSL.
 
 ---
 
@@ -191,17 +191,28 @@ Security is enabled by default (`WITH_FIREWALL=true`). The installer stages host
 ./install.sh --target opencode --no-firewall   # Bypass UFW rules
 ```
 
-### Windows (WSL) — One-Command Install
+### Self-Extracting Release Installers (Linux & Windows WSL2)
 
-Install on Windows 11 (WSL2) by downloading and extracting the v0.7.1 source bundle, then
-running a single command from inside the extracted tree (see
-[docs/WINDOWS.md](docs/WINDOWS.md) for requirements, the reboot note, and troubleshooting):
+Releases ship **exactly two** self-extracting installers (no separate source tarball):
+- **Linux (distro-agnostic):** `install-agent-harness-v0.7.1-linux.sh`
+- **Windows 10/11 (WSL2):** `install-agent-harness-v0.7.1-windows10-11.ps1`
+
+```bash
+# Linux: download and run directly
+chmod +x ./install-agent-harness-v0.7.1-linux.sh
+./install-agent-harness-v0.7.1-linux.sh
+```
 
 ```powershell
-# 1) Download agent-harness-v0.7.1-source.tar.gz from the v0.7.1 release, then extract:
-tar -xzf agent-harness-v0.7.1-source.tar.gz
-# 2) One command, from inside the extracted tree:
-powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-harness-v0.7.1\windows\install-windows.ps1
+# Windows 10/11 (WSL2): download and run one command (see docs/WINDOWS.md)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1
+```
+
+Build both artifacts locally from a checkout with:
+```bash
+bash release-build/make_linux_installer.sh
+pwsh -NoProfile -File release-build/make_windows_installer.ps1
+bash release-build/release-test
 ```
 
 ---
