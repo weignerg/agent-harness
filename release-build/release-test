@@ -28,7 +28,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/.." && pwd)"
 
 _pkg_ver="$(awk -F'"' '/^version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "${REPO_ROOT}/pyproject.toml")"
-VERSION="v${_pkg_ver:-0.7.3}"
+VERSION="v${_pkg_ver:-0.7.4}"
 LINUX_ART="install-agent-harness-${VERSION}-linux.sh"
 WINDOWS_ART="install-agent-harness-${VERSION}-windows10-11.ps1"
 
