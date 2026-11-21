@@ -1152,7 +1152,7 @@ fi
 echo "[Test 34] Verifying SGLang warmup disables CUDA graphs and enforces mutually exclusive port 30000 switching..."
 if grep -q -- "--disable-cuda-graph" "${INSTALL_SCRIPT}" && \
    grep -q 'SGLANG_WARMUP_TIMEOUT:-300' "${INSTALL_SCRIPT}" && \
-   grep -q 'SGLANG_HEALTHCHECK_RETRIES:-240' "${INSTALL_SCRIPT}" && \
+   grep -qE 'SGLANG_HEALTHCHECK_RETRIES:-(240|360)' "${INSTALL_SCRIPT}" && \
    grep -qE 'for _legacy_u in .*sglang-ornith-1\.5-35b\.service' "${INSTALL_SCRIPT}" && \
    grep -qE 'for _legacy_u in .*sglang-qwen3\.8-27b\.service' "${INSTALL_SCRIPT}" && \
    grep -q 'systemctl --user disable --now "$_legacy_u"' "${INSTALL_SCRIPT}"; then

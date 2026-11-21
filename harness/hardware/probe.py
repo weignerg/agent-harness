@@ -663,6 +663,22 @@ def compute_dynamic_vram_spillover(
     }
 
 
+def compute_model_runtime_limits(
+    effective_vram_gb: float,
+    cpu_offload: bool = False,
+) -> Dict[str, Any]:
+    """
+    Computes safe CUDA graph and Mamba SSM cache bounds for hybrid Mamba/GDN models
+    (Ornith-1.5-9B, Ornith-1.5-35B, Qwen3.8-27B) across any detected VRAM tier.
+    """
+    tight = effective_vram_gb < 14.0 or bool(cpu_offload)
+    return {
+        "disable_prefill_cuda_graph": True,
+        "cuda_graph_max_bs_decode": 4 if tight else 8,
+        "max_mamba_cache_size": 3 if tight else 5,
+    }
+
+
 def classify_model_sizing(
     effective_vram_gb: float,
     host_ram_gb: float = 0.0,
@@ -670,10 +686,33 @@ def classify_model_sizing(
     primary_gpu: Optional[GPUInfo] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Computes tailored settings (max_context, memory_fraction, cpu_offload, cpu_offload_gb, offload)
+    Computes tailored settings (max_context, memory_fraction, cpu_offload, cpu_offload_gb,
+    offload, max_mamba_cache_size, cuda_graph_max_bs_decode, disable_prefill_cuda_graph)
     for each local model family (ornith-1.5-35b, qwen3.8-27b, ornith-1.5-9b) using continuous
     100% GPU first sizing with dynamic CPU RAM spillover only when VRAM is exceeded.
     """
+    sizing = _classify_model_sizing_raw(
+        effective_vram_gb=effective_vram_gb,
+        host_ram_gb=host_ram_gb,
+        target_context=target_context,
+        primary_gpu=primary_gpu,
+    )
+    for entry in sizing.values():
+        entry.update(
+            compute_model_runtime_limits(
+                effective_vram_gb=effective_vram_gb,
+                cpu_offload=bool(entry.get("cpu_offload", False)),
+            )
+        )
+    return sizing
+
+
+def _classify_model_sizing_raw(
+    effective_vram_gb: float,
+    host_ram_gb: float = 0.0,
+    target_context: Optional[int] = None,
+    primary_gpu: Optional[GPUInfo] = None,
+) -> Dict[str, Dict[str, Any]]:
     vram = effective_vram_gb
     gpu_name = (primary_gpu.name if primary_gpu else "NVIDIA GPU").lower()
     is_spark = vram >= 100.0 or "spark" in gpu_name

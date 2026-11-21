@@ -822,6 +822,30 @@ class TestPerModelHardwareSizingIssue49(unittest.TestCase):
         self.assertEqual(data_csv["service"], "sglang-ornith-1.5-35b.service")
         self.assertEqual(data_csv["max_context"], 262144)
 
+    def test_model_runtime_limits_across_vram_tiers(self):
+        # 12 GB GPU -> tight limits (mamba=3, decode_bs=4) for all models
+        sizing_12 = classify_model_sizing(effective_vram_gb=12.0, host_ram_gb=32.0)
+        for model_key in ("ornith-1.5-35b", "qwen3.8-27b", "ornith-1.5-9b"):
+            entry = sizing_12[model_key]
+            self.assertTrue(entry["disable_prefill_cuda_graph"])
+            self.assertEqual(entry["max_mamba_cache_size"], 3)
+            self.assertEqual(entry["cuda_graph_max_bs_decode"], 4)
+
+        # 16 GB GPU -> pure-GPU 9B gets (5, 8); CPU-offloaded 35B/27B get tight (3, 4)
+        sizing_16 = classify_model_sizing(effective_vram_gb=16.0, host_ram_gb=32.0)
+        self.assertEqual(sizing_16["ornith-1.5-9b"]["max_mamba_cache_size"], 5)
+        self.assertEqual(sizing_16["ornith-1.5-9b"]["cuda_graph_max_bs_decode"], 8)
+        self.assertEqual(sizing_16["ornith-1.5-35b"]["max_mamba_cache_size"], 3)
+        self.assertEqual(sizing_16["qwen3.8-27b"]["max_mamba_cache_size"], 3)
+
+        # 32 GB GPU -> pure-GPU (5, 8) for all models
+        sizing_32 = classify_model_sizing(effective_vram_gb=32.0, host_ram_gb=64.0)
+        for model_key in ("ornith-1.5-35b", "qwen3.8-27b", "ornith-1.5-9b"):
+            entry = sizing_32[model_key]
+            self.assertTrue(entry["disable_prefill_cuda_graph"])
+            self.assertEqual(entry["max_mamba_cache_size"], 5)
+            self.assertEqual(entry["cuda_graph_max_bs_decode"], 8)
+
 
 if __name__ == "__main__":
     unittest.main()
