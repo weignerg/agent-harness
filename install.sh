@@ -1586,7 +1586,11 @@ with open(path, "w", encoding="utf-8") as f:
         "SGLANG_27B_CONTEXT_LENGTH=262144"
         "SGLANG_27B_CHUNKED_PREFILL=2048"
         "SGLANG_27B_ATTENTION_BACKEND=flashinfer"
+        "SGLANG_35B_CUDA_GRAPH_MAX_BS=8"
+        "SGLANG_35B_PREFILL_GRAPH_ARGS="
+        "SGLANG_35B_MAMBA_ARGS="
         "SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
+        "SGLANG_27B_PREFILL_GRAPH_ARGS="
         "SGLANG_27B_TORCH_COMPILE="
         "SGLANG_27B_SPECULATIVE_ALGO="
         "SGLANG_27B_SPECULATIVE_ARGS="
@@ -1594,8 +1598,11 @@ with open(path, "w", encoding="utf-8") as f:
         "SGLANG_27B_CPU_OFFLOAD_ARGS="
         "SGLANG_9B_CONTEXT_LENGTH=262144"
         "SGLANG_9B_MEM_FRACTION=0.88"
+        "SGLANG_9B_CUDA_GRAPH_MAX_BS=8"
+        "SGLANG_9B_PREFILL_GRAPH_ARGS="
         "SGLANG_9B_CPU_OFFLOAD_ARGS="
-        "SGLANG_27B_MAMBA_ARGS=\"--max-mamba-cache-size 5 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32\""
+        "SGLANG_9B_MAMBA_ARGS="
+        "SGLANG_27B_MAMBA_ARGS="
     )
 
     for kv in "${sglang_vars[@]}"; do
@@ -2203,7 +2210,6 @@ warmup_sglang_service() {
         --context-length "${ctx_len}"
         --chunked-prefill-size 2048
         --max-running-requests 1
-        --max-mamba-cache-size 5
         --port "${sglang_port}"
         --host 127.0.0.1
         --disable-cuda-graph
@@ -2666,8 +2672,25 @@ verify_backend_healthchecks() {
         echo "  Checking SGLang inference service (${svc_name} / port 30000)..."
         local sglang_ok=false
         local max_sglang_wait="${SGLANG_MAX_WAIT:-${SGLANG_HEALTHCHECK_TIMEOUT:-${SGLANG_HEALTHCHECK_RETRIES:-360}}}"
+        local prefill_capture_timeout="${SGLANG_PREFILL_CAPTURE_TIMEOUT:-90}"
+        local max_fallback_attempts="${SGLANG_MAX_FALLBACK_ATTEMPTS:-8}"
+        local fallback_attempt=0
         local elapsed=0
+        local prefill_begin_at=""
         local model_name="${PROBED_MODEL_NAME:-ornith}"
+
+        local fallback_handler=""
+        if [ -x "${STACK_DIR}/sglang_oom_handler.sh" ]; then
+            fallback_handler="${STACK_DIR}/sglang_oom_handler.sh"
+        elif [ -x "${SCRIPT_DIR}/scripts/sglang_oom_handler.sh" ]; then
+            fallback_handler="${SCRIPT_DIR}/scripts/sglang_oom_handler.sh"
+        fi
+
+        local inv_id=""
+        if command -v systemctl >/dev/null 2>&1; then
+            inv_id="$(systemctl --user show -p InvocationID --value "${svc_name}" 2>/dev/null || true)"
+            [ "$inv_id" = "00000000000000000000000000000000" ] && inv_id=""
+        fi
 
         local sglang_check_url="http://127.0.0.1:30000/v1/models"
         if curl -s -m 1 "http://127.0.0.1:30000/health" 2>/dev/null | grep -q '"active_service"'; then
@@ -2685,10 +2708,103 @@ verify_backend_healthchecks() {
                 break
             fi
 
+            # Track systemd InvocationID changes (e.g., if ExecStopPost watchdog restarted the unit)
+            local cur_inv_id=""
+            if command -v systemctl >/dev/null 2>&1; then
+                cur_inv_id="$(systemctl --user show -p InvocationID --value "${svc_name}" 2>/dev/null || true)"
+                [ "$cur_inv_id" = "00000000000000000000000000000000" ] && cur_inv_id=""
+            fi
+            if [ -n "$cur_inv_id" ] && [ -n "$inv_id" ] && [ "$cur_inv_id" != "$inv_id" ]; then
+                inv_id="$cur_inv_id"
+                prefill_begin_at=""
+                echo "  🔄 SGLang (${svc_name}) restarted automatically; continuing startup verification..."
+            elif [ -z "$inv_id" ] && [ -n "$cur_inv_id" ]; then
+                inv_id="$cur_inv_id"
+            fi
+
+            # Inspect current invocation log for recoverable prefill CUDA graph / OOM / worker crashes
+            local jlog=""
+            if [ -n "${SGLANG_HEALTHCHECK_LOG_FILE:-}" ] && [ -r "${SGLANG_HEALTHCHECK_LOG_FILE}" ]; then
+                jlog="$(tail -n 250 "${SGLANG_HEALTHCHECK_LOG_FILE}" 2>/dev/null || true)"
+            elif [ -n "$inv_id" ] && command -v journalctl >/dev/null 2>&1; then
+                jlog="$(journalctl --user _SYSTEMD_INVOCATION_ID="${inv_id}" -n 250 --no-pager 2>/dev/null || true)"
+            fi
+
+            local detected_fallback_mode=""
+            local detected_reason=""
+            if [ -n "$jlog" ] && ! printf '%s\n' "$jlog" | grep -qiE 'unrecognized arguments|401 Client Error|GatedRepoError|ModuleNotFoundError|No module named'; then
+                local saw_prefill_begin=false
+                local saw_prefill_end=false
+                if printf '%s\n' "$jlog" | grep -q 'Capture target prefill CUDA graph begin'; then
+                    saw_prefill_begin=true
+                fi
+                if printf '%s\n' "$jlog" | grep -q 'Capture target prefill CUDA graph end'; then
+                    saw_prefill_end=true
+                fi
+
+                if [ "$saw_prefill_begin" = true ] && [ "$saw_prefill_end" = false ]; then
+                    if [ -z "$prefill_begin_at" ]; then
+                        prefill_begin_at="$elapsed"
+                    fi
+                    if printf '%s\n' "$jlog" | grep -qiE 'double free or corruption|free\(\): invalid|malloc\(\):|Segmentation fault|SIGABRT|SIGSEGV|Fatal Python error|CUDA out of memory|torch\.OutOfMemoryError|RuntimeError: CUDA error|cudaError'; then
+                        detected_fallback_mode="prefill"
+                        detected_reason="worker crashed during prefill CUDA graph capture"
+                    elif [ "$((elapsed - prefill_begin_at))" -ge "$prefill_capture_timeout" ]; then
+                        detected_fallback_mode="prefill"
+                        detected_reason="prefill CUDA graph capture stalled >${prefill_capture_timeout}s"
+                    fi
+                elif printf '%s\n' "$jlog" | grep -qiE 'CUDA out of memory|torch\.OutOfMemoryError|Not enough memory|double free or corruption|free\(\): invalid|malloc\(\):|Segmentation fault|SIGABRT|SIGSEGV|RuntimeError: CUDA error|cudaError'; then
+                    detected_fallback_mode="auto"
+                    detected_reason="CUDA/memory failure during startup"
+                fi
+            fi
+
             # If not yet ready, check systemd status
             local sglang_status=""
             if command -v systemctl >/dev/null 2>&1; then
                 sglang_status="$(systemctl --user is-active "${svc_name}" 2>/dev/null || true)"
+            fi
+
+            local sglang_crash_reason=""
+            sglang_crash_reason="$(systemd_unit_crash_loop_reason "${svc_name}" 2>/dev/null || true)"
+
+            if [ -z "$detected_fallback_mode" ] && { [ "$sglang_status" = "failed" ] || [ -n "$sglang_crash_reason" ]; }; then
+                if [ -n "$jlog" ] && printf '%s\n' "$jlog" | grep -q 'Capture target prefill CUDA graph begin' && ! printf '%s\n' "$jlog" | grep -q 'Capture target prefill CUDA graph end'; then
+                    detected_fallback_mode="prefill"
+                    detected_reason="unit failed during prefill CUDA graph capture"
+                fi
+            fi
+
+            if [ -n "$detected_fallback_mode" ] && [ -n "$fallback_handler" ] && [ "$fallback_attempt" -lt "$max_fallback_attempts" ]; then
+                local tmp_jlog=""
+                tmp_jlog="$(mktemp /tmp/sglang-hc-log-XXXXXX 2>/dev/null || true)"
+                if [ -n "$tmp_jlog" ]; then
+                    printf '%s\n' "$jlog" > "$tmp_jlog"
+                fi
+                local step_out=""
+                local step_rc=0
+                step_out="$(HOME="${USER_HOME}" SGLANG_SERVICE="${svc_name}" OPENCODE_OOM_LOG="${tmp_jlog}" "${fallback_handler}" --fallback-step "${detected_fallback_mode}" --no-restart 2>&1)" || step_rc=$?
+                [ -n "$tmp_jlog" ] && rm -f "$tmp_jlog"
+                if [ "$step_rc" -eq 0 ]; then
+                    fallback_attempt=$((fallback_attempt + 1))
+                    echo "  ⚠️  SGLang ${detected_reason}; applying automatic fallback (${fallback_attempt}/${max_fallback_attempts}): ${step_out}"
+                    if command -v systemctl >/dev/null 2>&1; then
+                        systemctl --user stop "${svc_name}" 2>/dev/null || true
+                        systemctl --user reset-failed "${svc_name}" 2>/dev/null || true
+                        systemctl --user restart "${svc_name}" 2>/dev/null || true
+                    fi
+                    elapsed=0
+                    prefill_begin_at=""
+                    sleep 2
+                    if command -v systemctl >/dev/null 2>&1; then
+                        inv_id="$(systemctl --user show -p InvocationID --value "${svc_name}" 2>/dev/null || true)"
+                        [ "$inv_id" = "00000000000000000000000000000000" ] && inv_id=""
+                    fi
+                    continue
+                else
+                    echo "  ❌ SGLang progressive fallback floor reached: ${step_out}"
+                    break
+                fi
             fi
 
             if [ "$sglang_status" = "failed" ]; then
@@ -2696,8 +2812,6 @@ verify_backend_healthchecks() {
                 break
             fi
 
-            local sglang_crash_reason=""
-            sglang_crash_reason="$(systemd_unit_crash_loop_reason "${svc_name}" 2>/dev/null || true)"
             if [ -n "$sglang_crash_reason" ]; then
                 echo "  ❌ SGLang service (${svc_name}) crash-looping (${sglang_crash_reason}); aborting wait."
                 break
@@ -2713,6 +2827,11 @@ verify_backend_healthchecks() {
 
         if [ "$sglang_ok" = true ]; then
             echo "  ✅ SGLang inference engine is active and serving on port 30000."
+            if [ -n "$fallback_handler" ]; then
+                local active_tuning=""
+                active_tuning="$(HOME="${USER_HOME}" SGLANG_SERVICE="${svc_name}" "${fallback_handler}" --status-all 2>/dev/null || true)"
+                [ -n "$active_tuning" ] && echo "  ℹ️  Active SGLang runtime tuning: ${active_tuning}"
+            fi
         else
             health_failed=true
             failure_reasons+=("SGLang inference service (${svc_name} / port 30000) failed healthcheck")
@@ -3006,7 +3125,7 @@ deploy_opencode_backend_and_units() {
     local ornith_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('max_context', d.get('max_context', 262144)))" "${gpu_profile}" 2>/dev/null || echo "${max_context}")"
     local ornith_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
     local ornith_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('cpu_offload_gb', d.get('cpu_offload_gb', 0)))" "${gpu_profile}" 2>/dev/null || echo "0")"
-    local ornith_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('max_mamba_cache_size', 5))" "${gpu_profile}" 2>/dev/null || echo "5")"
+    local ornith_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('max_mamba_cache_size', 'auto'))" "${gpu_profile}" 2>/dev/null || echo "auto")"
     local ornith_cg_max_bs="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-35b', {}); print(m.get('cuda_graph_max_bs_decode', 8))" "${gpu_profile}" 2>/dev/null || echo "8")"
 
     local qwen27b_default_ctx="${max_context:-262144}"
@@ -3016,13 +3135,13 @@ deploy_opencode_backend_and_units() {
     local qwen27b_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('max_context', ${qwen27b_default_ctx}))" "${gpu_profile}" 2>/dev/null || echo "${qwen27b_default_ctx}")"
     local qwen27b_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
     local qwen27b_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
-    local qwen27b_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('max_mamba_cache_size', 5))" "${gpu_profile}" 2>/dev/null || echo "5")"
+    local qwen27b_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('max_mamba_cache_size', 'auto'))" "${gpu_profile}" 2>/dev/null || echo "auto")"
     local qwen27b_cg_max_bs="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('qwen3.8-27b', {}); print(m.get('cuda_graph_max_bs_decode', 8))" "${gpu_profile}" 2>/dev/null || echo "8")"
 
     local ornith9b_max_context="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('max_context', d.get('max_context', 262144)))" "${gpu_profile}" 2>/dev/null || echo "${max_context}")"
     local ornith9b_mem_fraction="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('memory_fraction', d.get('memory_fraction', 0.88)))" "${gpu_profile}" 2>/dev/null || echo "${mem_fraction}")"
     local ornith9b_cpu_offload_gb="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('cpu_offload_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
-    local ornith9b_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('max_mamba_cache_size', 5))" "${gpu_profile}" 2>/dev/null || echo "5")"
+    local ornith9b_mamba_cache="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('max_mamba_cache_size', 'auto'))" "${gpu_profile}" 2>/dev/null || echo "auto")"
     local ornith9b_cg_max_bs="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); m=d.get('model_sizing', {}).get('ornith-1.5-9b', {}); print(m.get('cuda_graph_max_bs_decode', 8))" "${gpu_profile}" 2>/dev/null || echo "8")"
 
     local is_wsl_runtime=false
@@ -3030,8 +3149,8 @@ deploy_opencode_backend_and_units() {
         is_wsl_runtime=true
     fi
     if [ "$is_wsl_runtime" = true ]; then
-        # On WSL2 GPU-PV, Windows DWM shares GPU VRAM; cap static pool to 0.82 on <=24GB GPUs
-        # so decode CUDA graph capture and Windows desktop compositor always have headroom.
+        # On WSL2 GPU-PV, Windows DWM shares GPU VRAM; cap static pool to 0.82 on <=26GB GPUs
+        # so CUDA graph capture and Windows desktop compositor always have headroom.
         local probed_vram_gb_val
         probed_vram_gb_val="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('vram_gb', 0))" "${gpu_profile}" 2>/dev/null || echo "0")"
         if python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if 0 < v <= 26.0 else 1)" "${probed_vram_gb_val}" 2>/dev/null; then
@@ -3042,9 +3161,18 @@ deploy_opencode_backend_and_units() {
         fi
     fi
 
-    local ornith_mamba_args="--max-mamba-cache-size ${ornith_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
-    local qwen27b_mamba_args="--max-mamba-cache-size ${qwen27b_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
-    local ornith9b_mamba_args="--max-mamba-cache-size ${ornith9b_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+    local ornith_mamba_args=""
+    if [[ "${ornith_mamba_cache}" =~ ^[0-9]+$ ]]; then
+        ornith_mamba_args="--max-mamba-cache-size ${ornith_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+    fi
+    local qwen27b_mamba_args=""
+    if [[ "${qwen27b_mamba_cache}" =~ ^[0-9]+$ ]]; then
+        qwen27b_mamba_args="--max-mamba-cache-size ${qwen27b_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+    fi
+    local ornith9b_mamba_args=""
+    if [[ "${ornith9b_mamba_cache}" =~ ^[0-9]+$ ]]; then
+        ornith9b_mamba_args="--max-mamba-cache-size ${ornith9b_mamba_cache} --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+    fi
 
     local probed_model="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model', 'ornith-1.5-35b'))" "${gpu_profile}" 2>/dev/null || echo "ornith-1.5-35b")"
     local probed_model_path="$(python3 -c "import json, sys; d=json.loads(sys.argv[1]); print(d.get('model_path', 'ornith-ai/Ornith-1.5-35B-A3B-NVFP4'))" "${gpu_profile}" 2>/dev/null || echo "ornith-ai/Ornith-1.5-35B-A3B-NVFP4")"

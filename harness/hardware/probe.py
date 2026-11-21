@@ -668,14 +668,21 @@ def compute_model_runtime_limits(
     cpu_offload: bool = False,
 ) -> Dict[str, Any]:
     """
-    Computes safe CUDA graph and Mamba SSM cache bounds for hybrid Mamba/GDN models
-    (Ornith-1.5-9B, Ornith-1.5-35B, Qwen3.8-27B) across any detected VRAM tier.
+    Computes default CUDA graph and Mamba SSM cache policy for hybrid Mamba/GDN
+    models (Ornith-1.5-9B, Ornith-1.5-35B, Qwen3.8-27B).
+
+    All hardware tiers start with SGLang's full-performance defaults (prefill
+    CUDA graphs enabled and auto Mamba cache sizing) and rely on the live
+    startup + runtime progressive fallback ladder (disable prefill CUDA graph
+    -> Mamba cache 8 -> 5 -> 3 with decode bs 4 -> context length ladder) to
+    step down only when a machine/driver actually needs it.
     """
-    tight = effective_vram_gb < 14.0 or bool(cpu_offload)
     return {
-        "disable_prefill_cuda_graph": True,
-        "cuda_graph_max_bs_decode": 4 if tight else 8,
-        "max_mamba_cache_size": 3 if tight else 5,
+        "disable_prefill_cuda_graph": False,
+        "prefill_cuda_graph_policy": "adaptive",
+        "cuda_graph_max_bs_decode": 8,
+        "max_mamba_cache_size": "auto",
+        "mamba_cache_fallback_ladder": [8, 5, 3],
     }
 
 

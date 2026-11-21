@@ -1220,6 +1220,67 @@ else
 fi
 rm -rf "${SANDBOX_SYNC}" 2>/dev/null || true
 
+# --- Test 36: Live Prefill CUDA Graph Crash Auto-Fallback & Retry (v0.7.8) ---
+echo "[Test 36] Verifying live prefill CUDA graph crash auto-fallback and retry in install.sh..."
+SANDBOX_FB="$(mktemp -d /tmp/installer-test-fb-XXXXXX)"
+MOCK_FB_BIN="${SANDBOX_FB}/bin"
+mkdir -p "${MOCK_FB_BIN}"
+FB_LOG="${SANDBOX_FB}/sglang.log"
+FB_RESTARTS="${SANDBOX_FB}/restarts"
+cat << 'EOF' > "${FB_LOG}"
+[2026-11-20 22:00:00] Capture target prefill CUDA graph begin. backend=breakable, avail mem=0.85 GB
+double free or corruption (!prev)
+EOF
+
+cat << EOF > "${MOCK_FB_BIN}/curl"
+#!/bin/sh
+for arg in "\$@"; do
+    if echo "\$arg" | grep -q "4096"; then
+        if echo "\$*" | grep -q "%{http_code}"; then printf "OpenCode Server\\n200"; else printf "OpenCode Server\\n"; fi
+        exit 0
+    elif echo "\$arg" | grep -q "3773"; then
+        if echo "\$*" | grep -q "%{http_code}"; then printf "T3 Code Server\\n200"; else printf "T3 Code Server\\n"; fi
+        exit 0
+    elif echo "\$arg" | grep -q "30000/v1/models"; then
+        if [ -f "${FB_RESTARTS}" ]; then
+            if echo "\$*" | grep -q "%{http_code}"; then printf '{"data":[{"id":"ornith-1.5-35b"}]}\\n200'; else printf '{"data":[{"id":"ornith-1.5-35b"}]}'; fi
+            exit 0
+        fi
+        exit 1
+    fi
+done
+exit 1
+EOF
+chmod 0755 "${MOCK_FB_BIN}/curl"
+
+cat << EOF > "${MOCK_FB_BIN}/systemctl"
+#!/bin/sh
+if [ "\$1" = "--user" ] && [ "\$2" = "is-active" ]; then
+    echo "active"
+    exit 0
+elif [ "\$1" = "--user" ] && [ "\$2" = "restart" ]; then
+    echo "\$*" >> "${FB_RESTARTS}"
+    : > "${FB_LOG}"
+    exit 0
+fi
+exit 0
+EOF
+chmod 0755 "${MOCK_FB_BIN}/systemctl"
+
+FB_OUT="$(PATH="${MOCK_FB_BIN}:${PATH}" SGLANG_HEALTHCHECK_LOG_FILE="${FB_LOG}" USER_HOME="${SANDBOX_FB}" HOME="${SANDBOX_FB}" "${INSTALL_SCRIPT}" --target=opencode --healthcheck --non-interactive 2>&1 || true)"
+FB_STATE="${SANDBOX_FB}/.config/opencode-backends/context_length.state"
+
+if echo "${FB_OUT}" | grep -q "applying automatic fallback" && \
+   echo "${FB_OUT}" | grep -q "SGLang inference engine is active and serving on port 30000." && \
+   [ -f "${FB_STATE}" ] && \
+   grep -qx 'SGLANG_35B_PREFILL_GRAPH_ARGS=--disable-prefill-cuda-graph' "${FB_STATE}" && \
+   ! grep -q 'SGLANG_35B_MAMBA_ARGS=' "${FB_STATE}"; then
+    pass "install.sh detected prefill CUDA graph crash, disabled prefill graph only, restarted, and succeeded"
+else
+    fail "install.sh live prefill CUDA graph auto-fallback test failed"
+fi
+rm -rf "${SANDBOX_FB}" 2>/dev/null || true
+
 echo "================================================================================"
 echo "📊 TEST RESULTS: ${TESTS_PASSED} Passed, ${TESTS_FAILED} Failed"
 echo "================================================================================"

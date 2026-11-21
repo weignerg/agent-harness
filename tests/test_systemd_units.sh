@@ -114,10 +114,14 @@ if grep -q -- "--cuda-graph-max-bs " "$QWEN27B_FILE"; then
 fi
 echo "✅ Passed: sglang-qwen3.8-27b.service correctly specifies nvidia/Qwen3.8-27B-NVFP4, modelopt, and valid SGLang flags."
 
-# 8. Check Qwen 3.8 27B fast startup and CUDA graph settings (Issue #23)
-echo "[CHECK 8] Verifying sglang-qwen3.8-27b.service fast startup and CUDA graph optimizations (Issue #23)..."
-if ! grep -q -- "--disable-prefill-cuda-graph" "$QWEN27B_FILE"; then
-    echo "❌ FAIL: sglang-qwen3.8-27b.service missing --disable-prefill-cuda-graph"
+# 8. Check Qwen 3.8 27B adaptive prefill CUDA graph and unbraced optional flags (Issue #23 / v0.7.8)
+echo "[CHECK 8] Verifying SGLang units use adaptive prefill CUDA graph defaults and unbraced optional flags..."
+if grep -q -- "^ *--disable-prefill-cuda-graph" "$QWEN27B_FILE" "${CONFIG_DIR}/sglang-ornith-1.5-35b.service" "${CONFIG_DIR}/sglang-ornith-1.5-9b.service"; then
+    echo "❌ FAIL: SGLang units must not hardcode --disable-prefill-cuda-graph; use adaptive \$SGLANG_*_PREFILL_GRAPH_ARGS"
+    exit 1
+fi
+if ! grep -q '^Environment="SGLANG_27B_PREFILL_GRAPH_ARGS="$' "$QWEN27B_FILE" || ! grep -q '\$SGLANG_27B_PREFILL_GRAPH_ARGS' "$QWEN27B_FILE"; then
+    echo "❌ FAIL: sglang-qwen3.8-27b.service missing adaptive SGLANG_27B_PREFILL_GRAPH_ARGS default or unbraced reference"
     exit 1
 fi
 if grep -q -- "^ *--enable-torch-compile" "$QWEN27B_FILE"; then
@@ -144,24 +148,26 @@ if ! grep -q '\$SGLANG_27B_TORCH_COMPILE' "$QWEN27B_FILE" || ! grep -q '\$SGLANG
     echo "❌ FAIL: sglang-qwen3.8-27b.service missing unbraced \$SGLANG_27B_TORCH_COMPILE or \$SGLANG_27B_SPECULATIVE_ARGS"
     exit 1
 fi
-echo "✅ Passed: sglang-qwen3.8-27b.service specifies --disable-prefill-cuda-graph, optional torch compile, nvfp4 KV cache, unbraced optional flags, and uncorrupted mem-fraction."
+echo "✅ Passed: SGLang units specify adaptive prefill CUDA graph defaults, optional torch compile, valid KV cache dtype, unbraced optional flags, and uncorrupted mem-fraction."
 
-# 9. Check SGLANG_27B_MAMBA_ARGS quoting and KV cache protection in install.sh, service, and env file
-echo "[CHECK 9] Verifying SGLANG_27B_MAMBA_ARGS quoting and KV cache protection..."
-if grep -qE 'SGLANG_27B_MAMBA_ARGS=--[a-z]' "$INSTALL_SCRIPT"; then
-    echo "❌ FAIL: install.sh contains unquoted SGLANG_27B_MAMBA_ARGS"
-    exit 1
-fi
-if ! grep -qE 'SGLANG_27B_MAMBA_ARGS=\\"--(max-mamba-cache-size|mamba)' "$INSTALL_SCRIPT"; then
-    echo "❌ FAIL: install.sh missing quoted SGLANG_27B_MAMBA_ARGS"
+# 9. Check MAMBA_ARGS adaptive defaults, quoting, and KV cache protection
+echo "[CHECK 9] Verifying SGLANG_*_MAMBA_ARGS adaptive defaults, fallback quoting, and KV cache protection..."
+if grep -qE 'SGLANG_(35B|27B|9B)_MAMBA_ARGS=--[a-z]' "$INSTALL_SCRIPT"; then
+    echo "❌ FAIL: install.sh contains unquoted SGLANG_*_MAMBA_ARGS"
     exit 1
 fi
 if grep -q -- '--mamba-full-memory-ratio 4.59' "$QWEN27B_FILE" "$INSTALL_SCRIPT"; then
     echo "❌ FAIL: Found KV-starving --mamba-full-memory-ratio 4.59 in service or installer"
     exit 1
 fi
-if ! grep -q -- '--max-mamba-cache-size 5' "$QWEN27B_FILE" || ! grep -q -- '--max-mamba-cache-size 5' "$INSTALL_SCRIPT"; then
-    echo "❌ FAIL: sglang-qwen3.8-27b.service or install.sh missing --max-mamba-cache-size 5"
+if ! grep -q '^Environment="SGLANG_27B_MAMBA_ARGS="$' "$QWEN27B_FILE" || \
+   ! grep -q '^Environment="SGLANG_35B_MAMBA_ARGS="$' "${CONFIG_DIR}/sglang-ornith-1.5-35b.service" || \
+   ! grep -q '^Environment="SGLANG_9B_MAMBA_ARGS="$' "${CONFIG_DIR}/sglang-ornith-1.5-9b.service"; then
+    echo "❌ FAIL: All 3 SGLang units must default to empty SGLANG_*_MAMBA_ARGS (SGLang auto default with progressive fallback)"
+    exit 1
+fi
+if ! grep -q 'MAMBA_LADDER=(8 5 3)' "${SCRIPT_DIR}/scripts/sglang_oom_handler.sh"; then
+    echo "❌ FAIL: scripts/sglang_oom_handler.sh missing MAMBA_LADDER=(8 5 3)"
     exit 1
 fi
 if [ -f "${HOME}/.config/opencode-backends/env" ]; then
@@ -174,7 +180,7 @@ if [ -f "${HOME}/.config/opencode-backends/env" ]; then
         exit 1
     fi
 fi
-echo "✅ Passed: SGLANG_27B_MAMBA_ARGS is properly quoted, protects KV cache capacity, and env file sources cleanly."
+echo "✅ Passed: SGLANG_*_MAMBA_ARGS defaults to auto with progressive fallback quoting, protects KV cache, and env file sources cleanly."
 
 # 10. Check adaptive CPU offload environment defaults and unbraced flags (Issue #49)
 echo "[CHECK 10] Verifying adaptive CPU offload environment defaults and unbraced flags (Issue #49)..."

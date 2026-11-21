@@ -18,6 +18,7 @@ Environment="SGLANG_27B_CONTEXT_LENGTH=262144"
 Environment="SGLANG_27B_CHUNKED_PREFILL=2048"
 Environment="SGLANG_27B_ATTENTION_BACKEND=flashinfer"
 Environment="SGLANG_27B_CUDA_GRAPH_MAX_BS=8"
+Environment="SGLANG_27B_PREFILL_GRAPH_ARGS="
 Environment="SGLANG_27B_TORCH_COMPILE="
 # To enable torch compile (caution: can cause multi-minute startup stalls during initial warmups):
 # Environment="SGLANG_27B_TORCH_COMPILE=--enable-torch-compile"
@@ -27,14 +28,14 @@ Environment="SGLANG_27B_SPECULATIVE_ALGO="
 # Environment="SGLANG_27B_SPECULATIVE_ARGS=--speculative-algorithm EAGLE3 --speculative-draft-model-path ${SGLANG_27B_DRAFT_MODEL_PATH} --speculative-num-steps 3 --speculative-eagle-topk 4"
 Environment="SGLANG_27B_SPECULATIVE_ARGS="
 Environment="SGLANG_27B_CPU_OFFLOAD_ARGS="
-Environment="SGLANG_27B_MAMBA_ARGS=--max-mamba-cache-size 5 --mamba-radix-cache-strategy extra_buffer --mamba-ssm-dtype float32"
+Environment="SGLANG_27B_MAMBA_ARGS="
 EnvironmentFile=-%h/.config/opencode-backends/context_length.state
 Environment="CUDA_HOME=/opt/cuda"
 Environment="PATH=%h/.local/share/opencode-sglang-stack/venv/bin:%h/.local/share/opencode-sglang-stack/cuda-home/bin:/opt/cuda/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin"
 Environment="NVCC_PREPEND_FLAGS=-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK"
 Environment="FLASHINFER_EXTRA_CUDAFLAGS=-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK"
 Environment="PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
-# Note: Unbraced $VAR syntax is required for optional flags ($SGLANG_27B_TORCH_COMPILE, $SGLANG_27B_SPECULATIVE_ARGS, $SGLANG_27B_CPU_OFFLOAD_ARGS, $SGLANG_27B_MAMBA_ARGS)
+# Note: Unbraced $VAR syntax is required for optional flags ($SGLANG_27B_PREFILL_GRAPH_ARGS, $SGLANG_27B_TORCH_COMPILE, $SGLANG_27B_SPECULATIVE_ARGS, $SGLANG_27B_CPU_OFFLOAD_ARGS, $SGLANG_27B_MAMBA_ARGS)
 # because systemd unbraced $VAR emits 0 arguments when empty and splits on whitespace when set,
 # whereas braced ${VAR} emits an empty argument "" when empty which causes argparse errors.
 ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
@@ -46,7 +47,7 @@ ExecStart=%h/.local/share/opencode-sglang-stack/venv/bin/sglang serve \
   --context-length ${SGLANG_27B_CONTEXT_LENGTH} \
   --chunked-prefill-size ${SGLANG_27B_CHUNKED_PREFILL} \
   --attention-backend ${SGLANG_27B_ATTENTION_BACKEND} \
-  --disable-prefill-cuda-graph \
+  $SGLANG_27B_PREFILL_GRAPH_ARGS \
   --cuda-graph-max-bs-decode ${SGLANG_27B_CUDA_GRAPH_MAX_BS} \
   $SGLANG_27B_TORCH_COMPILE \
   $SGLANG_27B_SPECULATIVE_ARGS \
