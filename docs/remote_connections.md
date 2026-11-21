@@ -65,7 +65,7 @@ OPENCODE_SERVER_HOST=0.0.0.0
 > systemd starts it under; if the username differs, clients can reach port 4096 but be
 > rejected. `install.sh` flags and (interactively) reconciles this mismatch, and the T3 /
 > Antigravity provider `Username` must use the same WSL account. See
-> [WINDOWS.md](./WINDOWS.md#the-opensource-server-username--wsl-default-user-cross-check)
+> [WINDOWS.md](./WINDOWS.md#the-opencode_server_username--wsl-default-user-cross-check)
 > for the full walkthrough.
 
 > [!IMPORTANT]

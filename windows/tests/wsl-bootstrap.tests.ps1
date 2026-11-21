@@ -124,6 +124,20 @@ $sampleU22 = "*? Ubuntu-22.04  Running  2"
 $r = Get-InstalledDistro -RawOutput $sampleU22
 AssertTest "10 Ubuntu-22.04 -> Ubuntu lenient present" ($r.present -eq $true)
 
+# 11) UTF-16LE embedded NUL bytes (PowerShell 5.1 piping wsl.exe output).
+$sampleUtf16Nul = ("*  Ubuntu  Running  2".ToCharArray() -join "`0")
+$r = Get-InstalledDistro -RawOutput $sampleUtf16Nul
+AssertTest "11 UTF-16LE NUL-interleaved Ubuntu detected" ($r.present -eq $true)
+
+# 12) Format-SelfInvocationArgs handles trailing backslash safely.
+$fmtMarker = "function Format-SelfInvocationArgs {"
+$fmtStart = $fullText.IndexOf($fmtMarker)
+$fmtNext  = $fullText.IndexOf("function ", $fmtStart + $fmtMarker.Length)
+$fmtText  = $fullText.Substring($fmtStart, ($fmtNext - $fmtStart)).TrimEnd("`r", "`n")
+iex $fmtText
+$fmtOut = Format-SelfInvocationArgs -ScriptPath "C:\tmp\install.ps1" -BoundParams @{ InstallTarget = "C:\Users\me\agent-harness\" }
+AssertTest "12 Format-SelfInvocationArgs doubles trailing backslash" ($fmtOut.Contains('"C:\Users\me\agent-harness\\"'))
+
 # ---------------------------------------------------------------------------
 # Static source checks against install-windows.ps1.
 # ---------------------------------------------------------------------------
@@ -138,6 +152,10 @@ AssertTest "13 contains 'Read-Host'"                            ($src.Contains("
 AssertTest "14 contains 'default=\$safeUser'"                  ($src.Contains("default=`$safeUser"))
 AssertTest "15 contains 'Unregister-WslInstallResume'"         ($src.Contains("Unregister-WslInstallResume"))
 AssertTest "16 contains 'wsl.exe --shutdown'"                  ($src.Contains("wsl.exe --shutdown"))
+AssertTest "17 uses valid 'wsl.exe -l -v' (not '-l --list')"   ($src.Contains("wsl.exe -l -v") -and -not $src.Contains("wsl.exe -l --list"))
+AssertTest "18 safe unsigned hex conversion (no [UInt32] cast)" ($src.Contains("ToUInt32") -and -not $src.Contains('[UInt32]$rc'))
+AssertTest "19 chpasswd stages user:password with finally rm"  ($src.Contains('$safeUser + ":" + $plainPw') -and $src.Contains('Remove-Item -LiteralPath $pwFile'))
+AssertTest "20 no double-semicolon in pwInject"                (-not $src.Contains('$pwInject = "; '))
 
 # ---------------------------------------------------------------------------
 $passCount = $script:passCount

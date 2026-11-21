@@ -132,6 +132,19 @@ EOF
     CONF_D="$(mktemp -d /tmp/wslconfD-XXXXXX)/missing.conf"
     out="$(run_parser "$CONF_D")"
     if [ -z "$out" ]; then pass "absent conf yields empty output (no crash)"; else fail "expected empty output, got '${out}'"; fi
+
+    # Case E: CRLF line endings in /etc/wsl.conf
+    CONF_E="$(mktemp /tmp/wslconfE-XXXXXX)"
+    printf '[boot]\r\nsystemd=true\r\n[user]\r\ndefault=wsluser\r\n' > "$CONF_E"
+    got="$(run_parser "$CONF_E")"
+    if [ "$got" = "wsluser" ]; then pass "parses CRLF wsl.conf cleanly"; else fail "expected wsluser (no CR), got '${got}'"; fi
+
+    # Case F: /etc/wsl.conf is checked first in production candidate discovery
+    if printf '%s\n' "$PARSER_SRC" | grep -q 'candidates=("/etc/wsl.conf")'; then
+        pass "detect_wsl_default_user checks /etc/wsl.conf first"
+    else
+        fail "detect_wsl_default_user missing /etc/wsl.conf primary candidate"
+    fi
 else
     fail "could not extract detect_wsl_default_user"
 fi
@@ -165,6 +178,17 @@ if [ -s "$SRC_FILE" ]; then
     fi
 else
     fail "could not extract reconcile_wsl_username / dependencies"
+fi
+
+# ------------------------------------------------------------------------------
+# 4. T3 gate unreachable-port regression check.
+# ------------------------------------------------------------------------------
+section "4. T3 gate state when required ports are unreachable"
+GATE_SRC="$(extract_fn human_confirmed_t3_gate)"
+if printf '%s\n' "$GATE_SRC" | grep -A 3 'if \[ "\$ok_4096" != true \] || \[ "\$ok_3773" != true \]; then' | grep -q 'T3_GATE_CONFIRMED="false"'; then
+    pass "human_confirmed_t3_gate sets T3_GATE_CONFIRMED=false when ports unreachable"
+else
+    fail "human_confirmed_t3_gate leaves T3_GATE_CONFIRMED=true when ports unreachable"
 fi
 
 echo ""

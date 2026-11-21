@@ -121,16 +121,27 @@ function Get-InstalledDistro {
     else {
         $listTxt  = $null; $listCode  = 0
         $statusTxt = $null; $statusC  = 0
-        try { $listTxt  = wsl.exe -l --list  2>&1 | Out-String; $listCode  = $LASTEXITCODE }
-        catch { $listCode  = [UInt32]$_.Exception.HResult }
-        try { $statusTxt = wsl.exe --status  2>&1 | Out-String; $statusC  = $LASTEXITCODE }
-        catch { $statusC  = [UInt32]$_.Exception.HResult }
+        $prevWslUtf8 = $env:WSL_UTF8
+        try {
+            $env:WSL_UTF8 = "1"
+            try { $listTxt  = wsl.exe -l -v     2>&1 | Out-String; $listCode  = $LASTEXITCODE }
+            catch { $listCode  = [int]$_.Exception.HResult }
+            try { $statusTxt = wsl.exe --status 2>&1 | Out-String; $statusC  = $LASTEXITCODE }
+            catch { $statusC  = [int]$_.Exception.HResult }
+        } finally {
+            if ($null -eq $prevWslUtf8) { Remove-Item Env:WSL_UTF8 -ErrorAction SilentlyContinue }
+            else { $env:WSL_UTF8 = $prevWslUtf8 }
+        }
         $blob = ($listTxt + "`r`n" + $statusTxt)
         if ($listCode  -ne 0 -or $statusC  -ne 0) {
-            $rc = if ($listCode  -ne 0) { $listCode } else { $statusC }
-            $errHex = ('0x{0:X8}' -f ([UInt32]$rc))
+            $rc = [int](if ($listCode -ne 0) { $listCode } else { $statusC })
+            $rcUnsigned = [BitConverter]::ToUInt32([BitConverter]::GetBytes($rc), 0)
+            $errHex = ('0x{0:X8}' -f $rcUnsigned)
         }
     }
+
+    # Strip embedded NUL bytes emitted when Windows PowerShell 5.1 captures UTF-16LE wsl.exe output.
+    $blob = $blob -replace "`0", ""
 
     # Surface any 0x80070xxx WSL error code from the output VERBATIM.
     if ($errHex -eq "" -and ($blob -match '(0x80[0-9a-fA-F]{6})')) { $errHex = $Matches[0] }
@@ -210,12 +221,19 @@ function Format-SelfInvocationArgs {
         [string]$ScriptPath,
         [hashtable]$BoundParams = @{}
     )
+    $quoteWinArg = {
+        param([string]$s)
+        # Double backslashes immediately before quotes or end-of-string (CommandLineToArgvW).
+        $escaped = [regex]::Replace($s, '(\\*)"', '$1$1\"')
+        $escaped = [regex]::Replace($escaped, '(\\+)$', '$1$1')
+        return ('"' + $escaped + '"')
+    }
     $parts = New-Object System.Collections.Generic.List[string]
     $parts.Add("-NoProfile")
     $parts.Add("-ExecutionPolicy")
     $parts.Add("Bypass")
     $parts.Add("-File")
-    $parts.Add(('"' + ($ScriptPath -replace '"', '\"') + '"'))
+    $parts.Add((& $quoteWinArg $ScriptPath))
     foreach ($key in ($BoundParams.Keys | Sort-Object)) {
         $val = $BoundParams[$key]
         if ($val -is [System.Management.Automation.SwitchParameter]) {
@@ -223,9 +241,8 @@ function Format-SelfInvocationArgs {
                 $parts.Add("-$key")
             }
         } elseif ($null -ne $val) {
-            $escaped = ([string]$val) -replace '"', '\"'
             $parts.Add("-$key")
-            $parts.Add(('"' + $escaped + '"'))
+            $parts.Add((& $quoteWinArg ([string]$val)))
         }
     }
     return ($parts -join " ")
@@ -471,22 +488,33 @@ try {
 } catch { $userExists = $false }
 $ErrorActionPreference = $oldEap
 
-if (-not $userExists -and (-not $Quiet)) {
-    $ans = Read-Host "Set a Linux password? [Enter = leave empty (convenience)]"
-    if ($ans) {
+if (-not $Quiet) {
+    $wantPw = [bool]$SetPassword
+    if (-not $wantPw -and (-not $userExists)) {
+        $ans = Read-Host "Set a Linux password? [y/N (Enter = leave empty)]"
+        $wantPw = ($ans -and ($ans.Trim().ToLower() -match '^(y|yes)$'))
+    }
+    if ($wantPw) {
         $ss = Read-Host -AsSecureString "Type the Linux password, then Enter"
         $b  = [System.Runtime.InteropServices.Marshal]::SecureStringToBString($ss)
         try {
+            $plainPw = [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b)
             $pwFile = Join-Path $env:TEMP ("agent-harness-pw-" + [Guid]::NewGuid().ToString("N"))
-            [System.IO.File]::WriteAllText($pwFile, [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b))
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($pwFile, ($safeUser + ":" + $plainPw + "`n"), $utf8NoBom)
+            $plainPw = $null
             # Resolve the Windows-side temp path to the WSL view so the bash payload below
             # (running inside WSL) can actually locate and read the staged password.
             $pwFileWslSq = ConvertTo-BashSingleQuoted (Convert-WindowsToWslPath $pwFile)
         } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBString($b) }
-        $pwInject = "; [ -f '$pwFileWslSq' ] && chmod 600 '$pwFileWslSq' && chpasswd < '$pwFileWslSq'; rm -f '$pwFileWslSq'; "
+        $pwInject = "if [ -f '$pwFileWslSq' ]; then chmod 600 '$pwFileWslSq' && chpasswd < '$pwFileWslSq'; rm -f '$pwFileWslSq'; fi; "
     }
-    $s = Read-Host "Give '$safeUser' passwordless sudo? [y/N]"
-    $sudoOK = (-not [bool]$NoSudo) -and ($s -and $s.Trim().ToLower() -eq 'y')
+    if (-not $userExists) {
+        $s = Read-Host "Give '$safeUser' passwordless sudo? [y/N]"
+        $sudoOK = (-not [bool]$NoSudo) -and ($s -and $s.Trim().ToLower() -match '^(y|yes)$')
+    } else {
+        $sudoOK = -not [bool]$NoSudo
+    }
 } else {
     $sudoOK = -not [bool]$NoSudo
 }
@@ -498,16 +526,32 @@ try {
 } catch { }
 
 $sudoFlag = if ($sudoOK) { "1" } else { "0" }   # PowerShell substitutes literal 1/0 (injection-safe)
+# Only clear the password on newly-created users when no password was requested; never wipe
+# an existing user's password on re-run or -Refresh.
+$pwStep = if ($pwInject) {
+    $pwInject
+} elseif (-not $userExists) {
+    "usermod -p '' '$safeUser'; "
+} else {
+    ""
+}
 
 $inner = "set -e; " +
   "if ! id '$safeUser' >/dev/null 2>&1; then useradd -m -s /bin/bash '$safeUser'; fi; " +
   "usermod -aG sudo '$safeUser'; " +
   "if [ `"$sudoFlag`" = 1 ]; then echo '$safeUser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent-harness; chmod 440 /etc/sudoers.d/agent-harness; fi; " +
-  "usermod -p '' '$safeUser'; " +               # empty password is the default convenience
-  $pwInject +
+  $pwStep +
   "if [ ! -f /etc/wsl.conf ]; then : > /etc/wsl.conf; fi; " +
-  "grep -q '^\[boot\]' /etc/wsl.conf 2>/dev/null || printf '[boot]\nsystemd=true\n'  >> /etc/wsl.conf; " +
-  "grep -q '^\[user\]' /etc/wsl.conf 2>/dev/null || printf '[user]\ndefault=$safeUser\n' >> /etc/wsl.conf"
+  "if grep -q '^\[boot\]' /etc/wsl.conf 2>/dev/null; then " +
+    "if grep -q '^[[:space:]]*systemd[[:space:]]*=' /etc/wsl.conf 2>/dev/null; then " +
+      "sed -i 's/^[[:space:]]*systemd[[:space:]]*=.*/systemd=true/' /etc/wsl.conf; " +
+    "else " +
+      "sed -i '/^\[boot\]/a systemd=true' /etc/wsl.conf; " +
+    "fi; " +
+  "else " +
+    "printf '\n[boot]\nsystemd=true\n' >> /etc/wsl.conf; " +
+  "fi; " +
+  "grep -q '^\[user\]' /etc/wsl.conf 2>/dev/null || printf '\n[user]\ndefault=$safeUser\n' >> /etc/wsl.conf"
 
 # Backwards-compatible alias for the downstream success message.
 $u = $safeUser
@@ -516,6 +560,11 @@ try {
     wsl.exe -d $Dist -u root -- bash -lc $inner
     $rc = $LASTEXITCODE
 } catch { $rc = $LASTEXITCODE }
+finally {
+    if ($pwFile -and (Test-Path -LiteralPath $pwFile)) {
+        Remove-Item -LiteralPath $pwFile -Force -ErrorAction SilentlyContinue
+    }
+}
 $ErrorActionPreference = $oldEap
 if ($rc -ne 0) { Write-Err "Default user setup failed (exit code $rc)"; exit $rc }
 Write-Ok "Default WSL user '$u' ready (systemd enabled)."

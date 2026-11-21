@@ -1070,11 +1070,11 @@ detect_wsl() {
 
 detect_wsl_default_user() {
     # Echo the auto-login account declared by wsl.conf [user] default= (best effort).
-    # __HARNESS_WSL_CONF_PATH is a test/introspection override; production never sets
-    # it and the function auto-discovers the conf under /mnt/c otherwise.
+    # __HARNESS_WSL_CONF_PATH is a test/introspection override; production checks
+    # /etc/wsl.conf first (the canonical WSL per-distro config) before any fallbacks.
     local conf_path="${__HARNESS_WSL_CONF_PATH:-}"
     if [ -z "$conf_path" ]; then
-        local candidates=()
+        local candidates=("/etc/wsl.conf")
         local d
         if [ -d "/mnt/c/Users" ]; then
             for d in /mnt/c/Users/*/; do
@@ -1090,11 +1090,12 @@ detect_wsl_default_user() {
         done
     fi
     [ -n "$conf_path" ] && [ -r "$conf_path" ] || return 1
-    # Parse only the [user] section; strip comments; match the key case-insensitively
-    # while preserving the original case of the value.
+    # Parse only the [user] section; strip CR and comments; match the key
+    # case-insensitively while preserving the original case of the value.
     awk '
-        /^\[user\]/ { sec=1; next }
-        /^\[/       { sec=0 }
+        { gsub(/\r/, "") }
+        /^\[user\][ \t]*$/ { sec=1; next }
+        /^\[/              { sec=0 }
         sec==1 {
             line=$0
             sub(/#.*/,"",line)                       # drop trailing comment
@@ -1337,6 +1338,7 @@ human_confirmed_t3_gate() {
     echo ""
 
     if [ "$ok_4096" != true ] || [ "$ok_3773" != true ]; then
+        T3_GATE_CONFIRMED="false"
         echo "   ⚠️  One or more required ports are not reachable. SGLang can take minutes to"
         echo "      load weights into VRAM. Re-run this installer after the services are up"
         echo "      before completing the gate."
