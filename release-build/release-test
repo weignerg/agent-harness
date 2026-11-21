@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# release-test  --  end-to-end sandbox verification for the two self-extracting
+# release artifacts BEFORE executing install.sh.
+#
+# Checks:
+#   CHECK 1 (Builder output)      : builders emit EXACTLY two artifacts (no extras)
+#   CHECK 2 (Linux self-extract)  : chmod +x sandbox self-extract + SHA-256 match
+#                                   + full runtime tree + excluded paths absent
+#   CHECK 3 (Linux tamper check)  : corrupted payload rejected BEFORE extraction
+#   CHECK 4 (Linux install.sh)    : dry-run from extracted dir resolves it as
+#                                   the canonical repo (not the git checkout)
+#   CHECK 5 (Windows AST + .NET)  : built .ps1 has 0 PowerShell parse errors;
+#                                   .NET decodes + SHA-256 matches BEFORE exec;
+#                                   extracts full runtime tree, excludes clean
+#   CHECK 6 (Source-bundle clean) : old agent-harness-v0.7.1-source.tar.gz path
+#                                   removed from ps1, docs/WINDOWS.md, README.md
+# ==============================================================================
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${HERE}/.." && pwd)"
+
+VERSION="v0.7.1"
+LINUX_ART="install-agent-harness-${VERSION}-linux.sh"
+WINDOWS_ART="install-agent-harness-${VERSION}-windows10-11.ps1"
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
+mkdir -p "${WORK}/dist" "${WORK}/sandbox-bin" "${WORK}/linux-extract" \
+         "${WORK}/linux-dryrun" "${WORK}/sandbox-home" "${WORK}/win-extract"
+
+STATUS=0
+CHECKS=0
+ok()  { CHECKS=$((CHECKS+1)); echo "  CHECK ${CHECKS}: OK    $*"; }
+bad() { CHECKS=$((CHECKS+1)); echo "  CHECK ${CHECKS}: FAIL  $*" >&2; STATUS=1; }
+
+# --- tooling discovery --------------------------------------------------------
+PWSH_BIN="${PWSH:-$(command -v pwsh 2>/dev/null || true)}"
+if [ -z "${PWSH_BIN}" ] && [ -x /tmp/opencode/pwsh ]; then
+  PWSH_BIN="/tmp/opencode/pwsh"
+fi
+
+if [ -z "${PWSH_BIN}" ]; then
+  echo "release-test: ERROR: pwsh is required to build and validate the Windows artifact." >&2
+  exit 1
+fi
+
+has_clean_runtime_tree() {
+  local dir="$1" sub bad_path
+  for sub in harness config scripts core; do
+    [ -d "${dir}/${sub}" ] || return 1
+  done
+  [ -f "${dir}/install.sh" ] || return 1
+  for bad_path in .git build .venv uv.lock tests release-build; do
+    [ ! -e "${dir}/${bad_path}" ] || return 1
+  done
+  return 0
+}
+
+echo "============================================================"
+echo "Building both self-extracting artifacts into ${WORK}/dist"
+echo "============================================================"
+bash "${HERE}/make_linux_installer.sh" "${WORK}/dist" || { bad "make_linux_installer.sh failed"; exit 1; }
+"${PWSH_BIN}" -NoProfile -File "${HERE}/make_windows_installer.ps1" -OutputDir "${WORK}/dist" || { bad "make_windows_installer.ps1 failed"; exit 1; }
+
+echo "============================================================"
+echo "Running release-test verification checks"
+echo "============================================================"
+
+# CHECK 1 -- Builders emit EXACTLY two files (no source-only / sidecar extras)
+mapfile -t BUILT_FILES < <(LC_ALL=C ls -1 "${WORK}/dist" | sort)
+if [ "${#BUILT_FILES[@]}" -eq 2 ] \
+   && [ "${BUILT_FILES[0]}" = "${LINUX_ART}" ] \
+   && [ "${BUILT_FILES[1]}" = "${WINDOWS_ART}" ]; then
+  ok "builder output: emitted EXACTLY 2 artifacts (${LINUX_ART}, ${WINDOWS_ART})"
+else
+  bad "builder output: expected exactly 2 artifacts, found ${#BUILT_FILES[@]}: ${BUILT_FILES[*]}"
+fi
+
+# Install both artifacts into an isolated sandbox directory (chmod +x)
+cp "${WORK}/dist/${LINUX_ART}" "${WORK}/sandbox-bin/${LINUX_ART}"
+chmod +x "${WORK}/sandbox-bin/${LINUX_ART}"
+cp "${WORK}/dist/${WINDOWS_ART}" "${WORK}/sandbox-bin/${WINDOWS_ART}"
+chmod +x "${WORK}/sandbox-bin/${WINDOWS_ART}"
+
+LINUX_SANDBOX="${WORK}/sandbox-bin/${LINUX_ART}"
+WIN_SANDBOX="${WORK}/sandbox-bin/${WINDOWS_ART}"
+
+# CHECK 2 -- Linux artifact self-extracts + checksum verified BEFORE executing install.sh
+LINUX_EMBED_SHA="$(awk -F= '/^# HARNESS_PAYLOAD_SHA256=/{print $2; exit}' "${LINUX_SANDBOX}")"
+LINUX_START="$(awk -v m='#''__HARNESS_PKG_EOF__' '$0==m {print NR+1; exit}' "${LINUX_SANDBOX}")"
+LINUX_DECODED_SHA=""
+if [ -n "${LINUX_START}" ]; then
+  LINUX_DECODED_SHA="$(awk "NR>=${LINUX_START}" "${LINUX_SANDBOX}" | base64 -d | sha256sum | awk '{print $1}')"
+fi
+
+if [ -n "${LINUX_EMBED_SHA}" ] && [ "${LINUX_EMBED_SHA}" = "${LINUX_DECODED_SHA}" ] \
+   && HARNESS_EXTRACT_ONLY=1 HARNESS_EXTRACT_DIR="${WORK}/linux-extract" "${LINUX_SANDBOX}" >/dev/null \
+   && has_clean_runtime_tree "${WORK}/linux-extract"; then
+  ok "Linux self-extract: SHA-256 verified (${LINUX_EMBED_SHA:0:12}...) + full clean runtime tree before exec"
+else
+  bad "Linux self-extract: checksum or runtime tree verification failed"
+fi
+
+# CHECK 3 -- Linux tamper test: corrupted payload must fail BEFORE extraction
+TAMPERED_LINUX="${WORK}/tampered-linux.sh"
+cp "${LINUX_SANDBOX}" "${TAMPERED_LINUX}"
+chmod +x "${TAMPERED_LINUX}"
+sed -i 's/^EXPECTED_PAYLOAD_SHA256=.*/EXPECTED_PAYLOAD_SHA256="0000000000000000000000000000000000000000000000000000000000000000"/' "${TAMPERED_LINUX}"
+mkdir -p "${WORK}/tampered-out"
+if ! HARNESS_EXTRACT_ONLY=1 HARNESS_EXTRACT_DIR="${WORK}/tampered-out" "${TAMPERED_LINUX}" >/dev/null 2>&1 \
+   && [ ! -f "${WORK}/tampered-out/install.sh" ]; then
+  ok "Linux tamper check: checksum mismatch rejected BEFORE extraction"
+else
+  bad "Linux tamper check: tampered artifact was not rejected"
+fi
+
+# CHECK 4 -- Linux artifact executes install.sh --dry-run and resolves extracted dir as canonical repo
+if HOME="${WORK}/sandbox-home" HARNESS_EXTRACT_DIR="${WORK}/linux-dryrun" \
+   "${LINUX_SANDBOX}" --dry-run --target all --non-interactive -y > "${WORK}/linux-dryrun.log" 2>&1 \
+   && grep -Fq "${WORK}/linux-dryrun/core" "${WORK}/linux-dryrun.log" \
+   && ! grep -Fq "${REPO_ROOT}/core" "${WORK}/linux-dryrun.log"; then
+  ok "Linux install.sh resolution: dry-run resolved extracted dir alone as canonical repo (exit 0)"
+else
+  bad "Linux install.sh resolution: dry-run failed or leaked git repo path (see ${WORK}/linux-dryrun.log)"
+  tail -n 20 "${WORK}/linux-dryrun.log" >&2 || true
+fi
+
+# CHECK 5 -- Windows artifact: 0 PowerShell parse errors + .NET decode + SHA-256 check + clean tree
+WIN_VERIFY_PS1="${WORK}/verify-win.ps1"
+cat > "${WIN_VERIFY_PS1}" <<'PS1'
+param([string]$ArtifactPath, [string]$OutTarGz)
+$ErrorActionPreference = "Stop"
+
+# (a) Full PowerShell AST parse check on the assembled self-extracting artifact.
+$tokens = $null
+$errs   = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile($ArtifactPath, [ref]$tokens, [ref]$errs)
+if ($errs -and $errs.Count -gt 0) {
+    $errs | ForEach-Object { Write-Error "PARSE ERROR: $($_.Message) at $($_.Extent.Text)" }
+    exit 10
+}
+
+# (b) Locate sentinel & embedded SHA-256, decode via .NET, verify SHA-256 BEFORE extract.
+$lines = [System.IO.File]::ReadAllLines($ArtifactPath)
+$marker = "#" + "__HARNESS_PKG_EOF__"
+$expectedSha = ""
+$markerIdx = -1
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match '^# HARNESS_PAYLOAD_SHA256=([0-9a-fA-F]{64})$') {
+        $expectedSha = $Matches[1].ToLowerInvariant()
+    }
+    if ($lines[$i] -ceq $marker) {
+        $markerIdx = $i
+        break
+    }
+}
+if ($markerIdx -lt 0 -or [string]::IsNullOrEmpty($expectedSha)) {
+    Write-Error "Missing marker or HARNESS_PAYLOAD_SHA256 in $ArtifactPath"
+    exit 11
+}
+
+$b64Lines = New-Object System.Collections.Generic.List[string]
+for ($j = $markerIdx + 1; $j -lt $lines.Count; $j++) {
+    if ($lines[$j] -ceq "#>") { break }
+    $b64Lines.Add($lines[$j])
+}
+$bytes = [Convert]::FromBase64String(($b64Lines -join "`n"))
+$sha = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $actualSha = -join (($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") }))
+} finally {
+    $sha.Dispose()
+}
+if ($actualSha -ne $expectedSha) {
+    Write-Error "SHA-256 mismatch: expected=$expectedSha actual=$actualSha"
+    exit 12
+}
+[System.IO.File]::WriteAllBytes($OutTarGz, $bytes)
+Write-Output $actualSha
+PS1
+
+WIN_DECODED_SHA="$("${PWSH_BIN}" -NoProfile -File "${WIN_VERIFY_PS1}" "${WIN_SANDBOX}" "${WORK}/win.tar.gz" 2>&1)"
+WIN_RC=$?
+if [ "${WIN_RC}" -eq 0 ] \
+   && tar -xzf "${WORK}/win.tar.gz" -C "${WORK}/win-extract" \
+   && has_clean_runtime_tree "${WORK}/win-extract"; then
+  ok "Windows artifact: 0 PS parse errors, .NET SHA-256 verified (${WIN_DECODED_SHA:0:12}...) + full clean runtime tree"
+else
+  bad "Windows artifact: parse, .NET decode/checksum, or tree check failed: ${WIN_DECODED_SHA}"
+fi
+
+# CHECK 6 -- Old source-bundle release path removed from active installer and docs
+if ! grep -q "agent-harness-v0.7.1-source.tar.gz" \
+     "${REPO_ROOT}/windows/install-windows.ps1" \
+     "${REPO_ROOT}/docs/WINDOWS.md" \
+     "${REPO_ROOT}/README.md"; then
+  ok "source-bundle cleanup: old agent-harness-v0.7.1-source.tar.gz removed from ps1/WINDOWS.md/README.md"
+else
+  bad "source-bundle cleanup: stale agent-harness-v0.7.1-source.tar.gz reference still present"
+fi
+
+echo "============================================================"
+if [ "${STATUS}" -eq 0 ]; then
+  echo "release-test: PASS  (${CHECKS}/${CHECKS} checks passed)"
+else
+  echo "release-test: FAIL  (${CHECKS} checks evaluated)"
+fi
+exit "${STATUS}"

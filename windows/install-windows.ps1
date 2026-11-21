@@ -1,35 +1,34 @@
 #
 # install-windows.ps1
-# Windows 11 (WSL2) one-command install bootstrap for agent-harness (v0.7.1).
+# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.1).
 #
 # TLDR:
-#   1) Download agent-harness-v0.7.1-source.tar.gz (the install bundle) from the v0.7.1
-#      release (https://github.com/weignerg/agent-harness/releases/tag/v0.7.1), then extract:
-#      tar -xzf agent-harness-v0.7.1-source.tar.gz
-#      (tar.exe is built into Windows 11; "Extract All" in Explorer works too.)
-#   2) One command, run from INSIDE the extracted tree:
-#      powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-harness-v0.7.1\windows\install-windows.ps1
-#   The command self-elevates, sets up WSL + Ubuntu, asks for the one mandatory reboot,
-#   then (same command after reboot, from the same extracted bundle) copies the bundle to
-#   $env:USERPROFILE\agent-harness and runs the Linux ./install.sh inside WSL. Because the
-#   repository is PRIVATE there is no anonymous install URL: the single bundled source
-#   tarball is the install medium (no git clone / remote fetch anywhere).
+#   1) Download install-agent-harness-v0.7.1-windows10-11.ps1 from the release page
+#      (https://github.com/weignerg/agent-harness/releases).
+#   2) Run ONE command:
+#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1
+#   The command self-elevates, provisions WSL2 + Ubuntu (with systemd persistence and
+#   Task Scheduler auto-resume across the one mandatory reboot), decodes and checksum-
+#   verifies its embedded base64(tar.gz) runtime payload, extracts it into
+#   $env:USERPROFILE\agent-harness via WSL, and runs the embedded Linux ./install.sh.
+#   Because the repository is PRIVATE there is no anonymous install URL: this single
+#   self-extracting script IS the install medium (no git clone / remote fetch anywhere).
 #
 # What it does (one paragraph):
-#   This script bootstraps agent-harness on a fresh Windows 11 machine using the Windows
-#   Subsystem for Linux. It elevates itself, provisions WSL and the Ubuntu distro (handling
-#   the single mandatory reboot via a state marker on disk), installs git/curl/python inside
-#   Ubuntu, creates a default user with an empty password and passwordless sudo so that WSL
-#   can auto-login, copies this source bundle (already on disk because the script runs from
-#   inside the extracted bundle) to a canonical install target, and finally runs the harness
-#   ./install.sh inside WSL with the locked flags. Every artifact comes from the bundle the
-#   script ships in; there is no remote fetch and no git clone because the repo is private.
+#   This script is the Windows/WSL2 bootstrap wrapped by release-build/make_windows_installer.ps1
+#   into the self-extracting install-agent-harness-v0.7.1-windows10-11.ps1 artifact. It
+#   elevates itself, provisions WSL2 and the Ubuntu distro (handling the single mandatory
+#   reboot via a state marker and logon auto-resume task), installs git/curl/python inside
+#   Ubuntu, configures a default Linux user and [boot] systemd=true in /etc/wsl.conf,
+#   decodes + SHA-256 verifies its embedded base64(tar.gz) payload with .NET, extracts it
+#   into $InstallTarget inside WSL, and finally runs the embedded ./install.sh inside WSL.
+#   Every runtime file comes from the embedded payload; there is no remote fetch or git clone.
 #
 
 param(
-  [string]$InstallTarget = "$env:USERPROFILE\agent-harness",  # canonical harness source dir
+  [string]$InstallTarget = "$env:USERPROFILE\agent-harness",  # canonical harness runtime dir
   [string]$Dist          = "Ubuntu",                          # WSL distro
-  [switch]$Refresh,                                            # re-copy this bundle over an existing $InstallTarget (update flow)
+  [switch]$Refresh,                                            # re-extract embedded payload over an existing $InstallTarget (update flow)
   [string]$Profile   = "quick",   # quick | full | manual  (recorded feature set; install.sh has no profile flag)
   [string]$LinuxUser = "user",    # Linux login name; defaults to sanitized $env:USERNAME
   [switch]$SetPassword,           # if set, prompt for + apply a Linux password (else empty-password convenience)
@@ -210,8 +209,10 @@ function Register-WslInstallResume {
     try {
         $name = "agent-harness-wsl-install-resume"
         $psBin = Join-Path $env:windir "System32\WindowsPowerShell\v1.0\powershell.exe"
-        $arg   = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
-        $act   = New-ScheduledTaskAction  -Execute $psBin -Argument $arg -WorkingDirectory $BundleRoot
+        $selfPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+        $workDir  = if ($selfPath) { Split-Path -Parent $selfPath } else { (Get-Location).Path }
+        $arg   = "-NoProfile -ExecutionPolicy Bypass -File `"$selfPath`""
+        $act   = New-ScheduledTaskAction  -Execute $psBin -Argument $arg -WorkingDirectory $workDir
         $trig  = New-ScheduledTaskTrigger  -AtLogOn
         $user  = ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
         # -RunLevel Highest is the canonical privilege; New-ScheduledTaskPrincipal has no
@@ -237,26 +238,64 @@ function Unregister-WslInstallResume {
     }
 }
 
+function Get-EmbeddedPayload {
+    param([string]$ScriptPath)
+    if ([string]::IsNullOrWhiteSpace($ScriptPath) -or -not (Test-Path -LiteralPath $ScriptPath)) {
+        return @{ found = $false; payloadB64 = ""; expectedSha = "" }
+    }
+    $lines = [System.IO.File]::ReadAllLines($ScriptPath)
+    $marker = "#" + "__HARNESS_PKG_EOF__"
+    $expectedSha = ""
+    $markerIdx = -1
+    for ($k = 0; $k -lt $lines.Count; $k++) {
+        if ($lines[$k] -match '^# HARNESS_PAYLOAD_SHA256=([0-9a-fA-F]{64})$') {
+            $expectedSha = $Matches[1].ToLowerInvariant()
+        }
+        if ($lines[$k] -ceq $marker) {
+            $markerIdx = $k
+            break
+        }
+    }
+    if ($markerIdx -lt 0) {
+        return @{ found = $false; payloadB64 = ""; expectedSha = $expectedSha }
+    }
+    $b64Lines = New-Object System.Collections.Generic.List[string]
+    for ($j = $markerIdx + 1; $j -lt $lines.Count; $j++) {
+        if ($lines[$j] -ceq "#>") { break }
+        if (-not [string]::IsNullOrWhiteSpace($lines[$j])) {
+            $b64Lines.Add($lines[$j].Trim())
+        }
+    }
+    if ($b64Lines.Count -eq 0) {
+        return @{ found = $false; payloadB64 = ""; expectedSha = $expectedSha }
+    }
+    return @{
+        found       = $true
+        payloadB64  = ($b64Lines -join "`n")
+        expectedSha = $expectedSha
+    }
+}
+
 # ---------------------------------------------------------------
-# Bundle-root check: this script MUST run from INSIDE an extracted
-# v0.7.1 source bundle. It is code, so it runs after param() and the
-# function definitions, then before the install flow.
+# Embedded payload pre-check: this script is the self-extracting
+# artifact built by release-build/make_windows_installer.ps1.
+# Fail fast if invoked as the raw unbuilt template without a payload.
 # ---------------------------------------------------------------
-$BundleRoot = Split-Path -Parent $PSScriptRoot
-if (-not $PSScriptRoot -or -not (Test-Path (Join-Path $BundleRoot "install.sh"))) {
-    Write-Err "This script must be run from INSIDE an extracted v0.7.1 source bundle (the folder containing install.sh, i.e. agent-harness-v0.7.1\windows\install-windows.ps1)."
-    Write-Err "  1) Download agent-harness-v0.7.1-source.tar.gz from the v0.7.1 release, then:"
-    Write-Err "        tar -xzf agent-harness-v0.7.1-source.tar.gz"
-    Write-Err "  2) Then run its copy of this script:"
-    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\\agent-harness-v0.7.1\\windows\\install-windows.ps1"
-    Write-Err "(If you only downloaded the standalone install-windows.ps1 asset, download the source bundle, extract it, and run ITS copy of this script.)"
+$ScriptSelfPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+$EmbeddedPayload = Get-EmbeddedPayload -ScriptPath $ScriptSelfPath
+if (-not $EmbeddedPayload.found) {
+    Write-Err "No embedded runtime payload found in this script (missing '#__HARNESS_PKG_EOF__' sentinel)."
+    Write-Err "  1) Download install-agent-harness-v0.7.1-windows10-11.ps1 from the release page, or"
+    Write-Err "     build it from a checkout with: pwsh -NoProfile -File release-build/make_windows_installer.ps1"
+    Write-Err "  2) Then run:"
+    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1"
     exit 1
 }
 
 # ---------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------
-Write-Host "agent-harness Windows (WSL) install bootstrap - v0.7.1" -ForegroundColor Magenta
+Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.1" -ForegroundColor Magenta
 Write-Host "-------------------------------------------------------------"
 Write-Host
 
@@ -265,8 +304,8 @@ Write-Host
 # ---------------------------------------------------------------
 if (-not (Test-IsAdmin)) {
     Write-Warn "Admin rights required - relaunching elevated..."
-    $scriptPath = $MyInvocation.MyCommand.Path
-    if (-not $scriptPath) { $scriptPath = (Get-Location).Path + "\install-windows.ps1" }
+    $scriptPath = $ScriptSelfPath
+    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.1-windows10-11.ps1" }
     $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
     Start-Process -FilePath $env:windir\System32\WindowsPowerShell\v1.0\powershell.exe `
                   -Verb RunAs -ArgumentList $argList
@@ -293,7 +332,7 @@ if ($featState -eq "Disabled") {
     Write-Host ""
     Write-Err "WSL + $Dist are being installed. A REBOOT is required to finish."
     Write-Err "Please REBOOT your machine now."
-    Write-Err "After the reboot, open PowerShell in the SAME extracted bundle and run the SAME command again (see the top-of-file TLDR) to continue the install."
+    Write-Err "After the reboot, this installer will resume automatically on login (or re-run the SAME self-extracting artifact)."
     exit 0
 }
 elseif ($featState -eq "Enabled (Pending Reboot)" -or $featState -eq "Disabled (Pending Reboot)") {
@@ -380,12 +419,12 @@ if (-not $userExists -and (-not $Quiet)) {
         $b  = [System.Runtime.InteropServices.Marshal]::SecureStringToBString($ss)
         try {
             $pwFile = Join-Path $env:TEMP ("agent-harness-pw-" + [Guid]::NewGuid().ToString("N"))
-            [File]::WriteAllText($pwFile, [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b))
+            [System.IO.File]::WriteAllText($pwFile, [System.Runtime.InteropServices.Marshal]::PtrToStringBString($b))
             # Resolve the Windows-side temp path to the WSL view so the bash payload below
             # (running inside WSL) can actually locate and read the staged password.
-            $pwFileWsl = Convert-WindowsToWslPath $pwFile
+            $pwFileWslSq = ConvertTo-BashSingleQuoted (Convert-WindowsToWslPath $pwFile)
         } finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBString($b) }
-        $pwInject = "; [ -f '$pwFileWsl' ] && chmod 600 '$pwFileWsl' && chpasswd < '$pwFileWsl'; rm -f '$pwFileWsl'; "
+        $pwInject = "; [ -f '$pwFileWslSq' ] && chmod 600 '$pwFileWslSq' && chpasswd < '$pwFileWslSq'; rm -f '$pwFileWslSq'; "
     }
     $s = Read-Host "Give '$safeUser' passwordless sudo? [y/N]"
     $sudoOK = (-not [bool]$NoSudo) -and ($s -and $s.Trim().ToLower() -eq 'y')
@@ -404,12 +443,12 @@ $sudoFlag = if ($sudoOK) { "1" } else { "0" }   # PowerShell substitutes literal
 $inner = "set -e; " +
   "if ! id '$safeUser' >/dev/null 2>&1; then useradd -m -s /bin/bash '$safeUser'; fi; " +
   "usermod -aG sudo '$safeUser'; " +
-  "if [ $sudoFlag ] = 1; then echo '$safeUser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent-harness; chmod 440 /etc/sudoers.d/agent-harness; fi; " +
+  "if [ `"$sudoFlag`" = 1 ]; then echo '$safeUser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent-harness; chmod 440 /etc/sudoers.d/agent-harness; fi; " +
   "usermod -p '' '$safeUser'; " +               # empty password is the default convenience
   $pwInject +
   "if [ ! -f /etc/wsl.conf ]; then : > /etc/wsl.conf; fi; " +
-  "grep -q '^\\[boot\\]' /etc/wsl.conf 2>/dev/null || printf '[boot]\nsystemd=true\n'  >> /etc/wsl.conf; " +
-  "grep -q '^\\[user\\]' /etc/wsl.conf 2>/dev/null || printf '[user]\ndefault=$safeUser\n' >> /etc/wsl.conf"
+  "grep -q '^\[boot\]' /etc/wsl.conf 2>/dev/null || printf '[boot]\nsystemd=true\n'  >> /etc/wsl.conf; " +
+  "grep -q '^\[user\]' /etc/wsl.conf 2>/dev/null || printf '[user]\ndefault=$safeUser\n' >> /etc/wsl.conf"
 
 # Backwards-compatible alias for the downstream success message.
 $u = $safeUser
@@ -420,7 +459,7 @@ try {
 } catch { $rc = $LASTEXITCODE }
 $ErrorActionPreference = $oldEap
 if ($rc -ne 0) { Write-Err "Default user setup failed (exit code $rc)"; exit $rc }
-Write-Ok "Default WSL user '$u' ready (empty password, passwordless sudo)."
+Write-Ok "Default WSL user '$u' ready (systemd enabled)."
 
 # Force WSL up fresh so the new /etc/wsl.conf [boot] systemd=true takes effect on the
 # next launch (the running distro otherwise keeps its stale boot config). --shutdown is
@@ -432,28 +471,58 @@ Write-State "READY"
 Unregister-WslInstallResume
 
 # ---------------------------------------------------------------
-# (4) Copy this source bundle to the canonical install target
-#     (Windows side, PowerShell native Copy-Item). No tar extraction
-#     inside WSL: the artifacts are already part of the bundle that
-#     this script ships in. Idempotent - only the first run, or
-#     -Refresh (from a NEW bundle), performs the copy.
+# (4) Self-extract the embedded base64(tar.gz) runtime payload to
+#     $InstallTarget via WSL tar. Verifies embedded SHA-256 BEFORE
+#     writing or extracting. Idempotent: skipped if already extracted
+#     unless -Refresh is passed.
 # ---------------------------------------------------------------
-$wslInstallTarget = Convert-WindowsToWslPath $InstallTarget
+$wslInstallTarget   = Convert-WindowsToWslPath $InstallTarget
+$wslInstallTargetSq = ConvertTo-BashSingleQuoted $wslInstallTarget
 $bundleHasInstallSh = Test-Path (Join-Path $InstallTarget "install.sh")
 if ($Refresh.IsPresent -or -not $bundleHasInstallSh) {
+    Write-Step "Decoding and verifying embedded runtime payload..."
+    $payloadBytes = [Convert]::FromBase64String($EmbeddedPayload.payloadB64)
+    if (-not [string]::IsNullOrEmpty($EmbeddedPayload.expectedSha)) {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $actualSha = -join (($sha.ComputeHash($payloadBytes) | ForEach-Object { $_.ToString("x2") }))
+        } finally {
+            $sha.Dispose()
+        }
+        if ($actualSha -ne $EmbeddedPayload.expectedSha) {
+            Write-Err "Embedded payload SHA-256 mismatch! Refusing to extract."
+            Write-Err "  expected: $($EmbeddedPayload.expectedSha)"
+            Write-Err "  actual  : $actualSha"
+            exit 1
+        }
+        Write-Ok "Embedded payload SHA-256 verified ($($actualSha.Substring(0, 12))...)."
+    }
+
     New-Item -ItemType Directory -Force -Path $InstallTarget | Out-Null
-    Write-Step "Copying bundle to $InstallTarget ..."
+    $tempPkg = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-harness-pkg-" + [Guid]::NewGuid().ToString("N") + ".tar.gz")
+    [System.IO.File]::WriteAllBytes($tempPkg, $payloadBytes)
+    $wslTempPkgSq = ConvertTo-BashSingleQuoted (Convert-WindowsToWslPath $tempPkg)
+
+    Write-Step "Extracting embedded runtime tree to $InstallTarget ..."
     $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    $rc = 1
     try {
-        Copy-Item -Path (Join-Path $BundleRoot "*") -Destination $InstallTarget -Recurse -Force
+        $extractCmd = "rm -rf '$wslInstallTargetSq/harness' '$wslInstallTargetSq/config' '$wslInstallTargetSq/scripts' '$wslInstallTargetSq/core' '$wslInstallTargetSq/install.sh' && tar -xzf '$wslTempPkgSq' -C '$wslInstallTargetSq'"
+        wsl.exe -d $Dist -- bash -lc $extractCmd
         $rc = $LASTEXITCODE
-    } catch { $rc = $LASTEXITCODE }
+    } catch {
+        $rc = if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }
+    } finally {
+        if (Test-Path -LiteralPath $tempPkg) {
+            Remove-Item -LiteralPath $tempPkg -Force -ErrorAction SilentlyContinue
+        }
+    }
     $ErrorActionPreference = $oldEap
-    if ($rc -ne 0) { Write-Err "Copy of bundle failed (exit code $rc)"; exit $rc }
-    Write-Ok "Bundle copied to $InstallTarget."
+    if ($rc -ne 0) { Write-Err "Payload extraction failed (exit code $rc)"; exit $rc }
+    Write-Ok "Runtime tree extracted to $InstallTarget."
 } else {
-    Write-Warn "Existing checkout at $InstallTarget detected; re-running the installer without re-copying."
-    Write-Warn "Use -Refresh (from a NEW bundle) to update."
+    Write-Warn "Existing runtime tree at $InstallTarget detected; re-running the installer without re-extracting."
+    Write-Warn "Use -Refresh (with a newer self-extracting artifact) to update."
 }
 
 # ---------------------------------------------------------------
@@ -461,18 +530,17 @@ if ($Refresh.IsPresent -or -not $bundleHasInstallSh) {
 #     The WSL target path is single-quoted inside bash, so it is
 #     made apostrophe-safe via ConvertTo-BashSingleQuoted.
 # ---------------------------------------------------------------
-$wslInstallTargetSq = ConvertTo-BashSingleQuoted $wslInstallTarget
 
 # Pre-flight: confirm the Linux view of the target exists (quote-safe path).
 $preExists = $false
 $oldEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
 try {
-    wsl.exe -d $Dist -- bash -lc "test -d '$wslInstallTargetSq'"
+    wsl.exe -d $Dist -- bash -lc "test -d '$wslInstallTargetSq' && test -f '$wslInstallTargetSq/install.sh'"
     $preExists = ($LASTEXITCODE -eq 0)
 } catch { $preExists = $false }
 $ErrorActionPreference = $oldEap
 if (-not $preExists) {
-    Write-Err "Install target not found inside WSL: $InstallTarget"
+    Write-Err "Install target or install.sh not found inside WSL: $InstallTarget"
     exit 1
 }
 
@@ -500,23 +568,23 @@ Write-Host ""
 Write-Host "agent-harness v0.7.1 install complete." -ForegroundColor Green
 Write-Host ""
 Write-Host "What was installed:" -ForegroundColor Cyan
-Write-Host "  - Harness source from this bundle, copied to $InstallTarget (Windows side),"
+Write-Host "  - Embedded harness runtime tree extracted to $InstallTarget (Windows side),"
 Write-Host "    with harness state in the WSL Linux home."
-Write-Host "  - WSL + $Dist, git/curl/python, and a default WSL user (empty password)."
+Write-Host "  - WSL + $Dist (systemd enabled), git/curl/python, and default WSL user '$u'."
 Write-Host ""
 Write-Host "How to enter WSL:" -ForegroundColor Cyan
 Write-Host "  In a new PowerShell, type: wsl"
 Write-Host ""
 Write-Host "How to update:" -ForegroundColor Cyan
-Write-Host "  Re-download the next release's source bundle, extract it, then run its"
-Write-Host "    windows\install-windows.ps1 with -Refresh (re-copies over $InstallTarget)."
+Write-Host "  Download the next release's self-extracting installer and run it with -Refresh"
+Write-Host "    (re-extracts the embedded runtime tree over $InstallTarget)."
 Write-Host ""
 Write-Host "How to uninstall:" -ForegroundColor Cyan
-Write-Host "  - Windows side: remove the checkout dir ($InstallTarget)."
+Write-Host "  - Windows side: remove the runtime dir ($InstallTarget)."
 Write-Host "  - WSL: remove ~/.config/opencode*, ~/.local/share/opencode-sglang-stack, ~/.orchestration"
 Write-Host "  - Optional: wsl.exe --unregister $Dist (removes the distro and its data)."
 Write-Host ""
-Write-Host "One-command start (re-download the source bundle, extract it, then):" -ForegroundColor Cyan
-Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\\agent-harness-v0.7.1\\windows\\install-windows.ps1"
+Write-Host "One-command start (download install-agent-harness-v0.7.1-windows10-11.ps1, then):" -ForegroundColor Cyan
+Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1"
 Write-Host ""
 exit 0

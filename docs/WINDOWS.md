@@ -1,75 +1,76 @@
 # Windows (WSL) — One-Command Install
 
-Install `agent-harness` on Windows 11 using the Windows Subsystem for Linux (WSL2). This
-guide covers the pinned **v0.7.1** bootstrap script `windows/install-windows.ps1`.
+Install `agent-harness` on Windows 10/11 using the Windows Subsystem for Linux (WSL2). This
+guide covers the self-extracting **v0.7.1** Windows artifact
+`install-agent-harness-v0.7.1-windows10-11.ps1` (built from `windows/install-windows.ps1`
+by `release-build/make_windows_installer.ps1`).
 
 > **Private repo note:** `agent-harness` is a **private** repository, so there is no
-> anonymous install URL. The release **source bundle** — the single artifact
-> `agent-harness-v0.7.1-source.tar.gz` published on the GitHub release — is the install
-> medium: the script copies that bundle to a canonical install target and runs the
-> installer from it. There is no `git clone` / raw-download path anywhere.
+> anonymous install URL. Releases ship **exactly two** self-extracting artifacts —
+> `install-agent-harness-v0.7.1-linux.sh` (Linux) and
+> `install-agent-harness-v0.7.1-windows10-11.ps1` (Windows 10/11 WSL2) — each embedding the
+> full runtime tree as `base64(tar.gz)` after `#__HARNESS_PKG_EOF__`. There is no separate
+> tarball to download and no `git clone` / remote fetch anywhere.
 
 ## TL;DR
 
-On Windows 11: download the v0.7.1 source bundle, extract it, then run **ONE** command from
-inside the extracted tree. It self-elevates, sets up WSL + Ubuntu, asks for the one
-mandatory reboot, then (same command after reboot, from the same extracted bundle) copies
-the bundle to `$env:USERPROFILE\agent-harness` and runs the Linux installer inside WSL.
+On Windows 10/11: download the single self-extracting Windows artifact, then run **ONE**
+command. It self-elevates, provisions WSL2 + Ubuntu (with systemd persistence and
+Task Scheduler auto-resume across the one mandatory reboot), verifies and self-extracts its
+embedded runtime tree to `$env:USERPROFILE\agent-harness`, and runs the embedded Linux
+installer inside WSL.
 
-1. **Download the bundle.** From the GitHub release page
-   `https://github.com/weignerg/agent-harness/releases/tag/v0.7.1`, download the single
-   source bundle `agent-harness-v0.7.1-source.tar.gz`, then extract it (e.g.):
+1. **Download the artifact.** From the GitHub release page
+   `https://github.com/weignerg/agent-harness/releases`, download
+   `install-agent-harness-v0.7.1-windows10-11.ps1` (or build it from a checkout with
+   `pwsh -NoProfile -File release-build/make_windows_installer.ps1`).
+2. **Run the one command:**
    ```powershell
-   tar -xzf agent-harness-v0.7.1-source.tar.gz
-   ```
-   `tar.exe` is built into Windows 11; "Extract All" in Explorer works too. This produces a
-   top-level folder `agent-harness-v0.7.1\`.
-2. **Run the one command,** from inside that extracted folder:
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-harness-v0.7.1\windows\install-windows.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1
    ```
 
-That single command self-elevates, sets up WSL + Ubuntu, asks for the one mandatory reboot,
-then (the same command after reboot, from the same extracted bundle) copies the bundle to
-the canonical install target and runs the Linux `install.sh` inside WSL.
+That single command self-elevates, sets up WSL + Ubuntu, registers automatic post-reboot
+resume before asking for the one mandatory reboot, then self-extracts the embedded runtime
+tree into `$env:USERPROFILE\agent-harness` and runs the Linux `install.sh` inside WSL.
 
 ## What it does (step by step)
 
-1. **Precheck / self-elevate** — requires admin; relaunches itself elevated if launched
+1. **Embedded payload pre-check** — verifies the script carries the `#__HARNESS_PKG_EOF__`
+   sentinel and embedded payload (fails fast if invoked as the unbuilt template).
+2. **Precheck / self-elevate** — requires admin; relaunches itself elevated if launched
    without it.
-2. **Bundle-root check** — verifies the script is running from inside an extracted v0.7.1
-   source bundle (the folder containing `install.sh`); it cannot be run from a loose
-   standalone script.
 3. **Probe WSL state** — checks the `Microsoft-Windows-Subsystem-Linux` + `VirtualMachinePlatform`
-    optional features and whether the distro is already installed, then branches.
-4. **Install WSL + the distro** — on a fresh machine, `wsl.exe --install -d <distro>`
-    (which needs the mandatory reboot below).
+   optional features and whether the distro is already installed, then branches.
+4. **Install WSL + the distro** — on a fresh machine, `wsl.exe --install -d <distro>` and
+   registers an at-logon auto-resume scheduled task before the mandatory reboot.
 5. **Reboot** — the single mandatory reboot finishes feature activation (see note).
-6. **First-run user setup** — installs git/curl/python inside the distro and creates a
-    default WSL user (empty password + passwordless sudo) so WSL can auto-login.
-7. **Copy the bundle** — copies this source bundle to the canonical `$InstallTarget`
-    (`$env:USERPROFILE\agent-harness`) on the Windows side (skipped if already present;
-    `-Refresh` re-copies).
-8. **Run `install.sh`** — the harness installer runs inside WSL from the copied target with
-    the flags documented below.
+6. **First-run user + systemd setup** — installs git/curl/python inside the distro, prompts
+   for the Linux username/password/sudo choice (decoupled from Windows login), writes
+   `[boot] systemd=true` + `[user] default=<user>` to `/etc/wsl.conf`, and restarts WSL.
+7. **Self-extract the embedded payload** — decodes the embedded `base64(tar.gz)` with .NET,
+   verifies its embedded SHA-256 checksum **before** extraction, and extracts the runtime
+   tree into `$InstallTarget` (`$env:USERPROFILE\agent-harness`) via WSL `tar -xzf`
+   (skipped if already extracted; `-Refresh` re-extracts).
+8. **Run `install.sh`** — the embedded harness installer runs inside WSL from the extracted
+   target with the flags documented below.
 9. **Summary** — how to enter WSL, update, and uninstall.
 
 ## Reboot note (be honest)
 
-A fresh Windows 11 machine needs **one** reboot mid-install, because enabling WSL2 requires
-it. After that, the **same command** (run from the **same extracted bundle**) resumes
-automatically — nothing is lost. The script remembers it needs a reboot via a small state
-marker in your AppData folder (`wsl-install.state`), so the re-run picks up where it left
-off. The WSL feature probe returns **four** states, which map to **three** user-facing
-outcomes:
+A fresh Windows 10/11 machine needs **one** reboot mid-install, because enabling WSL2 requires
+it. Before rebooting, the installer registers a logon auto-resume task (`agent-harness-wsl-install-resume`)
+and writes a small state marker in your AppData folder (`wsl-install.state`), so after reboot
+the **same self-extracting installer** resumes automatically (or you can re-run the same
+command) — nothing is lost. The WSL feature probe returns **four** states, which map to
+**three** user-facing outcomes:
 
-- `Disabled` — fresh install: `wsl.exe --install` is run, a marker is written, and the
-  script exits asking you to reboot.
+- `Disabled` — fresh install: `wsl.exe --install` is run, a marker is written, auto-resume
+  is registered, and the script exits asking you to reboot.
 - `Enabled (Pending Reboot)` / `Disabled (Pending Reboot)` — the machine still needs a
   REBOOT for WSL to activate: the script tells you to reboot and re-run the one-liner (it
   does **not** re-run `wsl --install`, which is a no-op/help text once the feature exists).
 - `Enabled` — WSL is usable; the script proceeds to install the distro (if needed) and the
-  rest of the bootstrap (copy + `install.sh`) without a reboot.
+  rest of the bootstrap (self-extract + `install.sh`) without a reboot.
 
 > If the script asks for **another** reboot because an unrelated **Windows Update**
 > pending-reboot coincides with the WSL install, simply reboot once more and re-run the
@@ -77,10 +78,10 @@ outcomes:
 
 ## Requirements
 
-- Windows 11.
+- Windows 10/11 with WSL2 support.
 - Administrator rights (the script self-elevates).
-- Access to the private `weignerg/agent-harness` GitHub repo, to download the release
-  source bundle `agent-harness-v0.7.1-source.tar.gz`.
+- Access to the private `weignerg/agent-harness` GitHub repo to download the self-extracting
+  artifact `install-agent-harness-v0.7.1-windows10-11.ps1`.
 - Internet access (to download the distro and, later, models).
 - ~30 minutes for the first run (the model warmup pass is skipped by the bootstrap).
 - An NVIDIA driver installed on the **Windows side**: GPU passthrough is automatic in WSL2
@@ -88,24 +89,27 @@ outcomes:
 
 ## What gets installed where
 
-- **Windows side:** the source bundle copied to `$env:USERPROFILE\agent-harness`.
+- **Windows side:** the self-extracted runtime tree in `$env:USERPROFILE\agent-harness`.
 - **WSL (Linux) side:** harness state in the Linux home — `~/.config`, `~/.local`, `~/.orchestration`.
-- The default WSL user is created with an **empty password** + passwordless sudo (personal-box
-  convenience). Run `passwd <user>` inside WSL to set a real password if you want one.
+- The default WSL user is created with your chosen Linux username (decoupled from your
+  Windows username), optional password, and optional passwordless sudo. Run `passwd <user>`
+  inside WSL anytime to change the password.
 
 ## Troubleshooting
 
 - **ExecutionPolicy / "cannot load because running scripts is disabled":** the TLDR uses
   `-ExecutionPolicy Bypass`, so this should not trigger; if you run the `.ps1` directly, use
-  `powershell -ExecutionPolicy Bypass -File .\agent-harness-v0.7.1\windows\install-windows.ps1`.
-- **"WSL needs a reboot" / `0x8007019e` / `0x80370102`:** reboot, then re-run the same one-liner.
+  `powershell -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1`.
+- **"WSL needs a reboot" / `0x8007019e` / `0x80370102`:** reboot, then let auto-resume continue
+  or re-run the same one-liner.
 - **"Windows Subsystem for Linux has no installed distributions":** the script handles this
   (it installs the distro); if you hit it manually, run `wsl --install -d <distro>`.
 - **Requested a second reboot:** if an unrelated Windows Update pending-reboot coincides
   with the WSL install, reboot once more and re-run the same command — nothing is lost.
-- **I only downloaded the standalone `install-windows.ps1` asset (not the source bundle):**
-  the script requires running from inside the extracted bundle. Download `agent-harness-v0.7.1-source.tar.gz`,
-  extract it, and run **its** copy of `windows\install-windows.ps1`.
+- **"No embedded runtime payload found in this script":** you ran the raw template
+  `windows/install-windows.ps1` from a git checkout instead of the built self-extracting
+  artifact. Download `install-agent-harness-v0.7.1-windows10-11.ps1` from the release page
+  or build it with `pwsh -NoProfile -File release-build/make_windows_installer.ps1`.
 - **GPU not detected in WSL:** make sure the NVIDIA driver is installed on the Windows side
   (WSL2 auto-passthrough); no action is needed inside WSL.
 - **systemd note:** the bootstrap writes `[boot] systemd=true` into `/etc/wsl.conf`
@@ -164,14 +168,13 @@ that matters: set the provider `Username` to the **WSL** account, not the Window
 
 ## Update
 
-Re-download the **new** release's source bundle, extract it, then from the new extracted
-folder run:
+Download the **new** release's self-extracting Windows artifact and run it with `-Refresh`:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-harness-v0.7.1\windows\install-windows.ps1 -Refresh
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.1-windows10-11.ps1 -Refresh
 ```
-`-Refresh` re-copies the new bundle over the existing `$InstallTarget` checkout, then the
-installer re-runs. (Because the repo is private, there is no `git fetch` update path; the
-release source bundle is the update medium.)
+`-Refresh` re-extracts the embedded runtime tree over the existing `$InstallTarget`
+directory, then re-runs `install.sh`. (Because the repo is private, there is no `git fetch`
+update path; the self-extracting artifact is the update medium.)
 
 ## Uninstall
 
