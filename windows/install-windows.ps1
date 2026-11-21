@@ -1,12 +1,12 @@
 #
 # install-windows.ps1
-# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.7).
+# Windows 10/11 (WSL2) self-extracting install bootstrap for agent-harness (v0.7.8).
 #
 # TLDR:
-#   1) Download install-agent-harness-v0.7.7-windows10-11.ps1 from the release page
+#   1) Download install-agent-harness-v0.7.8-windows10-11.ps1 from the release page
 #      (https://github.com/weignerg/agent-harness/releases).
 #   2) Run ONE command:
-#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.7-windows10-11.ps1
+#      powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.8-windows10-11.ps1
 #   The command self-elevates, provisions WSL2 + Ubuntu (with systemd persistence and
 #   Task Scheduler auto-resume across the one mandatory reboot), decodes and checksum-
 #   verifies its embedded base64(tar.gz) runtime payload, extracts it into
@@ -16,7 +16,7 @@
 #
 # What it does (one paragraph):
 #   This script is the Windows/WSL2 bootstrap wrapped by release-build/make_windows_installer.ps1
-#   into the self-extracting install-agent-harness-v0.7.7-windows10-11.ps1 artifact. It
+#   into the self-extracting install-agent-harness-v0.7.8-windows10-11.ps1 artifact. It
 #   elevates itself, provisions WSL2 and the Ubuntu distro (handling the single mandatory
 #   reboot via a state marker and logon auto-resume task), installs git/curl/python inside
 #   Ubuntu, configures a default Linux user and [boot] systemd=true in /etc/wsl.conf,
@@ -382,17 +382,17 @@ try {
     $VerifiedPayload = Resolve-VerifiedEmbeddedPayload -ScriptPath $ScriptSelfPath
 } catch {
     Write-Err $_.Exception.Message
-    Write-Err "  1) Download install-agent-harness-v0.7.7-windows10-11.ps1 from the release page, or"
+    Write-Err "  1) Download install-agent-harness-v0.7.8-windows10-11.ps1 from the release page, or"
     Write-Err "     build it from a checkout with: pwsh -NoProfile -File release-build/make_windows_installer.ps1"
     Write-Err "  2) Then run:"
-    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.7-windows10-11.ps1"
+    Write-Err "        powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.8-windows10-11.ps1"
     exit 1
 }
 
 # ---------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------
-Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.7" -ForegroundColor Magenta
+Write-Host "agent-harness Windows (WSL2) self-extracting install bootstrap - v0.7.8" -ForegroundColor Magenta
 Write-Host "-------------------------------------------------------------"
 Write-Host
 Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substring(0, 12) + "...).")
@@ -403,7 +403,7 @@ Write-Ok ("Embedded payload SHA-256 verified (" + $VerifiedPayload.sha256.Substr
 if (-not (Test-IsAdmin)) {
     Write-Warn "Admin rights required - relaunching elevated..."
     $scriptPath = $ScriptSelfPath
-    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.7-windows10-11.ps1" }
+    if (-not $scriptPath) { $scriptPath = Join-Path (Get-Location).Path "install-agent-harness-v0.7.8-windows10-11.ps1" }
     $argList = Format-SelfInvocationArgs -ScriptPath $scriptPath -BoundParams $script:InitialBoundParams
     Start-Process -FilePath $env:windir\System32\WindowsPowerShell\v1.0\powershell.exe `
                   -Verb RunAs -ArgumentList $argList
@@ -702,7 +702,7 @@ Write-Ok "install.sh completed successfully."
 # (6) Final summary
 # ---------------------------------------------------------------
 Write-Host ""
-Write-Host "agent-harness v0.7.7 install complete." -ForegroundColor Green
+Write-Host "agent-harness v0.7.8 install complete." -ForegroundColor Green
 Write-Host ""
 Write-Host "What was installed:" -ForegroundColor Cyan
 Write-Host "  - Embedded harness runtime tree extracted to $InstallTarget (Windows side),"
@@ -721,7 +721,7 @@ Write-Host "  - Windows side: remove the runtime dir ($InstallTarget)."
 Write-Host "  - WSL: remove ~/.config/opencode*, ~/.local/share/opencode-sglang-stack, ~/.orchestration"
 Write-Host "  - Optional: wsl.exe --unregister $Dist (removes the distro and its data)."
 Write-Host ""
-Write-Host "One-command start (download install-agent-harness-v0.7.7-windows10-11.ps1, then):" -ForegroundColor Cyan
-Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.7-windows10-11.ps1"
+Write-Host "One-command start (download install-agent-harness-v0.7.8-windows10-11.ps1, then):" -ForegroundColor Cyan
+Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.8-windows10-11.ps1"
 Write-Host ""
 exit 0

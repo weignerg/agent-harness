@@ -4,8 +4,22 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.7**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.8**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.8] - 2026-11-21
+
+### Changed & Fixed
+- **Try-with-defaults → progressive automatic fallback for prefill CUDA graphs & Mamba cache across all 3 SGLang models** (`config/systemd/sglang-*.service`, `scripts/sglang_oom_handler.sh`, `install.sh`, `harness/hardware/probe.py`):
+  - Restored full-performance defaults across all 3 hybrid Mamba/GDN service templates (`sglang-ornith-1.5-35b.service`, `sglang-ornith-1.5-9b.service`, `sglang-qwen3.8-27b.service`): prefill CUDA graphs are **enabled by default** (`SGLANG_*_PREFILL_GRAPH_ARGS=""`) and Mamba cache uses **SGLang's auto default** (`SGLANG_*_MAMBA_ARGS=""`), so machines with sufficient VRAM headroom (such as 32 GB+ GPUs) keep full prefill CUDA graphs and default Mamba sizing without penalty.
+  - Upgraded `scripts/sglang_oom_handler.sh` into a per-model progressive fallback engine persisted in `~/.config/opencode-backends/context_length.state` (isolated per model):
+    1. Prefill CUDA graph capture crash/OOM/stall → disables only `--disable-prefill-cuda-graph`, preserving default Mamba cache & context length.
+    2. Memory / Mamba pressure (before prefill capture or after prefill is disabled) → steps Mamba cache down `auto → 8 → 5 → 3` (dropping decode CUDA graph `max_bs` to `4` at size `3`), preserving context length.
+    3. Context length ladder (`262144 → 131072 → 65536 → 32768`) only after prefill & Mamba bounds are exhausted.
+    4. Ignores graceful `SIGTERM` stops and non-memory errors (`401`/`GatedRepoError`, `unrecognized arguments`, `ModuleNotFoundError`); `--reset` restores full defaults.
+  - Wired live startup verification in `install.sh` (`verify_backend_healthchecks`) to watch the active unit's systemd `InvocationID` journal for worker crashes (`double free`, `SIGABRT`/`SIGSEGV`, CUDA OOM) or stalled prefill graph capture (`>90s`), invoke `sglang_oom_handler.sh --fallback-step`, restart cleanly, and re-verify automatically without waiting the full 360s timeout.
+  - Kept WSL2-only safety tuning (`mem_fraction <= 0.82` on `<= 26 GB` GPUs and `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False`) while preserving native Linux `mem_fraction=0.88` and `expandable_segments:True`.
+- Version bump `0.7.7` → `0.7.8`.
 
 ## [v0.7.7] - 2026-11-20
 

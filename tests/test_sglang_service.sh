@@ -30,10 +30,13 @@ for _su in "$R/config/systemd/sglang-ornith-1.5-35b.service" "$R/config/systemd/
     else
         fail "$(basename "$_su") missing CCCL CTK compatibility flags"
     fi
-    if grep -q -- '--disable-prefill-cuda-graph' "$_su" && grep -q -- '--cuda-graph-max-bs-decode' "$_su" && grep -q -- '--max-mamba-cache-size 5' "$_su"; then
-        pass "$(basename "$_su") disables prefill CUDA graph and bounds decode/Mamba cache"
+    if grep -qE '\$SGLANG_(35B|27B|9B)_PREFILL_GRAPH_ARGS' "$_su" && \
+       grep -q -- '--cuda-graph-max-bs-decode' "$_su" && \
+       grep -qE '\$SGLANG_(35B|27B|9B)_MAMBA_ARGS' "$_su" && \
+       ! grep -q -- '^ *--disable-prefill-cuda-graph' "$_su"; then
+        pass "$(basename "$_su") uses adaptive prefill CUDA graph and Mamba cache defaults"
     else
-        fail "$(basename "$_su") missing prefill CUDA graph or Mamba cache bounds"
+        fail "$(basename "$_su") missing adaptive prefill CUDA graph or Mamba cache vars"
     fi
 done
 if grep -qE -- '--context-length [0-9]+\$' "$U"; then fail "corrupted context-length string in template"; else pass "unbroken context-length parameter"; fi
@@ -43,7 +46,7 @@ if [ -f "$DEPLOYED" ]; then
 fi
 if grep -qiE 'speculative|eagle|dflash|d-flash|draft|cpu-offload' "$U"; then fail "no speculative/offload flags"; else pass "no speculative/offload flags"; fi
 Q27B="$R/config/systemd/sglang-qwen3.8-27b.service"
-if grep -q -- '--max-mamba-cache-size 5' "$Q27B" && ! grep -q -- '--mamba-full-memory-ratio 4.59' "$Q27B"; then pass "qwen27b Mamba cache preserves 64k+ KV cache"; else fail "qwen27b Mamba cache configuration"; fi
+if grep -q '^Environment="SGLANG_27B_MAMBA_ARGS="$' "$Q27B" && ! grep -q -- '--mamba-full-memory-ratio 4.59' "$Q27B"; then pass "qwen27b Mamba cache uses adaptive default without KV starvation"; else fail "qwen27b Mamba cache configuration"; fi
 grep -q 'local-sglang' "$R/config/opencode/opencode.json" && ! grep -q 'ornith-local' "$R/config/opencode/opencode.json" && grep -q '"baseURL": "http://127.0.0.1:30000/v1"' "$R/config/opencode/opencode.json" && grep -q '"apiKey": "EMPTY"' "$R/config/opencode/opencode.json" && pass "opencode.json provider direct to :30000" || fail "opencode provider"
 [ -s "$R/docs/inference_architecture.md" ] && grep -q 'eagle-3' "$R/docs/inference_architecture.md" && grep -q 'continuous batching' "$R/docs/inference_architecture.md" && pass "docs/inference_architecture.md present" || fail "architecture doc"
 if curl -sf --max-time 2 http://127.0.0.1:30000/v1/models -o /tmp/_models.json 2>/dev/null; then
