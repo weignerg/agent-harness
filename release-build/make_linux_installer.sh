@@ -2,7 +2,7 @@
 # ==============================================================================
 # make_linux_installer.sh  --  build the self-extracting Linux installer.
 #
-#   Output  : <out_dir>/install-agent-harness-v0.7.1-linux.sh  (default: dist/)
+#   Output  : <out_dir>/install-agent-harness-v<version>-linux.sh  (default: dist/)
 #   Payload : base64( tar.gz( harness config scripts core install.sh ) )
 #   Layout  : [self-extract bash header w/ embedded SHA-256]
 #             + '#__HARNESS_PKG_EOF__' sentinel line
@@ -20,7 +20,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${HERE}/.." && pwd)"
 
-VERSION="v0.7.1"
+_pkg_ver="$(awk -F'"' '/^version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "${REPO_ROOT}/pyproject.toml")"
+VERSION="v${_pkg_ver:-0.7.2}"
 ARTIFACT_NAME="install-agent-harness-${VERSION}-linux.sh"
 MARKER='#''__HARNESS_PKG_EOF__'
 
@@ -58,10 +59,10 @@ _payload_sha="$(sha256sum < "${_raw}" | awk '{print $1}')"
 _out_file="${OUT_DIR}/${ARTIFACT_NAME}"
 
 {
+  printf '#!/usr/bin/env bash\n'
+  printf '# ==============================================================================\n'
+  printf '# %s  (self-extracting, distro-agnostic)\n' "${ARTIFACT_NAME}"
   cat <<'HDR_TOP'
-#!/usr/bin/env bash
-# ==============================================================================
-# install-agent-harness-v0.7.1-linux.sh  (self-extracting, distro-agnostic)
 # Built by release-build/make_linux_installer.sh.
 # Decodes the embedded base64(tar.gz) runtime tree, verifies its SHA-256
 # checksum BEFORE extraction/execution, extracts it, and runs install.sh.

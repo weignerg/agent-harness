@@ -2,7 +2,7 @@
 # ==============================================================================
 # make_windows_installer.ps1  --  build the self-extracting Windows/WSL installer.
 #
-#   Output  : <OutputDir>/install-agent-harness-v0.7.1-windows10-11.ps1
+#   Output  : <OutputDir>/install-agent-harness-v<version>-windows10-11.ps1
 #             (default: <repo>/dist)
 #   Layout  : [windows/install-windows.ps1 WSL + self-extract bootstrap]
 #             + '<#'
@@ -28,7 +28,9 @@ $ErrorActionPreference = "Stop"
 
 $here     = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $here "..")).Path
-$version  = "v0.7.1"
+$pyprojectText = [System.IO.File]::ReadAllText((Join-Path $repoRoot "pyproject.toml"))
+$verMatch = [regex]::Match($pyprojectText, '(?m)^version\s*=\s*"([^"]+)"')
+$version  = if ($verMatch.Success) { "v" + $verMatch.Groups[1].Value } else { "v0.7.2" }
 $outName  = "install-agent-harness-${version}-windows10-11.ps1"
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
