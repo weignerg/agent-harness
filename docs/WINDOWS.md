@@ -1,14 +1,14 @@
 # Windows (WSL) — One-Command Install
 
 Install `agent-harness` on Windows 10/11 using the Windows Subsystem for Linux (WSL2). This
-guide covers the self-extracting **v0.7.2** Windows artifact
-`install-agent-harness-v0.7.2-windows10-11.ps1` (built from `windows/install-windows.ps1`
+guide covers the self-extracting **v0.7.3** Windows artifact
+`install-agent-harness-v0.7.3-windows10-11.ps1` (built from `windows/install-windows.ps1`
 by `release-build/make_windows_installer.ps1`).
 
 > **Private repo note:** `agent-harness` is a **private** repository, so there is no
 > anonymous install URL. Releases ship **exactly two** self-extracting artifacts —
-> `install-agent-harness-v0.7.2-linux.sh` (Linux) and
-> `install-agent-harness-v0.7.2-windows10-11.ps1` (Windows 10/11 WSL2) — each embedding the
+> `install-agent-harness-v0.7.3-linux.sh` (Linux) and
+> `install-agent-harness-v0.7.3-windows10-11.ps1` (Windows 10/11 WSL2) — each embedding the
 > full runtime tree as `base64(tar.gz)` after `#__HARNESS_PKG_EOF__`. There is no separate
 > tarball to download and no `git clone` / remote fetch anywhere.
 
@@ -22,11 +22,11 @@ installer inside WSL.
 
 1. **Download the artifact.** From the GitHub release page
    `https://github.com/weignerg/agent-harness/releases`, download
-   `install-agent-harness-v0.7.2-windows10-11.ps1` (or build it from a checkout with
+   `install-agent-harness-v0.7.3-windows10-11.ps1` (or build it from a checkout with
    `pwsh -NoProfile -File release-build/make_windows_installer.ps1`).
 2. **Run the one command:**
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1
    ```
 
 That single command self-elevates, sets up WSL + Ubuntu, registers automatic post-reboot
@@ -81,7 +81,7 @@ command) — nothing is lost. The WSL feature probe returns **four** states, whi
 - Windows 10/11 with WSL2 support.
 - Administrator rights (the script self-elevates).
 - Access to the private `weignerg/agent-harness` GitHub repo to download the self-extracting
-  artifact `install-agent-harness-v0.7.2-windows10-11.ps1`.
+  artifact `install-agent-harness-v0.7.3-windows10-11.ps1`.
 - Internet access (to download the distro and, later, models).
 - ~30 minutes for the first run (the model warmup pass is skipped by the bootstrap).
 - An NVIDIA driver installed on the **Windows side**: GPU passthrough is automatic in WSL2
@@ -99,7 +99,7 @@ command) — nothing is lost. The WSL feature probe returns **four** states, whi
 
 - **ExecutionPolicy / "cannot load because running scripts is disabled":** the TLDR uses
   `-ExecutionPolicy Bypass`, so this should not trigger; if you run the `.ps1` directly, use
-  `powershell -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1`.
+  `powershell -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1`.
 - **"WSL needs a reboot" / `0x8007019e` / `0x80370102`:** reboot, then let auto-resume continue
   or re-run the same one-liner.
 - **"Windows Subsystem for Linux has no installed distributions":** the script handles this
@@ -108,7 +108,7 @@ command) — nothing is lost. The WSL feature probe returns **four** states, whi
   with the WSL install, reboot once more and re-run the same command — nothing is lost.
 - **"No embedded runtime payload found in this script":** you ran the raw template
   `windows/install-windows.ps1` from a git checkout instead of the built self-extracting
-  artifact. Download `install-agent-harness-v0.7.2-windows10-11.ps1` from the release page
+  artifact. Download `install-agent-harness-v0.7.3-windows10-11.ps1` from the release page
   or build it with `pwsh -NoProfile -File release-build/make_windows_installer.ps1`.
 - **GPU not detected in WSL:** make sure the NVIDIA driver is installed on the Windows side
   (WSL2 auto-passthrough); no action is needed inside WSL.
@@ -170,7 +170,7 @@ that matters: set the provider `Username` to the **WSL** account, not the Window
 
 Download the **new** release's self-extracting Windows artifact and run it with `-Refresh`:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.2-windows10-11.ps1 -Refresh
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-agent-harness-v0.7.3-windows10-11.ps1 -Refresh
 ```
 `-Refresh` re-extracts the embedded runtime tree over the existing `$InstallTarget`
 directory, then re-runs `install.sh`. (Because the repo is private, there is no `git fetch`

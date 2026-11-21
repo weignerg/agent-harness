@@ -191,6 +191,62 @@ else
     fail "human_confirmed_t3_gate leaves T3_GATE_CONFIRMED=true when ports unreachable"
 fi
 
+# ------------------------------------------------------------------------------
+# 5. Local SGLang GPU capability guard, hf CLI, and probed model preservation.
+# ------------------------------------------------------------------------------
+section "5. Local SGLang GPU guard, hf CLI, and probe auto-selection"
+GPU_GUARD_SRC="$(extract_fn check_local_sglang_gpu_support)"
+if [ -n "$GPU_GUARD_SRC" ]; then
+    MOCK_BIN="$(mktemp -d /tmp/gpu-guard-bin-XXXXXX)"
+    cat > "${MOCK_BIN}/nvidia-smi" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${MOCK_SMI_OUT}"
+EOF
+    chmod +x "${MOCK_BIN}/nvidia-smi"
+
+    # Pascal GTX 1060 6GB (CC 6.1, 6144 MB) -> must reject
+    if out="$(PATH="${MOCK_BIN}:${PATH}" MOCK_SMI_OUT="NVIDIA GeForce GTX 1060 6GB, 6.1, 6144" bash -c "${GPU_GUARD_SRC}; check_local_sglang_gpu_support" 2>&1)"; then
+        fail "GTX 1060 6GB (CC 6.1) should be rejected by check_local_sglang_gpu_support"
+    else
+        if printf '%s' "$out" | grep -q "6.1" && printf '%s' "$out" | grep -qi "VRAM"; then
+            pass "rejects GTX 1060 6GB (CC 6.1 < 7.5 and < 8 GB VRAM)"
+        else
+            fail "unexpected rejection message for GTX 1060: ${out}"
+        fi
+    fi
+
+    # RTX 4090 Laptop 16GB (CC 8.9, 16376 MB) -> must accept
+    if PATH="${MOCK_BIN}:${PATH}" MOCK_SMI_OUT="NVIDIA GeForce RTX 4090 Laptop GPU, 8.9, 16376" bash -c "${GPU_GUARD_SRC}; check_local_sglang_gpu_support" >/dev/null 2>&1; then
+        pass "accepts RTX 4090 Laptop GPU (CC 8.9, 16 GB VRAM)"
+    else
+        fail "RTX 4090 Laptop GPU (CC 8.9, 16 GB) should be accepted"
+    fi
+
+    # 6 GB Turing card (CC 7.5, 6144 MB) -> must reject on VRAM
+    if PATH="${MOCK_BIN}:${PATH}" MOCK_SMI_OUT="NVIDIA GeForce RTX 2060, 7.5, 6144" bash -c "${GPU_GUARD_SRC}; check_local_sglang_gpu_support" >/dev/null 2>&1; then
+        fail "RTX 2060 6GB (< 8 GB VRAM) should be rejected"
+    else
+        pass "rejects 6 GB GPU even when CC >= 7.5"
+    fi
+    rm -rf "${MOCK_BIN}"
+else
+    fail "could not extract check_local_sglang_gpu_support"
+fi
+
+ACQ_SRC="$(extract_fn verify_or_acquire_model_weights)"
+if printf '%s\n' "$ACQ_SRC" | grep -q 'hf download ' && ! printf '%s\n' "$ACQ_SRC" | grep -q 'huggingface-cli download '; then
+    pass "verify_or_acquire_model_weights uses modern 'hf download' instructions"
+else
+    fail "verify_or_acquire_model_weights still prints deprecated 'huggingface-cli download'"
+fi
+
+DEPLOY_SRC="$(extract_fn deploy_opencode_backend_and_units)"
+if printf '%s\n' "$DEPLOY_SRC" | grep -q 'if \[ "\$SGLANG_MODEL_EXPLICIT" = true \]; then'; then
+    pass "deploy_opencode_backend_and_units preserves hardware-probed model unless --sglang-model is explicit"
+else
+    fail "deploy_opencode_backend_and_units unconditionally clobbers probed model with SGLANG_MODEL default"
+fi
+
 echo ""
 echo "================================================================================"
 echo "RESULTS: ${TESTS_PASSED} passed, ${TESTS_FAILED} failed"

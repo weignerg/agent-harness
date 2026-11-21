@@ -4,8 +4,30 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.2**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.3**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.3] - 2026-11-20
+
+### Fixed
+- **Windows PowerShell 5.1 & WSL2 bootstrap fixes** (`windows/install-windows.ps1`):
+  - Fixed PowerShell 5.1 `EmptyPipeElement` parse errors (moved pipes to trailing line ends and removed raw UTF-8 em-dash), `Test-IsAdmin` operator precedence cast, DISM `.State` detection (plus Windows 11 Store WSL2 where `VirtualMachinePlatform` is enabled without legacy `Microsoft-Windows-Subsystem-Linux`), `Write-State` parenthesized string cast, and Step 2 distro-present reboot-loop guard.
+  - Added `--cd ~` to all `wsl.exe` invocations to eliminate UNC path translation warnings, and kept `install.sh` interactive by default (only passing `-y` when `-Quiet` is set).
+- **OpenCode auto-install & systemd service resolution** (`install.sh`):
+  - Automatically installs the `opencode` CLI (`https://opencode.ai/install`) when missing, symlinks `~/.local/bin/opencode -> ~/.opencode/bin/opencode`, patches `ExecStart=` in `opencode-server.service`, and verifies port `4096` health.
+- **Python 3.12 standalone venv for SGLang** (`install.sh`):
+  - Provisions Python 3.12 via `uv` when the host ships Python 3.13/3.14+ (e.g. Ubuntu 26.04) so PyTorch/SGLang wheels install cleanly without compiling from source.
+- **Hardware-probed model & GPU capability protection** (`install.sh`, `harness/hardware/probe.py`):
+  - Fixed `SGLANG_MODEL` default clobbering `gpu_probe.sh` auto-selection so 16 GB GPUs (e.g. RTX 4090 Laptop / RTX 4080) cleanly select and run `sglang-ornith-1.5-9b.service` across systemd, `env`, `opencode.json`, and compiled agents unless `--sglang-model` is explicitly passed.
+  - Added NVIDIA compute-capability (`>= 7.5`) and VRAM (`>= 8 GB`) pre-flight guard to skip local SGLang installation, model weight download, and healthcheck polling on unsupported GPUs (e.g. Pascal GTX 1060), plus fail-fast systemd crash-loop detection (`SubState=auto-restart`).
+- **Hugging Face token persistence & modern `hf` CLI** (`install.sh`):
+  - Replaced deprecated `huggingface-cli` with the modern `hf` CLI (`hf download`), added a step-by-step Hugging Face account & Read token prompt (only prompted when `HF_TOKEN` is unset), and reliably persisted user-pasted tokens into `~/.config/opencode-backends/env`.
+- **Guided T3 Code pairing UX** (`install.sh`):
+  - Replaced internal jargon with plain-English T3 Code login instructions and runs `t3 pair --ttl 1h` directly during install while showing how to re-run it later.
+
+### Changed
+- Added PowerShell 5.1 compatibility assertions in `windows/tests/wsl-bootstrap.tests.ps1` and GPU guard / `hf` CLI / probed-model tests in `tests/test_guided_config_gate.sh`.
+- Version bump `0.7.2` → `0.7.3`.
 
 ## [v0.7.2] - 2026-11-20
 
