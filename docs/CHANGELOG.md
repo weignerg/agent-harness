@@ -4,8 +4,17 @@ All notable changes to this project are documented in this file. The format is b
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This changelog covers releases **v0.4.0 through v0.7.5**. For the full history of earlier
+This changelog covers releases **v0.4.0 through v0.7.6**. For the full history of earlier
 versions, see [Earlier releases (v0.1.0–v0.3.0)](#earlier-releases-v010v030) below.
+
+## [v0.7.6] - 2026-11-20
+
+### Fixed
+- **FlashInfer CCCL compiler/toolkit minor-version mismatch on pip-installed CUDA wheels** (`config/systemd/sglang-*.service`, `install.sh`):
+  - PyTorch/FlashInfer venv wheels install `nvidia-cuda-nvcc` (13.4) alongside `nvidia-cuda-runtime` headers (`CUDART_VERSION` 13.0) inside `nvidia/cu13/`, triggering `#error "CUDA compiler and CUDA toolkit headers are incompatible"` in `flashinfer/data/cccl/libcudacxx/include/cuda/std/__cccl/cuda_toolkit.h`.
+  - Added `NVCC_PREPEND_FLAGS=-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK` and `FLASHINFER_EXTRA_CUDAFLAGS=-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK` to all SGLang systemd service units and the `install.sh` warmup subshell.
+  - Raised the default SGLang live healthcheck timeout ceiling from `240s` to `360s` to accommodate first-run FlashInfer JIT kernel compilation on laptop CPUs.
+- Version bump `0.7.5` → `0.7.6`.
 
 ## [v0.7.5] - 2026-11-20
 

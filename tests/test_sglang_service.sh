@@ -25,6 +25,11 @@ for _su in "$R/config/systemd/sglang-ornith-1.5-35b.service" "$R/config/systemd/
     else
         fail "$(basename "$_su") PATH missing venv/bin or cuda-home/bin"
     fi
+    if grep -q 'NVCC_PREPEND_FLAGS=-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK' "$_su" && grep -q 'FLASHINFER_EXTRA_CUDAFLAGS=-DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK' "$_su"; then
+        pass "$(basename "$_su") sets CCCL CTK compatibility flags"
+    else
+        fail "$(basename "$_su") missing CCCL CTK compatibility flags"
+    fi
 done
 if grep -qE -- '--context-length [0-9]+\$' "$U"; then fail "corrupted context-length string in template"; else pass "unbroken context-length parameter"; fi
 DEPLOYED="$HOME/.config/systemd/user/sglang-ornith-1.5-35b.service"
